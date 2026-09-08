@@ -21,7 +21,7 @@ struct FocusPanel: View {
 
     private func toggle(_ id: UUID) {
         withAnimation(CaploMotion.animation(0.22, reduceMotion: reduceMotion)) {
-            if expanded == id { expanded = nil } else { expanded = id; model.selectedFocus = id }
+            if expanded == id { expanded = nil } else { expanded = id; model.selectedFocus = id; model.reveal(id) }
         }
     }
 

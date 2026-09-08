@@ -7,6 +7,22 @@ import ExportKit
 
 /// 自定义布局（像 FocuSee）：在当前帧上直接拖录屏与人像的位置、拉角改大小，“应用”才写进工程。
 /// 人像按叠放布局自由摆放（卡片布局打开时先换算成等价的叠放）；录屏在留白之内缩放与摆位。
+/// 对话框需要的三张图：打开前在后台取好，对话框一出现就是完整画面。
+struct CustomLayoutStills: Sendable {
+    var screen: CGImage?
+    var camera: CGImage?
+    var backdrop: CGImage?
+
+    @MainActor static func load(model: VideoEditorModel) async -> CustomLayoutStills {
+        let stills = await model.layoutStills()
+        var loaded = CustomLayoutStills(screen: stills.screen, camera: stills.camera)
+        if let image = ProjectMedia.backgroundImage(for: model.edit.layout, in: model.entry.url) {
+            loaded.backdrop = CIContext().createCGImage(image, from: image.extent)
+        }
+        return loaded
+    }
+}
+
 struct CustomLayoutSheet: View {
     let model: VideoEditorModel
     @Environment(\.dismiss) private var dismiss
@@ -16,14 +32,20 @@ struct CustomLayoutSheet: View {
     @State private var cameraImage: CGImage?
     @State private var backdrop: CGImage?
     @State private var dragStart: (camera: CameraLayout, layout: CanvasLayout)?
+    @State private var revealed = false
     /// 拖动中吸附上的参考线（画布边、留白边、中线、另一块的边与中线），青色画出来。
     @State private var guides: [CustomLayoutMath.Guide] = []
 
-    init(model: VideoEditorModel) {
+    init(model: VideoEditorModel, stills: CustomLayoutStills = CustomLayoutStills()) {
         self.model = model
-        let converted = CustomLayoutMath.customEquivalent(camera: model.edit.camera ?? CameraLayout(), edit: model.edit, sourceSize: CGSize(width: 16, height: 9))
+        // 原帧已经取好：一开始就按真实录屏比例换算，画面不会先按 16 : 9 摆一次再跳。
+        let source = stills.screen.map { CGSize(width: $0.width, height: $0.height) } ?? CGSize(width: 16, height: 9)
+        let converted = CustomLayoutMath.customEquivalent(camera: model.edit.camera ?? CameraLayout(), edit: model.edit, sourceSize: source)
         _camera = State(initialValue: converted.camera)
         _layout = State(initialValue: converted.layout)
+        _screenImage = State(initialValue: stills.screen)
+        _cameraImage = State(initialValue: stills.camera)
+        _backdrop = State(initialValue: stills.backdrop)
     }
 
     private var edit: VideoEdit { var copy = model.edit; copy.camera = camera; copy.layout = layout; copy.focuses = []; return copy }
@@ -51,14 +73,16 @@ struct CustomLayoutSheet: View {
         .padding(CaploMetrics.Spacing.l)
         .frame(width: 900, height: 600)
         .background(CaploColor.surfaceOpaqueWindow)
+        .opacity(revealed ? 1 : 0)
+        .onAppear { withAnimation(.easeOut(duration: 0.22)) { revealed = true } }
         .task {
-            let stills = await model.layoutStills()
-            screenImage = stills.screen; cameraImage = stills.camera
-            // 有了真实的录屏比例，再把卡片布局换算成看起来一模一样的自定义布局（人像与录屏的位置大小都对上）。
-            let converted = CustomLayoutMath.customEquivalent(camera: model.edit.camera ?? CameraLayout(), edit: model.edit, sourceSize: sourceSize)
-            camera = converted.camera; layout = converted.layout
-            if let path = model.edit.layout.backgroundImage, let image = ProjectMedia.backgroundImage(for: model.edit.layout, in: model.entry.url) {
-                backdrop = CIContext().createCGImage(image, from: image.extent); _ = path
+            // 打开前没取到帧（极少见）才在这里补取，并带淡入。
+            guard screenImage == nil, cameraImage == nil else { return }
+            let stills = await CustomLayoutStills.load(model: model)
+            withAnimation(.easeInOut(duration: 0.25)) {
+                screenImage = stills.screen; cameraImage = stills.camera; backdrop = stills.backdrop
+                let converted = CustomLayoutMath.customEquivalent(camera: model.edit.camera ?? CameraLayout(), edit: model.edit, sourceSize: sourceSize)
+                camera = converted.camera; layout = converted.layout
             }
         }
     }

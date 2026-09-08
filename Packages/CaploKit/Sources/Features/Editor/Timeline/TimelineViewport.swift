@@ -35,7 +35,7 @@ struct TimelineViewportBridge: NSViewRepresentable {
         view.materialOpaqueOverride = materialOpaquePreview
         view.liveResizing = viewport.liveResizing
         view.update(edit: model.edit, analysis: model.analysis, selection: model.selectedClipIDs,
-                    primary: model.selectedClip, focus: model.selectedFocus, zoom: viewport.zoom, fit: viewport.fitRequest, heights: viewport.trackHeights)
+                    primary: model.selectedClip, focus: model.selectedFocus, zoom: viewport.zoom, fit: viewport.fitRequest, heights: viewport.trackHeights, reveal: model.revealRequest)
     }
     static func dismantleNSView(_ view: TimelineViewportView, coordinator: ()) { view.detach() }
 }
@@ -172,8 +172,7 @@ final class TimelineViewportView: NSView {
             switch block.role { case .screen: kind = .screen; case .camera: kind = .camera; case .system, .microphone: kind = .audio; case nil: kind = .focus }
             return TimelineNavigatorItem(id: block.id, start: block.start, duration: block.duration, kind: kind)
         }
-        navigator.update(items: items, duration: timelineExtent, visibleStart: offset, visibleDuration: contentWidth / scale, playhead: playbackPosition,
-                         selected: Set(blocks.filter { isSelected($0) }.map(\.id)))
+        navigator.update(items: items, duration: timelineExtent, visibleStart: offset, visibleDuration: contentWidth / scale, playhead: playbackPosition)
     }
     private var trackArea: CGRect { CGRect(x: 0, y: 28, width: bounds.width, height: max(1, bounds.height - 28 - TimelineNavigatorView.preferredHeight)) }
     private(set) var trackDrawCount = 0
@@ -251,7 +250,8 @@ final class TimelineViewportView: NSView {
     }
 
     /// SwiftUI 每次刷新都会调用；只有内容或几何变化才重绘，与每帧播放位置分离。
-    func update(edit: VideoEdit, analysis: TimelineAnalysis, selection: Set<UUID>, primary: UUID?, focus: UUID?, zoom: Double, fit: Int, heights: [Double]? = nil) {
+    private var lastReveal = 0
+    func update(edit: VideoEdit, analysis: TimelineAnalysis, selection: Set<UUID>, primary: UUID?, focus: UUID?, zoom: Double, fit: Int, heights: [Double]? = nil, reveal: (id: UUID, serial: Int)? = nil) {
         var changed = false
         if let heights, heights.count == 4 {
             let clamped = heights.enumerated().map { min(200, max($0.offset == 0 ? 40 : 26, $0.element.isFinite ? $0.element : 40)) }
@@ -273,8 +273,29 @@ final class TimelineViewportView: NSView {
             offset = 0; retainedExtent = 0
             changed = true
         }
+        if let reveal, reveal.serial != lastReveal {
+            lastReveal = reveal.serial
+            if let block = blocks.first(where: { $0.id == reveal.id }), self.reveal(block) { changed = true }
+        }
         guard changed else { return }
         changedViewport()
+    }
+
+    /// 把块滚进视口：横向不在可见范围时把它放到左侧 10 % 处（块比视口还长就贴左）；纵向所在行不可见时滚到那一行。
+    /// 已经可见就什么都不动。返回是否滚动过。
+    @discardableResult private func reveal(_ block: Block) -> Bool {
+        var scrolled = false
+        let visible = contentWidth / scale
+        if block.start < offset || block.start + block.duration > offset + visible {
+            offset = max(0, block.start - visible * 0.1); scrolled = true
+        }
+        if let row = rowByBlock[block.id] {
+            let top = Double(row) * rowHeight, bottom = top + rowHeight
+            if top < verticalOffset { verticalOffset = top; scrolled = true }
+            else if bottom > verticalOffset + trackArea.height { verticalOffset = bottom - trackArea.height; scrolled = true }
+        }
+        if scrolled { clampOffset(); retainedExtent = 0 }
+        return scrolled
     }
     private var contentWidth: Double { max(1, bounds.width - timeOrigin - 8) }
     private var accent: NSColor { CaploNSColor.accent }
@@ -1091,6 +1112,8 @@ final class TimelineViewportView: NSView {
         guard let initial = drag else { return }
         if initial.moved { updateDrag(at: convert(event.locationInWindow, from: nil), modifiers: event.modifierFlags) }
         if case .invalid = dropTarget { model.cancelInteraction(); clearDrag(); return }
+        // 轨头图标只是点了一下（没拖成换行）：把这一行选中的块滚进视口。
+        if let drag, !drag.moved, case .reorder(let id) = drag.kind, let block = blocks.first(where: { $0.id == id }), reveal(block) { changedViewport() }
         if let drag, drag.moved, let id = drag.blockID, let dropTarget {
             model.beginInteraction()
             switch dropTarget {

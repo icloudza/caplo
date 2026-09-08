@@ -6,6 +6,9 @@ import EditingCore
 struct CameraPanel: View {
     let model: VideoEditorModel
     @State private var customizing = false
+    /// 打开对话框前先把两张原帧与背景图取好，对话框一出现就是完整画面，不闪占位。
+    @State private var customStills: CustomLayoutStills?
+    @State private var loadingStills = false
 
     /// 布局预设：与 FocuSee 一样用缩略图挑：圆形右下、左右分屏、小卡片贴左压在录屏上、圆角矩形右上、人像全屏配录屏小窗、大卡片贴右垫在录屏后。
     struct Preset: Identifiable, Equatable {
@@ -90,10 +93,15 @@ struct CameraPanel: View {
                     let layout = model.edit.camera ?? CameraLayout()
                     HStack(spacing: CaploMetrics.Spacing.s) {
                         // 翻转的是布局（人像换到对侧、自定义摆过的录屏也换到对侧），不是画面镜像。
-                        Button { model.commit { CameraPanel.flip(&$0) } } label: { Label("水平翻转", systemImage: "arrow.left.arrow.right") }
+                        Button { model.commit { CameraPanel.flip(&$0) } } label: { Label("水平翻转", systemImage: "arrow.left.arrow.right").frame(maxWidth: .infinity) }
                             .buttonStyle(StudioButtonStyle(.secondary))
-                        Button { customizing = true } label: { Label("自定义布局…", systemImage: "square.and.pencil") }
+                        Button {
+                            guard !loadingStills else { return }
+                            loadingStills = true
+                            Task { customStills = await CustomLayoutStills.load(model: model); loadingStills = false; customizing = true }
+                        } label: { Label("自定义布局", systemImage: "square.and.pencil").frame(maxWidth: .infinity) }
                             .buttonStyle(StudioButtonStyle(.secondary))
+                            .disabled(loadingStills)
                     }
                     if layout.isSplit {
                         // 分屏的尺寸完全由画布决定，没有可调的大小。
@@ -132,7 +140,7 @@ struct CameraPanel: View {
             }.disabled(model.edit.camera?.enabled != true)
             Button("重置人像布局") { model.commit { $0.camera = CameraLayout(); $0.layout.screenScale = 1; $0.layout.screenOffsetX = 0; $0.layout.screenOffsetY = 0 } }
                 .buttonStyle(StudioButtonStyle(.secondary))
-                .sheet(isPresented: $customizing) { CustomLayoutSheet(model: model) }
+                .sheet(isPresented: $customizing) { CustomLayoutSheet(model: model, stills: customStills ?? CustomLayoutStills()) }
         } else {
             PanelNote("此录制没有摄像头素材。下次录制前可在录制条开启摄像头。")
         }

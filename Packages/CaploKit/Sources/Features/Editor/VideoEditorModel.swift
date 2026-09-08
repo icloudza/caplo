@@ -290,6 +290,10 @@ final class VideoEditorModel {
         commit { edit in edit.focuses.append(zoom); edit.moveLayer(zoom.id, before: clip.id) }
         selectedMedia = nil; selectedMediaID = nil; selectedFocus = zoom.id
     }
+    /// 请时间线把某个块滚进视口（面板里点了镜头列表 / 轨头图标时）；序号递增让同一块可以重复触发。
+    private(set) var revealRequest: (id: UUID, serial: Int)?
+    func reveal(_ id: UUID) { revealRequest = (id, (revealRequest?.serial ?? 0) &+ 1) }
+
     /// 播放器不能正好定位到时间线末尾：合成在那一刻没有画面样本，只会画出背景。末尾一律停在最后一帧的中间。
     nonisolated static func seekTarget(_ target: Double, duration: Double, frameRate: Double) -> Double {
         guard duration > 0 else { return max(0, target) }

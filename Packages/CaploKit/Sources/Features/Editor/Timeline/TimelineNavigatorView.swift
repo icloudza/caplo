@@ -28,9 +28,6 @@ final class TimelineNavigatorView: NSView {
     private let rail = CAShapeLayer()
     private let sheen = CAGradientLayer()
     private let itemLayers = TimelineNavigatorItem.Kind.allCases.map { _ in CAShapeLayer() }
-    /// 当前选中的块单独一层、更亮；其余块压暗。
-    private let selectedLayers = TimelineNavigatorItem.Kind.allCases.map { _ in CAShapeLayer() }
-    private var selectedIDs: Set<UUID> = []
     private let outsideShade = CAShapeLayer()
     private let rangeLayer = CAShapeLayer()
     private let handles = CAShapeLayer()
@@ -70,7 +67,7 @@ final class TimelineNavigatorView: NSView {
         sheen.cornerRadius = 4; sheen.masksToBounds = true
         sheen.startPoint = CGPoint(x: 0, y: 0); sheen.endPoint = CGPoint(x: 1, y: 1)
         layer?.addSublayer(sheen)
-        for child in [rail] + itemLayers + selectedLayers + [outsideShade, rangeLayer, handles] { layer?.addSublayer(child) }
+        for child in [rail] + itemLayers + [outsideShade, rangeLayer, handles] { layer?.addSublayer(child) }
         layer?.addSublayer(playheadLayer)
         rangeLayer.lineWidth = 1.2
         handles.lineWidth = 1.5
@@ -87,9 +84,8 @@ final class TimelineNavigatorView: NSView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func update(items: [TimelineNavigatorItem], duration: Double, visibleStart: Double, visibleDuration: Double, playhead: Double, selected: Set<UUID> = []) {
+    func update(items: [TimelineNavigatorItem], duration: Double, visibleStart: Double, visibleDuration: Double, playhead: Double) {
         if self.items != items { self.items = items; needsOverviewPath = true }
-        if selectedIDs != selected { selectedIDs = selected; needsOverviewPath = true }
         totalDuration = duration.isFinite ? max(0, duration) : 0
         let range = clampedRange(start: visibleStart, length: visibleDuration, total: mappingDuration)
         self.visibleStart = range.start; self.visibleDuration = range.length
@@ -145,7 +141,6 @@ final class TimelineNavigatorView: NSView {
             rail.lineWidth = CaploMetrics.hairline
             let colors = [CaploNSColor.accent, CaploNSColor.warning, CaploNSColor.zoom, CaploNSColor.audio]
             for (item, color) in zip(itemLayers, colors) { item.fillColor = color.withAlphaComponent(0.28).cgColor }
-            for (item, color) in zip(selectedLayers, colors) { item.fillColor = color.withAlphaComponent(0.9).cgColor }
             outsideShade.fillColor = CaploNSColor.glassShade.cgColor
             rangeLayer.fillColor = CaploNSColor.accent.withAlphaComponent(0.06).cgColor
             rangeLayer.strokeColor = CaploNSColor.accent.withAlphaComponent(0.78).cgColor
@@ -200,17 +195,6 @@ final class TimelineNavigatorView: NSView {
                 }
             }
             for (item, path) in zip(itemLayers, paths) { item.path = path; item.isHidden = !valid }
-            // 选中的块按自己的区间单独画，盖在同类块之上。
-            let highlighted = TimelineNavigatorItem.Kind.allCases.map { _ in CGMutablePath() }
-            if valid {
-                for item in items where selectedIDs.contains(item.id) && item.start.isFinite && item.duration.isFinite && item.duration > 0 {
-                    let start = max(0, item.start), end = min(total, item.start + item.duration)
-                    guard start < end else { continue }
-                    let x = area.minX + start / total * area.width, width = max(2, (end - start) / total * area.width)
-                    highlighted[item.kind.rawValue].addRoundedRect(in: CGRect(x: x, y: top + Double(item.kind.rawValue) * (height + gap), width: width, height: height), cornerWidth: 1, cornerHeight: 1)
-                }
-            }
-            for (item, path) in zip(selectedLayers, highlighted) { item.path = path; item.isHidden = !valid }
             lastOverviewSize = bounds.size; lastOverviewDuration = total; needsOverviewPath = false
             overviewBuildCount += 1
         }
