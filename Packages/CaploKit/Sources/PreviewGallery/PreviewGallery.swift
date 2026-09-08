@@ -66,6 +66,11 @@ struct PreviewGallery {
             try await render(DesignSystemGallery(), name: "components-dark", size: CGSize(width: 1100, height: 760), scheme: .dark, output: output)
             return
         }
+        if CommandLine.arguments.contains("--onboarding") {
+            // 打开方式条并强制播放首次使用引导，直到引导结束或方式条收起；供真实屏幕核对。
+            WindowSmokeTest.showOnboarding()
+            return
+        }
         if CommandLine.arguments.contains("--gallery") {
             // 只开组件画廊一个真实窗口给人看，关掉窗口即退出。
             WindowSmokeTest.showGallery()

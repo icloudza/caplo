@@ -93,11 +93,6 @@ public struct CaploSettingsView: View {
             SettingsRow("系统声音") { Toggle("系统声音", isOn: $systemAudio).toggleStyle(StudioToggleStyle(embedded: true)) }
             SettingsRow("摄像头") { Toggle("摄像头", isOn: $camera).toggleStyle(StudioToggleStyle(embedded: true)) }
         }
-        SettingsGroup("麦克风") {
-            SettingsRow("麦克风模式", caption: "在系统面板里选择。") {
-                Button("更改…") { MicrophoneModes.showSystemPicker() }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
-            }
-        }
     }
 
     // MARK: 存储
@@ -124,8 +119,13 @@ public struct CaploSettingsView: View {
         SettingsGroup("全局") {
             shortcutRows([("新建录制", "⌘N"), ("打开工程…", "⌘O"), ("项目中心", "⇧⌘P"), ("设置", "⌘,")])
         }
-        SettingsGroup("录制方式条") {
+        SettingsGroup("录制方式条", footer: "首次使用引导只在第一次打开录制方式条时出现。") {
             shortcutRows([("全屏 / 自定义区域 / 窗口", "1 / 2 / 3"), ("关闭", "Esc")])
+            HStack {
+                Text("首次使用引导").font(CaploFont.body)
+                Spacer()
+                Button("重新显示") { OnboardingTour.reset(); StudioWindows.showRecorder() }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
+            }
         }
         SettingsGroup("项目中心") {
             shortcutRows([("搜索", "⌘F"), ("全选", "⌘A"), ("打开选中", "回车"), ("删除选中", "⌫")])

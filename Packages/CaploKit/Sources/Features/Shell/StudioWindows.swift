@@ -36,7 +36,10 @@ public enum StudioWindows {
         ProjectLibraryWindow.shared.hide()
         if let recorder { dock(recorder, toBottomOf: NSScreen.main) }
         present(recorder)
+        OnboardingTour.beginIfNeeded()
     }
+    /// 录制方式条窗口（测试用）。
+    static var recorderWindow: NSWindow? { recorder }
 
     /// 录制条显示期间从齿轮菜单打开设置时，设置窗口临时抬到录制条层级，否则会被置顶的覆盖层盖住；
     /// 录制条收起时恢复普通层级。
@@ -47,7 +50,7 @@ public enum StudioWindows {
         present(settings)
     }
 
-    static func hideRecorder() { recorder?.orderOut(nil) }
+    static func hideRecorder() { OnboardingTour.dismiss(); recorder?.orderOut(nil) }
 
     /// 贴底录制条：替换方式选择窗口；同一模型复用面板，新模型重建内容。
     /// `focusTarget`：窗口模式下不激活本应用，转而把所选窗口的应用带到最前（虚线框随之可见）。

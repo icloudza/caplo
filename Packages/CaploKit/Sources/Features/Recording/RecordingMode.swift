@@ -2,6 +2,11 @@ import CaptureKit
 
 /// 三种录制方式；`kind` 决定来源列表按显示器还是窗口过滤。
 enum RecordingMode: String, CaseIterable, Identifiable {
+    /// 首次使用引导里的目标 id。
+    var onboardingID: String {
+        switch self { case .display: "display"; case .region: "region"; case .window: "window" }
+    }
+
     case display = "全屏", region = "自定义区域", window = "窗口"
     var id: Self { self }
 

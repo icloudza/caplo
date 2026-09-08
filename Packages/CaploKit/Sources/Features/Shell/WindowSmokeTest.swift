@@ -23,6 +23,17 @@ public enum WindowSmokeTest {
         while window.isVisible { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2)) }
     }
 
+    /// 方式条 + 首次使用引导（不管看没看过），停到引导结束为止；供人工在真实屏幕上评审。
+    /// 预览进程的遮罩会挡住整个屏幕：除了引导自身的退出方式，这里还兜底最多停留 60 秒后自动退出。
+    public static func showOnboarding() {
+        NSApp.setActivationPolicy(.regular)
+        StudioWindows.showRecorder()
+        OnboardingTour.begin()
+        let deadline = Date(timeIntervalSinceNow: 60)
+        while OnboardingTour.current != nil, Date() < deadline { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2)) }
+        OnboardingTour.dismiss()
+    }
+
     public static func run(projectURL: URL?) throws {
         NSSetUncaughtExceptionHandler { exception in
             FileHandle.standardError.write(Data("窗口回归失败：\(exception.name.rawValue) \(exception.reason ?? "")\n".utf8))

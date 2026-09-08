@@ -36,9 +36,11 @@ public struct ModePickerView: View {
                     .buttonStyle(StudioIconButtonStyle(size: .small))
                     .help("关闭录制方式 · 菜单栏图标或 ⌘N 再次打开").accessibilityLabel("关闭录制方式")
                     .keyboardShortcut(.cancelAction)
+                    .onboardingTarget("close")
                 HStack(spacing: CaploMetrics.Spacing.xs) {
                     ForEach(Array(RecordingMode.allCases.enumerated()), id: \.element) { index, mode in
                         ModeSegment(mode: mode, shortcut: Character(String(index + 1))) { pick(mode) }
+                            .onboardingTarget(mode.onboardingID)
                             .disabled(busy || recorder.isBusy)
                             .matchedGeometryEffect(id: mode, in: segmentSpace, isSource: true)
                             .onHover { inside in
@@ -65,9 +67,12 @@ public struct ModePickerView: View {
                 FloatingBarDivider()
                 Button { ProjectLibraryWindow.shared.show() } label: { Image(systemName: "clock.arrow.circlepath") }
                     .buttonStyle(StudioIconButtonStyle()).help("项目中心 · ⇧⌘P").accessibilityLabel("项目中心")
+                    .onboardingTarget("recent")
                 Button { StudioWindows.showSettings() } label: { Image(systemName: "gearshape") }
                     .buttonStyle(StudioIconButtonStyle()).help("设置 · ⌘,").accessibilityLabel("设置")
+                    .onboardingTarget("settings")
             }
+            .onboardingTarget("bar")
         }
         .padding(.horizontal, CaploMetrics.floatingBarInset)
         .padding(.bottom, CaploMetrics.floatingBarInset)
