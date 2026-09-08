@@ -62,7 +62,8 @@ extension WindowLifecycleTests {
         let second = try #require(try await pull(timeout: 600), "暂停后换合成并原地定位，必须拿到新帧")
         let secondPixel = corner(second.0)
         print("换合成后新帧耗时 \(Int(Date().timeIntervalSince(swapStart) * 1000)) ms，角落像素 \(secondPixel)")
-        #expect(secondPixel.b > 120 && secondPixel.r < 150, "留白 120 时角落应是背景")
+        // 判定不绑定默认渐变的具体数值：背景是蓝系（蓝通道明显高于红），红色视频不是。
+        #expect(secondPixel.b > secondPixel.r + 40 && secondPixel.r < 150, "留白 120 时角落应是背景")
         // 连续快速换合成 30 次，统计每次拿到新帧的耗时。
         var latencies: [Double] = []
         for step in 1...30 {

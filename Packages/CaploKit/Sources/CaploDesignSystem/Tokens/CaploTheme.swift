@@ -57,11 +57,13 @@ public enum CaploNSColor {
                                           alpha: 0.45, highContrastAlpha: 0.88)
     /// 强调色服务动作与轨道识别，不参与窗口玻璃染色。浅字与实心按钮分别定义对比度。
     public static let controlOn = token("controlOn", 0x80DFB8, alpha: 0.80)
-    public static let primaryButtonFill = token("primaryButtonFill", 0xD9D2FF)
-    public static let primaryButtonText = token("primaryButtonText", 0x2B2350)
-    public static let accent = token("accent", 0xBDB1FF)
-    public static let accentFill = token("accentFill", 0x7A66E6)
-    public static let accentSoft = token("accentSoft", 0xBDB1FF, alpha: 0.16)
+    /// 2026-09-09 定论：界面不再有"主题色"。强调色是冷白，选中态与主按钮靠明度而不是色相成形，
+    /// 彩色只留给录制红、开关绿和各轨道识别色（Final Cut / Screen Studio 的路子）。
+    public static let primaryButtonFill = token("primaryButtonFill", 0xF2F1F6)
+    public static let primaryButtonText = token("primaryButtonText", 0x1C1B22)
+    public static let accent = token("accent", 0xE8E6EE)
+    public static let accentFill = token("accentFill", 0xF2F1F6)
+    public static let accentSoft = token("accentSoft", 0xE8E6EE, alpha: 0.18)
     public static let zoom = token("zoom", 0xACCFFF)
     public static let record = token("record", 0xFF858B)
     public static let live = token("live", 0x5CE07A)

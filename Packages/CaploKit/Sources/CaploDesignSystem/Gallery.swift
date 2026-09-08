@@ -13,7 +13,7 @@ public struct DesignSystemGallery: View {
     public init() {}
 
     private let swatches: [Swatch] = [
-        Swatch(id: "violet", name: "紫罗兰", colors: [Color(red: 0.24, green: 0.22, blue: 0.72), Color(red: 0.72, green: 0.61, blue: 0.94)]),
+        Swatch(id: "violet", name: "鸢尾", colors: [Color(red: 0.06, green: 0.12, blue: 0.29), Color(red: 0.18, green: 0.44, blue: 0.88)]),
         Swatch(id: "lagoon", name: "湖水", colors: [Color(red: 0.12, green: 0.44, blue: 0.55), Color(red: 0.56, green: 0.83, blue: 0.78)]),
         Swatch(id: "ember", name: "余烬", colors: [Color(red: 0.91, green: 0.42, blue: 0.29), Color(red: 0.96, green: 0.76, blue: 0.55)]),
         Swatch(id: "ink", name: "墨", colors: [Color(red: 0.11, green: 0.12, blue: 0.23), Color(red: 0.29, green: 0.34, blue: 0.5)]),

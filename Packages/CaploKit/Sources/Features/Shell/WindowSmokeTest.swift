@@ -9,6 +9,20 @@ import CaploDesignSystem
 /// 由 `PreviewGallery --windows` 调用，纳入 `Scripts/check.sh`。
 @MainActor
 public enum WindowSmokeTest {
+    /// 单独打开组件画廊（真实窗口、深色），停到窗口关闭为止；供人工评审设计系统控件。
+    public static func showGallery() {
+        NSApp.setActivationPolicy(.regular)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        window.title = "组件画廊"
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.contentView = NSHostingView(rootView: DesignSystemGallery().preferredColorScheme(.dark))
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        while window.isVisible { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2)) }
+    }
+
     public static func run(projectURL: URL?) throws {
         NSSetUncaughtExceptionHandler { exception in
             FileHandle.standardError.write(Data("窗口回归失败：\(exception.name.rawValue) \(exception.reason ?? "")\n".utf8))

@@ -66,6 +66,11 @@ struct PreviewGallery {
             try await render(DesignSystemGallery(), name: "components-dark", size: CGSize(width: 1100, height: 760), scheme: .dark, output: output)
             return
         }
+        if CommandLine.arguments.contains("--gallery") {
+            // 只开组件画廊一个真实窗口给人看，关掉窗口即退出。
+            WindowSmokeTest.showGallery()
+            return
+        }
         if CommandLine.arguments.contains("--windows") {
             let fixture = try await PreviewFixture.create(camera: false, pointer: false)
             try WindowSmokeTest.run(projectURL: fixture)

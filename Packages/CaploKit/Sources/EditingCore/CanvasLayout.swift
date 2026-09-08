@@ -46,6 +46,7 @@ public enum CanvasRatio: String, CaseIterable, Codable, Sendable {
 }
 
 /// 背景色板：渐变由两个端点色构成，纯色两端相同。名称即持久化值，新增项只能追加。
+/// 默认的"鸢尾"（名字保留以兼容旧工程）2026-09-09 改为深靛到钴蓝，白色窗口压上去对比最强。
 public enum CanvasBackground: String, CaseIterable, Codable, Sendable {
     case iris = "鸢尾"
     case ocean = "海盐"
@@ -71,7 +72,7 @@ public enum CanvasBackground: String, CaseIterable, Codable, Sendable {
     /// sRGB 端点色；渲染器与色板共用同一张表，保证预览、导出与面板一致。
     public var colors: (start: (red: Double, green: Double, blue: Double), end: (red: Double, green: Double, blue: Double)) {
         switch self {
-        case .iris: ((0.38, 0.36, 0.85), (0.85, 0.70, 0.95))
+        case .iris: ((0.06, 0.12, 0.29), (0.18, 0.44, 0.88))
         case .ocean: ((0.12, 0.48, 0.65), (0.64, 0.90, 0.85))
         case .peach: ((0.95, 0.49, 0.42), (1, 0.85, 0.64))
         case .graphite: ((0.12, 0.14, 0.18), (0.35, 0.38, 0.44))
