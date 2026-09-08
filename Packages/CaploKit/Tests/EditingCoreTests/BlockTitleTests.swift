@@ -39,3 +39,23 @@ import Testing
     edit.renameBlock(unknown, title: "无人认领")
     #expect(edit == before)
 }
+
+
+/// 多个镜头按时间线顺序编号："镜头聚焦 1 · 1.8×""镜头聚焦 2 · 2.0×"；只有一个时不编号；自定义名优先；关掉自动镜头后重新编号。
+@Test func multipleFocusesAreNumberedInTimelineOrder() {
+    var edit = VideoEdit(duration: 20)
+    var late = FocusSegment(start: 10, duration: 2, x: 0.5, y: 0.5, scale: 2.0); late.timelineStart = 10
+    var early = FocusSegment(start: 2, duration: 2, x: 0.5, y: 0.5, scale: 1.8); early.timelineStart = 2
+    edit.focuses = [late]
+    #expect(edit.focusDisplayTitle(late) == "镜头聚焦 · 2.0×")
+    edit.focuses = [late, early]
+    #expect(edit.focusDisplayTitle(early) == "镜头聚焦 1 · 1.8×" && edit.focusDisplayTitle(late) == "镜头聚焦 2 · 2.0×")
+    edit.focuses[1].title = "开场"
+    #expect(edit.focusDisplayTitle(edit.focuses[1]) == "开场" && edit.focusDisplayTitle(edit.focuses[0]) == "镜头聚焦 2 · 2.0×")
+    var automatic = FocusSegment(start: 5, duration: 2, x: 0.5, y: 0.5, scale: 1.8, automatic: true)
+    automatic.easeIn = 0.6; automatic.easeOut = 0.7
+    edit.focuses.append(automatic)
+    #expect(edit.focusDisplayTitle(automatic) == "镜头聚焦 2 · 1.8×" && edit.focusDisplayTitle(late) == "镜头聚焦 3 · 2.0×")
+    edit.automaticFocus = false
+    #expect(edit.focusDisplayTitle(late) == "镜头聚焦 2 · 2.0×")
+}

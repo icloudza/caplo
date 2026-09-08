@@ -113,16 +113,21 @@ public final class HoverTipWindow {
     }
 }
 
-/// 提示标签：11 点白字、深色实底、6 点圆角。
+/// 提示标签：11 点白字、深色实底、6 点圆角。短句单行；说明性长文本（超过 36 字）按 260 点宽换行。
 public struct HoverTipLabel: View {
     let text: String
     public init(text: String) { self.text = text }
+    private var wraps: Bool { text.count > 36 }
     public var body: some View {
         Text(text)
             .font(CaploFont.caption)
             .foregroundStyle(CaploColor.textPrimary)
-            .lineLimit(1)
-            .padding(.horizontal, 8).padding(.vertical, 4)
+            .lineLimit(wraps ? nil : 1)
+            .lineSpacing(2)
+            // 换行时固定 260 点宽、高度按内容纵向自适应；否则提示窗按单行算尺寸，文字会溢出底板。
+            .fixedSize(horizontal: !wraps, vertical: true)
+            .frame(width: wraps ? 260 : nil, alignment: .leading)
+            .padding(.horizontal, wraps ? 10 : 8).padding(.vertical, wraps ? 7 : 4)
             .background(CaploColor.surfaceOpaqueRaised.opacity(0.96), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(CaploColor.glassEdge.opacity(0.6)))
             .fixedSize()

@@ -1,13 +1,16 @@
 import SwiftUI
 
 /// 设置项统一使用固定图标槽，避免不同 SF Symbols 的宽度影响文字对齐。
+/// `tip`：标题右侧带一个小的 info 圆圈，鼠标停上去浮出说明，代替占一整块的说明文字。
 public struct SettingLabel: View {
     private let title: String
     private let symbol: String
+    private let tip: String?
 
-    public init(_ title: String, systemImage: String) {
+    public init(_ title: String, systemImage: String, tip: String? = nil) {
         self.title = title
         self.symbol = systemImage
+        self.tip = tip
     }
 
     public var body: some View {
@@ -22,6 +25,15 @@ public struct SettingLabel: View {
             Text(title)
                 .font(CaploFont.bodyMedium)
                 .foregroundStyle(CaploColor.textPrimary)
+            if let tip {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(CaploColor.textTertiary)
+                    .frame(width: 16, height: 16)
+                    .contentShape(Rectangle())
+                    .hoverTip(tip)
+                    .accessibilityLabel(tip)
+            }
         }
     }
 }

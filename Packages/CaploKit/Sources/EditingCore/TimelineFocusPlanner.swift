@@ -134,7 +134,8 @@ private struct TimelineFocusPlanner {
                 let position = unit.reusePrevious ? last : unit.initial.map { AutoFocus.clamp(CGPoint(x: $0.x, y: $0.y), scale: focus.scale) } ?? fallback
                 append(unit.start, position); append(unit.end, position); last = position
             case .motion:
-                var position = unit.reusePrevious ? last : initialPosition(samples: unit.samples, start: unit.start, fallback: fallback, scale: focus.scale)
+                let lead = min(focus.easeIn ?? style.easeIn, focus.duration / 2) * 0.6
+                var position = unit.reusePrevious ? last : initialPosition(samples: unit.samples, start: unit.start, fallback: fallback, scale: focus.scale, lead: lead)
                 append(unit.start, position)
                 var currentTime = unit.start
                 for window in unit.windows {
@@ -270,9 +271,13 @@ private struct TimelineFocusPlanner {
         return result
     }
 
-    private func initialPosition(samples: [PointerSample], start: Double, fallback: CGPoint, scale: Double) -> CGPoint {
+    /// 镜头起点的相机位置：0.4 秒内有点击就用点击；没有点击（手动讲解镜头）则做起点预判——
+    /// 取推近完成六成时指针会在的位置（`lead` 秒后），推近落点就是指针所在，而不是按下那一刻的旧位置。
+    private func initialPosition(samples: [PointerSample], start: Double, fallback: CGPoint, scale: Double, lead: Double) -> CGPoint {
         let nearby = samples.prefix { $0.time <= start + 0.4 }
-        guard let first = nearby.first(where: { $0.kind == .click }) ?? nearby.first else { return fallback }
+        if let click = nearby.first(where: { $0.kind == .click }) { return AutoFocus.clamp(CGPoint(x: click.x, y: click.y), scale: scale) }
+        if lead > 0, let ahead = PointerSpeedProbe(samples: samples).position(at: start + lead) { return AutoFocus.clamp(ahead, scale: scale) }
+        guard let first = nearby.first else { return fallback }
         return AutoFocus.clamp(CGPoint(x: first.x, y: first.y), scale: scale)
     }
 

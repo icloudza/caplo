@@ -65,6 +65,8 @@ final class TimelineViewportView: NSView {
     private var detached = false
     private var playbackPosition = 0.0
     private var drag: Drag?
+    /// 拖出范围新建镜头时的当前范围（时间线秒）。
+    private var createRange: (Double, Double)?
     private var renamePopover: NSPopover?
     private enum DropTarget: Equatable {
         case row(UUID), before(UUID?), invalid(UUID)
@@ -156,10 +158,11 @@ final class TimelineViewportView: NSView {
             }
         }
         let focuses = Dictionary(uniqueKeysWithValues: edit.focuses.map { ($0.id, $0) })
+        let numbers = edit.focusNumbers()
         for span in edit.focusSpans() {
             guard let focus = focuses[span.focusID] else { continue }
-            let defaultTitle = String(format: "镜头聚焦 · %.1f×", focus.scale)
-            values[span.focusID] = Block(id: span.focusID, role: nil, title: focus.displayTitle, defaultTitle: defaultTitle, start: span.start, duration: span.duration, span: span)
+            let defaultTitle = edit.focusDefaultTitle(focus, numbers: numbers)
+            values[span.focusID] = Block(id: span.focusID, role: nil, title: focus.title ?? defaultTitle, defaultTitle: defaultTitle, start: span.start, duration: span.duration, span: span)
         }
         blocks = edit.orderedLayerIDs.compactMap { values.removeValue(forKey: $0) }
         blocks += values.values.sorted { $0.start < $1.start }
@@ -197,7 +200,8 @@ final class TimelineViewportView: NSView {
     }
 
     private struct Drag {
-        enum Kind { case scrub, block(Block, VideoEdit.FocusDragEdge), reorder(UUID) }
+        /// `create`：在镜头行（或所有行下方）空白处拖出范围，松手新建手动镜头。
+        enum Kind { case scrub, block(Block, VideoEdit.FocusDragEdge), reorder(UUID), create(row: Int, start: Double) }
         let kind: Kind
         let origin: CGPoint
         let snapshot: VideoEdit
@@ -209,7 +213,7 @@ final class TimelineViewportView: NSView {
         let rowIDs: [[UUID]]
         let snapEdges: [Double]
         var blockID: UUID? {
-            switch kind { case .scrub: nil; case .block(let block, _): block.id; case .reorder(let id): id }
+            switch kind { case .scrub, .create: nil; case .block(let block, _): block.id; case .reorder(let id): id }
         }
     }
 
@@ -770,6 +774,15 @@ final class TimelineViewportView: NSView {
                 NSGraphicsContext.restoreGraphicsState()
             }
         }
+        // 正在拖出的新镜头：虚线框加淡底，标上默认倍率。
+        if let drag, case .create(let row, _) = drag.kind, let range = createRange, range.1 > range.0 {
+            let rect = TimelineInteractionGeometry.blockRect(start: range.0, duration: range.1 - range.0, scale: scale, offset: offset, header: timeOrigin, y: rowY(row) + 6, height: rowHeight - 12)
+            let shape = NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
+            CaploNSColor.zoom.withAlphaComponent(0.18).setFill(); shape.fill()
+            CaploNSColor.zoom.withAlphaComponent(0.7).setStroke(); shape.setLineDash([4, 3], count: 2, phase: 0); shape.lineWidth = 1; shape.stroke()
+            label(String(format: "镜头聚焦 · %.1f×", edit.focusStyle?.baseScale ?? AutoFocusStyle().baseScale),
+                  in: CGRect(x: rect.minX + 9, y: rect.minY + 8, width: max(0, rect.width - 18), height: 14), color: CaploNSColor.textPrimary, size: 10, bold: true)
+        }
         setAccessibilityChildren(accessibleClips + [navigator])
         NSGraphicsContext.restoreGraphicsState()
         CaploNSColor.separator.setFill(); CGRect(x: headerWidth - 1, y: 0, width: 1, height: bounds.height).fill()
@@ -856,8 +869,11 @@ final class TimelineViewportView: NSView {
         if isSelected(block) {
             // 选中描边画在块内部：外扩的描边在块贴着轨道左缘时会被裁掉一截。
             accent.setStroke(); let border = NSBezierPath(roundedRect: rect.insetBy(dx: 0.75, dy: 0.75), xRadius: 4.5, yRadius: 4.5); border.lineWidth = 1.5; border.stroke()
+            // 两端把手：2 点宽的小胶囊，圆角与块本身呼应。
             accent.setFill()
-            for point in [rect.minX + 3, rect.maxX - 5] { CGRect(x: point, y: rect.minY + 7, width: 2, height: rect.height - 14).fill() }
+            for point in [rect.minX + 3, rect.maxX - 5] {
+                NSBezierPath(roundedRect: CGRect(x: point, y: rect.minY + 7, width: 2, height: rect.height - 14), xRadius: 1, yRadius: 1).fill()
+            }
         }
     }
     override func mouseDown(with event: NSEvent) {
@@ -873,9 +889,22 @@ final class TimelineViewportView: NSView {
         }
         guard trackArea.contains(point) else { return }
         let number = Int((point.y - 28 + verticalOffset) / rowHeight)
-        guard rows.indices.contains(number), let first = rows[number].first else { return }
         if point.x >= headerWidth, point.x < timeOrigin { return }
+        // 所有行下方的空白：按下即定位，拖出范围则在新一行建一个跟随指针的手动镜头。
+        guard rows.indices.contains(number), let first = rows[number].first else {
+            guard point.x >= timeOrigin, number >= rows.count else { return }
+            retainedExtent = 0; model.seek(time(point.x))
+            drag = Drag(kind: .create(row: number, start: time(point.x)), origin: point, snapshot: edit, timeline: index, scale: scale, offset: offset, rowIDs: rows.map { $0.map(\.id) }, snapEdges: createSnapTargets())
+            return
+        }
         let hit = hitBlock(at: point, row: number)
+        // 镜头行的空白处：和以前一样选中该行并定位，但拖动起来就是在拖一个新镜头的范围。
+        if hit == nil, point.x >= timeOrigin, rows[number].allSatisfy({ $0.role == nil }) {
+            select(first)
+            retainedExtent = 0; model.seek(time(point.x))
+            drag = Drag(kind: .create(row: number, start: time(point.x)), origin: point, snapshot: edit, timeline: index, scale: scale, offset: offset, rowIDs: rows.map { $0.map(\.id) }, snapEdges: createSnapTargets())
+            return
+        }
         let block = hit?.0 ?? first
         if block.role == .screen, event.modifierFlags.contains(.command) { model.selectClip(block.id, extending: true) }
         else { select(block) }
@@ -917,6 +946,12 @@ final class TimelineViewportView: NSView {
             let atPlayhead = NSMenuItem(title: "在播放头分割", action: #selector(splitBlockAtPlayhead(_:)), keyEquivalent: "b")
             atPlayhead.target = self; atPlayhead.isEnabled = model.canSplit
             menu.addItem(atPlayhead)
+            if block.role == .screen {
+                // 从右键落点起加一个 2 秒的跟随镜头；这段已有镜头时模型会先问。
+                let focus = NSMenuItem(title: "在此处添加聚焦 · " + TimelineTime.code(clicked), action: #selector(addFocusHere(_:)), keyEquivalent: "")
+                focus.target = self; focus.representedObject = clicked
+                menu.addItem(focus)
+            }
             menu.addItem(.separator())
             let rename = NSMenuItem(title: "重命名…", action: #selector(renameBlock(_:)), keyEquivalent: "")
             rename.target = self; rename.representedObject = block.id
@@ -958,6 +993,7 @@ final class TimelineViewportView: NSView {
         return menu
     }
     @objc private func splitBlockHere(_ sender: NSMenuItem) { if let time = sender.representedObject as? Double { model.split(at: time) } }
+    @objc private func addFocusHere(_ sender: NSMenuItem) { if let time = sender.representedObject as? Double { model.requestAddFocus(start: time, duration: 2) } }
     /// 在块下方弹出改名框；确定或回车写入模型，留空恢复默认名称。
     @objc private func renameBlock(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? UUID, let block = blocks.first(where: { $0.id == id }), let row = rowByBlock[id] else { return }
@@ -986,6 +1022,9 @@ final class TimelineViewportView: NSView {
     @objc private func selectRowMember(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? UUID, let block = blocks.first(where: { $0.id == id }) else { return }
         select(block)
+    }
+    private func createSnapTargets() -> [Double] {
+        blocks.flatMap { [$0.start, $0.start + $0.duration] } + [0, model.position]
     }
     private func snapTargets(for block: Block, edge: VideoEdit.FocusDragEdge) -> [Double] {
         var moving = Set([block.id])
@@ -1018,6 +1057,15 @@ final class TimelineViewportView: NSView {
         self.drag = drag
         switch drag.kind {
         case .scrub: seek(time(point.x), modifiers: modifiers)
+        case .create(_, let start):
+            guard drag.moved else { return }
+            var desired = time(point.x)
+            if viewport.snapping && !modifiers.contains(.option),
+               let snap = drag.snapEdges.filter({ abs($0 - desired) < 8.0 / drag.scale }).min(by: { abs($0 - desired) < abs($1 - desired) }) {
+                desired = snap; snappedTime = snap
+            } else { snappedTime = nil }
+            createRange = (min(start, desired), max(start, desired))
+            needsDisplay = true
         case .reorder:
             guard drag.moved else { return }
             updateDropTarget(at: point, proposed: drag.snapshot)
@@ -1103,6 +1151,7 @@ final class TimelineViewportView: NSView {
         changedViewport(); updateDrag(at: point, modifiers: dragModifiers)
     }
     private func clearDrag() {
+        createRange = nil
         autoScrollTask?.cancel(); autoScrollTask = nil
         drag = nil; dragLocation = nil; dropTarget = nil; snappedTime = nil
         dragGhost.removeAllAnimations(); dragGhost.isHidden = true; dragGhostVisible = false
@@ -1130,6 +1179,11 @@ final class TimelineViewportView: NSView {
         guard let initial = drag else { return }
         if initial.moved { updateDrag(at: convert(event.locationInWindow, from: nil), modifiers: event.modifierFlags) }
         if case .invalid = dropTarget { model.cancelInteraction(); clearDrag(); return }
+        // 拖出的范围够长就新建手动镜头；只是点了一下则已在按下时定位过。
+        if case .create = initial.kind {
+            if initial.moved, let range = createRange, range.1 - range.0 >= 0.3 { model.requestAddFocus(start: range.0, duration: range.1 - range.0) }
+            clearDrag(); return
+        }
         // 轨头图标只是点了一下（没拖成换行）：把这一行选中的块滚进视口。
         if let drag, !drag.moved, case .reorder(let id) = drag.kind, let block = blocks.first(where: { $0.id == id }), reveal(block) { changedViewport() }
         if let drag, drag.moved, let id = drag.blockID, let dropTarget {

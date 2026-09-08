@@ -16,7 +16,7 @@ struct FocusPanel: View {
     init(model: VideoEditorModel) {
         self.model = model
         _expanded = State(initialValue: model.selectedFocus)
-        _autoParametersExpanded = State(initialValue: UserDefaults.standard.object(forKey: Self.autoParametersKey) as? Bool ?? true)
+        _autoParametersExpanded = State(initialValue: UserDefaults.standard.object(forKey: Self.autoParametersKey) as? Bool ?? false)
     }
 
     private func toggle(_ id: UUID) {
@@ -54,14 +54,14 @@ struct FocusPanel: View {
 
     var body: some View {
         Toggle(isOn: Binding(get: { model.edit.automaticFocus }, set: { value in model.commit { $0.automaticFocus = value } })) {
-            SettingLabel("自动聚焦", systemImage: "sparkles")
+            SettingLabel("自动聚焦", systemImage: "sparkles",
+                         tip: "按点击推近，提前读取鼠标轨迹并平滑跟随。不点鼠标的讲解也能聚焦：在时间线的镜头行拖出一段范围，镜头会推近到指针所在并跟着走。相邻镜头间隔小于合并间隔时直接平移过去，不拉远。手动指定水平或垂直位置后改为固定聚焦。")
         }.toggleStyle(StudioToggleStyle())
-        PanelNote("按点击推近，提前读取鼠标轨迹并平滑跟随。镜头可跨片段延长，自动识别范围内的目标；手动指定水平或垂直位置后改为固定聚焦。")
-        // 默认展开；镜头多时可以收起，专注于各镜头的参数。状态随偏好保留。
+        // 默认收起，专注于各镜头的参数；需要时展开调整。状态随偏好保留。
         PanelSection("自动镜头参数", expanded: $autoParametersExpanded) {
             EditorSlider(model: model, title: "默认倍率", value: styleBinding(\.baseScale), range: 1...3, suffix: "×", detents: [1.5, 2, 2.5])
             EditorSlider(model: model, title: "停留秒数", value: styleBinding(\.idleTimeout), range: 0.5...5)
-            EditorSlider(model: model, title: "镜头合并间隔", value: styleBinding(\.mergeGap), range: 0...2)
+            EditorSlider(model: model, title: "合并 / 衔接间隔", value: styleBinding(\.mergeGap), range: 0...2)
             EditorSlider(model: model, title: "轨迹前瞻（秒）", value: optionalStyleBinding(\.prediction, fallback: 0.16), range: 0...0.4)
             EditorSlider(model: model, title: "镜头平滑响应", value: optionalStyleBinding(\.panResponse, fallback: 0.55), range: 0.15...1.5)
             EditorSlider(model: model, title: "中心安全区", value: styleBinding(\.safeZone), range: 0.2...0.9)
@@ -72,12 +72,13 @@ struct FocusPanel: View {
         }
         PanelSection("镜头") {
             if model.edit.focuses.isEmpty {
-                PanelNote("暂无镜头。可在播放头位置添加手动聚焦。")
+                PanelNote("暂无镜头。在时间线的镜头行拖出一段范围即可添加，或用工具栏按钮在播放头处添加 2 秒镜头。")
             } else {
                 // 每个镜头是一个可展开条目：默认收起只占一行，点开向下展开这个镜头的参数；展开即选中，时间线里选中也会展开。
+                let numbers = model.edit.focusNumbers()
                 VStack(spacing: CaploMetrics.Spacing.xs) {
                     ForEach(model.edit.focuses) { focus in
-                        FocusDisclosure(focus: focus, expanded: expanded == focus.id, toggle: { toggle(focus.id) }) {
+                        FocusDisclosure(focus: focus, title: model.edit.focusDisplayTitle(focus, numbers: numbers), expanded: expanded == focus.id, toggle: { toggle(focus.id) }) {
                             controls(for: focus.id, focus: focus)
                         }
                     }
@@ -144,6 +145,8 @@ struct FocusPanel: View {
 /// 可展开的镜头条目：一行表头（图标、起点、倍率、箭头），展开后表头高亮、下面是参数；高度变化带动画，整体裁成圆角卡片。
 private struct FocusDisclosure<Content: View>: View {
     let focus: FocusSegment
+    /// 与时间线块相同的显示名（自定义名优先，多个镜头时带编号）。
+    let title: String
     let expanded: Bool
     let toggle: () -> Void
     @ViewBuilder let content: () -> Content
@@ -156,7 +159,7 @@ private struct FocusDisclosure<Content: View>: View {
                 // 表头显示与时间线块相同的名字（自定义名优先），右侧是起点时间码。
                 HStack(spacing: CaploMetrics.Spacing.s) {
                     Image(systemName: focus.automatic ? "sparkles" : "viewfinder").frame(width: CaploMetrics.Icon.control)
-                    Text(focus.displayTitle).font(CaploFont.bodyMedium).lineLimit(1).truncationMode(.tail)
+                    Text(title).font(CaploFont.bodyMedium).lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: CaploMetrics.Spacing.s)
                     Text(timecode(focus.editingStart)).font(CaploFont.value).foregroundStyle(expanded ? CaploColor.textPrimary : CaploColor.textSecondary)
                     Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(CaploColor.textTertiary)

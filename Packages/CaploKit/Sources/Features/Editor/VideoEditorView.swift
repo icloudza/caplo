@@ -21,6 +21,7 @@ struct VideoEditorView: View {
     @State private var model: VideoEditorModel
     @State private var tab = "布局"
     @State private var viewport = TimelineViewport()
+    @State private var suppressOverlapPrompt = false
     let back: () -> Void
     let previewTime: Double
 
@@ -56,7 +57,7 @@ struct VideoEditorView: View {
                 }
                 .disabled(!model.ready)
                 .studioCard()
-                EditorWorkspace(model: model, viewport: viewport) { model.addFocus(); tab = "聚焦" }.frame(maxWidth: .infinity)
+                EditorWorkspace(model: model, viewport: viewport) { model.requestAddFocus(); tab = "聚焦" }.frame(maxWidth: .infinity)
             }
             .padding([.top, .trailing, .bottom], CaploMetrics.Spacing.s)
         }
@@ -78,6 +79,14 @@ struct VideoEditorView: View {
         .onChange(of: model.edit) { model.previewChanged() }
         .onChange(of: model.selectedMedia) { if let role = model.selectedMedia { tab = role == .camera ? "人像" : "片段" } }
         .onChange(of: model.selectedFocus) { if model.selectedFocus != nil { tab = "聚焦" } }
+        // 要添加的时间段已经有镜头：问一下，可以勾"不再提示"。
+        .sheet(item: Binding(get: { model.pendingFocus }, set: { if $0 == nil { model.cancelPendingFocus() } })) { pending in
+            StudioConfirmSheet(title: "这段时间已有镜头",
+                               message: "\(TimelineTime.code(pending.start)) 到 \(TimelineTime.code(pending.start + pending.duration)) 之间已经有一个镜头。再添加一个的话，两个镜头会叠在一起，后添加的在上。",
+                               confirmTitle: "仍然添加", suppression: $suppressOverlapPrompt,
+                               confirm: { model.confirmPendingFocus(suppressFurtherPrompts: suppressOverlapPrompt) },
+                               cancel: { model.cancelPendingFocus() })
+        }
         // 摄像头片段被删光（或本就没录）时"人像"不可选；正停在人像面板上就退回布局。
         .onChange(of: model.hasCameraMedia, initial: true) { if !model.hasCameraMedia, tab == "人像" { tab = "布局" } }
     }

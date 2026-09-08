@@ -118,7 +118,12 @@ public struct FocusSegment: Codable, Equatable, Sendable, Identifiable {
     /// 用户自定义的块名称；为空时时间线显示"镜头聚焦 · 倍率"。
     public var title: String?
     /// 时间线块与属性面板共用的显示名：自定义名称优先，否则"镜头聚焦 · 1.8×"。
-    public var displayTitle: String { title ?? String(format: "镜头聚焦 · %.1f×", scale) }
+    /// 工程里有多个镜头时请用 `VideoEdit.focusDisplayTitle(_:)`，它会按时间线顺序编号成"镜头聚焦 2 · 1.8×"。
+    public var displayTitle: String { title ?? defaultTitle(number: nil) }
+    /// 默认名："镜头聚焦 · 1.8×"，给了序号则是"镜头聚焦 2 · 1.8×"。
+    public func defaultTitle(number: Int?) -> String {
+        number.map { String(format: "镜头聚焦 %d · %.1f×", $0, scale) } ?? String(format: "镜头聚焦 · %.1f×", scale)
+    }
     public var editingStart: Double {
         get { timelineStart ?? start }
         set { if timelineStart != nil { timelineStart = newValue } else { start = newValue } }
@@ -292,43 +297,128 @@ public struct FocusState: Equatable, Sendable {
     }
 }
 
+extension VideoEdit {
+    /// 镜头编号：只有一个镜头时不编号；多个时按它们在时间线上首次出现的位置排序，从 1 起。
+    /// 自动镜头关掉时不参与编号（它们也不显示）。
+    public func focusNumbers() -> [UUID: Int] {
+        let shown = focuses.filter { !$0.automatic || automaticFocus }
+        guard shown.count > 1 else { return [:] }
+        var firstStart: [UUID: Double] = [:]
+        for span in focusSpans() { firstStart[span.focusID] = min(firstStart[span.focusID] ?? .infinity, span.start) }
+        let ordered = shown.enumerated().sorted { a, b in
+            let x = firstStart[a.element.id] ?? a.element.editingStart, y = firstStart[b.element.id] ?? b.element.editingStart
+            return x == y ? a.offset < b.offset : x < y
+        }
+        return Dictionary(uniqueKeysWithValues: ordered.enumerated().map { ($0.element.element.id, $0.offset + 1) })
+    }
+    /// 镜头的默认名（含编号）。
+    public func focusDefaultTitle(_ focus: FocusSegment, numbers: [UUID: Int]? = nil) -> String {
+        focus.defaultTitle(number: (numbers ?? focusNumbers())[focus.id])
+    }
+    /// 时间线块与面板列表共用的显示名：自定义名优先，否则带编号的默认名。
+    public func focusDisplayTitle(_ focus: FocusSegment, numbers: [UUID: Int]? = nil) -> String {
+        focus.title ?? focusDefaultTitle(focus, numbers: numbers)
+    }
+}
+
 /// 预览和导出只在此处求值镜头；剪辑后先映射回原素材，手动镜头优先于自动镜头。
 /// 求值是无状态的：任意时刻都能独立算出相机，导出与拖动预览得到完全一致的画面。
+///
+/// 同一时刻可能有多个镜头生效（重叠、相邻衔接）：按"自动在下、手动在上，同类按层序"逐层混合，
+/// 倍率从 1 起、位置从最底层镜头起逐层按各自包络 lerp，任何边界都没有跳变。
+/// 相邻衔接：两个镜头间隔小于合并间隔时，前一个不拉远，保持推近直到后一个推近完成，视觉上直接平移过去。
 public enum SceneEvaluator {
-    public static func focus(edit: VideoEdit, time: Double, timeline supplied: TimelineIndex? = nil) -> FocusState {
+    /// 前一个镜头需要"保持推近"的额外秒数（越过自身时长），以及它衔接到的后一个镜头。
+    public struct Link: Equatable, Sendable {
+        public let hold: Double
+        public let next: UUID
+    }
+
+    /// 相邻衔接关系：按时间域（时间线 / 原素材）分组，起点排序后看相邻两段的间隔。
+    /// 分割出来的镜头片段（带 transition 字段）不参与衔接，它们的曲线本来就是一整段。
+    public static func links(edit: VideoEdit) -> [UUID: Link] {
+        let gap = edit.focusStyle?.isValid == true ? edit.focusStyle!.mergeGap : AutoFocusStyle().mergeGap
+        guard gap > 0 else { return [:] }
+        var result: [UUID: Link] = [:]
+        for timelineBased in [false, true] {
+            let group = edit.focuses.filter {
+                (!$0.automatic || edit.automaticFocus) && ($0.timelineStart != nil) == timelineBased
+                && $0.transitionOffset == nil && $0.transitionDuration == nil
+            }.sorted { $0.editingStart < $1.editingStart }
+            for (number, current) in group.enumerated() {
+                let end = current.editingStart + current.duration
+                guard let next = group.dropFirst(number + 1).first(where: { $0.editingStart >= end - 0.0001 }) else { continue }
+                let distance = next.editingStart - end
+                guard distance < gap, current.targetClipID == nil || next.targetClipID == nil || current.targetClipID == next.targetClipID else { continue }
+                result[current.id] = Link(hold: distance + easeInLength(next), next: next.id)
+            }
+        }
+        return result
+    }
+
+    /// 推近段长度：显式 easeIn 或旧镜头的 0.4 秒阶跃，都不超过时长的一半。
+    static func easeInLength(_ zoom: FocusSegment) -> Double {
+        let duration = zoom.transitionDuration ?? zoom.duration
+        return max(0.001, min(zoom.easeIn ?? 0.4, duration / 2))
+    }
+
+    public static func focus(edit: VideoEdit, time: Double, timeline supplied: TimelineIndex? = nil, links suppliedLinks: [UUID: Link]? = nil) -> FocusState {
         let timeline = supplied ?? TimelineIndex(clips: edit.orderedScreenClips)
         guard let source = timeline.sourceTime(at: time) else { return FocusState() }
-        var selected: (FocusSegment, Double)?
+        let links = suppliedLinks ?? links(edit: edit)
+        struct Layer { let zoom: FocusSegment; let elapsed: Double; let envelope: Double; let order: Int? }
+        var layers: [Layer] = []
         let visibleClip = timeline.clipIndex(at: time).map { timeline.clips[$0].id }
         for zoom in edit.focuses where !zoom.automatic || edit.automaticFocus {
             if let target = zoom.targetClipID, target != visibleClip { continue }
             let visibleElapsed = (zoom.timelineStart == nil ? source : time) - zoom.editingStart
-            guard visibleElapsed >= 0, visibleElapsed < zoom.duration else { continue }
+            let hold = links[zoom.id]?.hold ?? 0
+            guard visibleElapsed >= 0, visibleElapsed < zoom.duration + hold else { continue }
             let elapsed = visibleElapsed + (zoom.transitionOffset ?? 0)
-            if let current = selected {
-                if zoom.automatic && !current.0.automatic { continue }
-                if zoom.automatic == current.0.automatic {
-                    if let order = edit.layerOrder, let candidate = order.firstIndex(of: zoom.id), let active = order.firstIndex(of: current.0.id) {
-                        if candidate > active { continue }
-                    } else if elapsed >= current.1 { continue }
-                }
-            }
-            selected = (zoom, elapsed)
+            let envelope = min(1, max(0, self.envelope(zoom, elapsed: elapsed, holding: hold > 0)))
+            guard envelope > 0 else { continue }
+            layers.append(Layer(zoom: zoom, elapsed: elapsed, envelope: envelope, order: edit.layerOrder?.firstIndex(of: zoom.id)))
         }
-        guard let (zoom, elapsed) = selected else { return FocusState() }
+        guard !layers.isEmpty else { return FocusState() }
+        // 层序（后应用的在上）：手动压过自动；衔接进来的镜头压过它接续的前一个；同类按层序（索引小在上），
+        // 没有层序时后开始的在上（与原先"选一个镜头"的优先规则一致）。
+        func above(_ a: Layer, _ b: Layer) -> Bool {
+            if a.zoom.automatic != b.zoom.automatic { return !a.zoom.automatic }
+            if links[b.zoom.id]?.next == a.zoom.id { return true }
+            if links[a.zoom.id]?.next == b.zoom.id { return false }
+            if let x = a.order, let y = b.order { return x < y }
+            return a.elapsed < b.elapsed
+        }
+        layers.sort { above($1, $0) }
+        var scale = 1.0, x = 0.5, y = 0.5, pushed = 0.0
+        for (number, layer) in layers.enumerated() {
+            let camera = layer.zoom.camera(at: layer.elapsed)
+            scale += (camera.scale - scale) * layer.envelope
+            if number == 0 { x = camera.x; y = camera.y } else { x += (camera.x - x) * layer.envelope; y += (camera.y - y) * layer.envelope }
+            if camera.scale > 1.001 { pushed = max(pushed, layer.envelope) }
+        }
+        let margin = 0.5 / scale
+        return FocusState(scale: scale, x: min(1 - margin, max(margin, x)), y: min(1 - margin, max(margin, y)), envelope: pushed, targetX: x, targetY: y)
+    }
+
+    /// 单个镜头此刻的包络；衔接出去的镜头（`holding`）只推近不拉远，保持到后一个镜头推近完成。
+    static func envelope(_ zoom: FocusSegment, elapsed: Double, holding: Bool) -> Double {
         let curveDuration = zoom.transitionDuration ?? zoom.duration
-        let envelope: Double
         if zoom.easing == .demo {
             let inTime = max(0.001, min(zoom.easeIn ?? 0.6, curveDuration / 2))
             let outTime = max(0.001, min(zoom.easeOut ?? 0.7, curveDuration / 2))
-            envelope = elapsed < inTime ? DemoMotion.easeOut(elapsed / inTime)
-                : elapsed > curveDuration - outTime ? 1 - DemoMotion.easeOut((elapsed - curveDuration + outTime) / outTime) : 1
-        } else { envelope = Self.envelope(elapsed: elapsed, duration: curveDuration, easeIn: zoom.easeIn, easeOut: zoom.easeOut) }
-        let camera = zoom.camera(at: elapsed)
-        let scale = 1 + (camera.scale - 1) * envelope
-        let margin = 0.5 / scale
-        return FocusState(scale: scale, x: min(1 - margin, max(margin, camera.x)), y: min(1 - margin, max(margin, camera.y)),
-                          envelope: camera.scale > 1.001 ? min(1, max(0, envelope)) : 0, targetX: camera.x, targetY: camera.y)
+            if elapsed < inTime { return DemoMotion.easeOut(elapsed / inTime) }
+            if holding { return 1 }
+            return elapsed > curveDuration - outTime ? 1 - DemoMotion.easeOut((elapsed - curveDuration + outTime) / outTime) : 1
+        }
+        if holding {
+            guard let easeIn = zoom.easeIn else {
+                let edge = min(0.4, curveDuration / 2), phase = min(1, elapsed / edge)
+                return phase * phase * (3 - 2 * phase)
+            }
+            return smootherstep(elapsed / max(0.001, min(easeIn, curveDuration / 2)))
+        }
+        return envelope(elapsed: elapsed, duration: curveDuration, easeIn: zoom.easeIn, easeOut: zoom.easeOut)
     }
 
     /// 推近 / 拉远包络：旧镜头沿用 0.4 秒平滑阶跃；带显式时长的镜头用更平滑的五次曲线。

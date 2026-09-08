@@ -387,6 +387,11 @@ extension WindowLifecycleTests {
         #expect(abs(focus.editingStart - bounds.lowerBound) < 0.000001)
         #expect(abs(focus.editingStart + focus.duration - bounds.upperBound) < 0.000001)
 
+        // "自动镜头参数"默认收起；这里要数全部滑块，先按用户展开过的状态来。
+        let expandedKey = "editor.focus.autoParametersExpanded"
+        let previous = UserDefaults.standard.object(forKey: expandedKey)
+        UserDefaults.standard.set(true, forKey: expandedKey)
+        defer { if let previous { UserDefaults.standard.set(previous, forKey: expandedKey) } else { UserDefaults.standard.removeObject(forKey: expandedKey) } }
         let host = NSHostingView(rootView: FocusPanel(model: model).frame(width: 300))
         host.frame = CGRect(x: 0, y: 0, width: 300, height: 1200)
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -448,5 +453,81 @@ extension WindowLifecycleTests {
         #expect(try menu(atRow: 90).items.first?.title.hasPrefix("录制画面 01") == true)
         model.undo(); harness.sync()
         #expect(model.edit.clips.first?.title == "开场")
+    }
+}
+
+
+extension WindowLifecycleTests {
+    /// 在镜头行空白处拖出范围就新建一个跟随指针的手动镜头；行下方空白也可以；拖得太短不建。
+    @Test func draggingAcrossEmptyFocusRowCreatesAFollowingShot() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await makeTimelinePointerModel(root: root)
+        defer { model.close() }
+        model.seek(1); model.addFocus()
+        let existing = try #require(model.selectedFocus)
+        let clipID = try #require(model.edit.clips.first?.id)
+        let harness = TimelinePointerHarness(model: model, zoom: 1)
+        defer { harness.close() }
+        let head = TimelineViewportView.timeOrigin
+        // 镜头行（第 0 行，y = 48）里 3.3 → 3.9 秒的空白。
+        try harness.mouse(.leftMouseDown, x: head + 3.3 * 120, y: 48)
+        try harness.mouse(.leftMouseDragged, x: head + 3.9 * 120, y: 48)
+        try harness.mouse(.leftMouseUp, x: head + 3.9 * 120, y: 48)
+        #expect(model.edit.focuses.count == 2)
+        let created = try #require(model.edit.focuses.first { $0.id != existing })
+        #expect(abs((created.timelineStart ?? -1) - 3.3) < 0.000001 && abs(created.duration - 0.6) < 0.000001)
+        #expect(created.followsTimeline == true && created.targetClipID == clipID && !created.automatic)
+        #expect(model.selectedFocus == created.id)
+        // 所有行下方的空白：0.5 → 1.5 秒，新镜头落在新的一行。
+        let belowRows = 28 + Double(model.edit.timelineRows.count) * 42 + 20
+        try harness.mouse(.leftMouseDown, x: head + 0.5 * 120, y: belowRows)
+        try harness.mouse(.leftMouseDragged, x: head + 1.5 * 120, y: belowRows)
+        try harness.mouse(.leftMouseUp, x: head + 1.5 * 120, y: belowRows)
+        // 0.5–1.5 秒和已有的 1–3 秒镜头重叠：先问再加。
+        #expect(model.pendingFocus != nil && model.edit.focuses.count == 2)
+        model.confirmPendingFocus(suppressFurtherPrompts: false)
+        #expect(model.edit.focuses.count == 3)
+        let below = try #require(model.edit.focuses.first { $0.id != existing && $0.id != created.id })
+        #expect(abs((below.timelineStart ?? -1) - 0.5) < 0.000001 && abs(below.duration - 1) < 0.000001)
+        // 太短（0.1 秒）不建，只是定位。
+        try harness.mouse(.leftMouseDown, x: head + 3.3 * 120, y: 48)
+        try harness.mouse(.leftMouseDragged, x: head + 3.4 * 120, y: 48)
+        try harness.mouse(.leftMouseUp, x: head + 3.4 * 120, y: 48)
+        #expect(model.edit.focuses.count == 3)
+        #expect(model.error == nil)
+        model.undo(); model.undo()
+        #expect(model.edit.focuses.count == 1)
+    }
+}
+
+
+extension WindowLifecycleTests {
+    /// 片段右键菜单里有"在此处添加聚焦"，落点已有镜头时触发的是确认而不是直接添加。
+    @Test func clipContextMenuOffersAddingAFocusAtTheClickedTime() async throws {
+        let defaults = UserDefaults(suiteName: "caplo.tests.focus-menu." + UUID().uuidString)!
+        VideoEditorModel.defaults = defaults
+        defer { VideoEditorModel.defaults = .standard }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await makeTimelinePointerModel(root: root)
+        defer { model.close() }
+        model.seek(1); model.addFocus()
+        let harness = TimelinePointerHarness(model: model, zoom: 1)
+        defer { harness.close() }
+        let head = TimelineViewportView.timeOrigin
+        // 录制画面在第 1 行（y = 90），右键落在 2.5 秒处。
+        let location = harness.view.convert(CGPoint(x: head + 2.5 * 120, y: 90), to: nil)
+        let event = try #require(NSEvent.mouseEvent(with: .rightMouseDown, location: location, modifierFlags: [], timestamp: 0, windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let menu = try #require(harness.view.menu(for: event))
+        let item = try #require(menu.items.first { $0.title.hasPrefix("在此处添加聚焦") })
+        #expect(item.title.contains(TimelineTime.code(2.5)))
+        // 2.5 秒起的 2 秒和已有的 1–3 秒镜头重叠：先问，不直接加。
+        _ = item.target?.perform(item.action, with: item)
+        #expect(model.pendingFocus != nil && model.edit.focuses.count == 1)
+        model.confirmPendingFocus(suppressFurtherPrompts: false)
+        #expect(model.edit.focuses.count == 2)
+        let added = try #require(model.edit.focuses.last)
+        #expect(abs((added.timelineStart ?? -1) - 2.5) < 0.000001 && abs(added.duration - 1.5) < 0.000001)
     }
 }

@@ -291,14 +291,70 @@ final class VideoEditorModel {
         selectedClipIDs = copies; selectedClip = edit.clips.first(where: { copies.contains($0.id) })?.id
     }
     func addFocus() {
-        guard let clip = edit.clips.first(where: { $0.id == selectedClip }) ?? edit.clip(atTimeline: position) else { return }
+        guard let (anchor, length) = defaultFocusRange() else { return }
+        addFocus(start: anchor, duration: length)
+    }
+    /// 播放头处默认镜头的范围：2 秒，不超出所在片段。
+    private func defaultFocusRange() -> (Double, Double)? {
+        guard let clip = edit.clips.first(where: { $0.id == selectedClip }) ?? edit.clip(atTimeline: position) else { return nil }
         let start = clip.timelineStart ?? 0
         let anchor = position >= start && position < start + clip.duration ? position : start
-        var zoom = FocusSegment(start: clip.sourceStart + min(anchor - start, clip.playableDuration - 0.00001), duration: min(2, start + clip.duration - anchor), x: 0.5, y: 0.5)
-        guard zoom.duration > 0 else { return }
-        zoom.timelineStart = anchor; zoom.targetClipID = clip.id; zoom.followsTimeline = true
+        return (anchor, min(2, start + clip.duration - anchor))
+    }
+
+    // MARK: 添加镜头前的重叠提示
+
+    /// 等待用户确认的添加请求：这段时间里已经有镜头。
+    struct PendingFocus: Identifiable, Equatable {
+        let id = UUID()
+        let start: Double
+        let duration: Double
+    }
+    var pendingFocus: PendingFocus?
+    static var defaults: UserDefaults = .standard
+    static let overlapPromptSuppressedKey = "editor.focus.overlapPromptSuppressed"
+    /// 这段时间内是否已有（显示着的）镜头。
+    func focusOverlaps(start: Double, duration: Double) -> Bool {
+        duration > 0 && !edit.focusSpans(in: start..<(start + duration)).isEmpty
+    }
+    /// 工具栏按钮：在播放头处添加，必要时先问。
+    func requestAddFocus() {
+        guard let (anchor, length) = defaultFocusRange() else { return }
+        requestAddFocus(start: anchor, duration: length)
+    }
+    /// 添加镜头的统一入口：这段时间已有镜头且用户没勾过"不再提示"时先弹确认，否则直接加。
+    func requestAddFocus(start: Double, duration: Double) {
+        let start = max(0, min(edit.duration, start)), length = min(duration, edit.duration - start)
+        guard length > 0 else { return }
+        if focusOverlaps(start: start, duration: length), !Self.defaults.bool(forKey: Self.overlapPromptSuppressedKey) {
+            pendingFocus = PendingFocus(start: start, duration: length)
+        } else {
+            addFocus(start: start, duration: length)
+        }
+    }
+    func confirmPendingFocus(suppressFurtherPrompts: Bool) {
+        guard let pending = pendingFocus else { return }
+        pendingFocus = nil
+        if suppressFurtherPrompts { Self.defaults.set(true, forKey: Self.overlapPromptSuppressedKey) }
+        addFocus(start: pending.start, duration: pending.duration)
+    }
+    func cancelPendingFocus() { pendingFocus = nil }
+    /// 在时间线任意范围添加跟随指针的手动镜头（不需要有点击事件）：范围落在单个片段内就关联该片段，
+    /// 跨片段则不关联，让镜头顺着成片时间跟随下去。
+    @discardableResult func addFocus(start: Double, duration: Double) -> UUID? {
+        // 不在这里对齐帧格：播放头处添加沿用精确位置（旧行为），时间线拖出的范围由时间线自己按帧格对齐。
+        let start = max(0, min(edit.duration, start))
+        let length = min(duration, edit.duration - start)
+        guard length > 0, let clip = edit.clip(atTimeline: start) else { return nil }
+        let clipStart = clip.timelineStart ?? 0
+        let within = start + length <= clipStart + clip.duration + 0.0001
+        var zoom = FocusSegment(start: clip.sourceStart + min(start - clipStart, clip.playableDuration - 0.00001), duration: length, x: 0.5, y: 0.5,
+                                scale: edit.focusStyle?.baseScale ?? AutoFocusStyle().baseScale)
+        zoom.timelineStart = start; zoom.targetClipID = within ? clip.id : nil; zoom.followsTimeline = true
+        zoom.easeIn = edit.focusStyle?.easeIn; zoom.easeOut = edit.focusStyle?.easeOut
         commit { edit in edit.focuses.append(zoom); edit.moveLayer(zoom.id, before: clip.id) }
         selectedMedia = nil; selectedMediaID = nil; selectedFocus = zoom.id
+        return zoom.id
     }
     /// 请时间线把某个块滚进视口（面板里点了镜头列表 / 轨头图标时）；序号递增让同一块可以重复触发。
     private(set) var revealRequest: (id: UUID, serial: Int)?
