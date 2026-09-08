@@ -75,6 +75,8 @@ public enum StudioWindows {
         recordBarDetached = false
         if model.mode == .region, let region = model.region, let screen = model.targetScreen {
             place(window, near: region, on: screen)
+        } else if model.mode == .window, let windowID = model.source?.windowID, let bounds = WindowGeometry.onScreenBounds(of: windowID) {
+            placeRecordBar(window, nearWindow: bounds)
         } else {
             dock(window, toBottomOf: model.targetScreen)
         }
@@ -114,6 +116,25 @@ public enum StudioWindows {
     static func followRegion(_ region: CGRect, on screen: NSScreen?) {
         guard let window = recordBar?.window, window.isVisible, let screen, !recordBarDetached else { return }
         place(window, near: region, on: screen)
+    }
+
+    /// 窗口模式：录制条贴在目标窗口正下方（放不下则上方），窗口移动时跟随；用户拖过录制条后停止跟随。
+    /// `bounds` 为全局左上角原点坐标（`WindowGeometry.onScreenBounds`）。
+    static func followWindow(_ bounds: CGRect, primaryHeight: CGFloat? = nil) {
+        guard let window = recordBar?.window, window.isVisible, recordBarModel?.mode == .window, !recordBarDetached else { return }
+        placeRecordBar(window, nearWindow: bounds, primaryHeight: primaryHeight)
+    }
+
+    private static func overlap(_ a: CGRect, _ b: CGRect) -> CGFloat { let r = a.intersection(b); return r.isNull ? 0 : r.width * r.height }
+    /// 目标窗口所在显示器取窗口中心所在的那块，中心不在任何显示器上时取相交面积最大的一块。
+    static func placeRecordBar(_ window: NSWindow, nearWindow bounds: CGRect, primaryHeight: CGFloat? = nil) {
+        let height = primaryHeight ?? NSScreen.screens.first?.frame.maxY ?? bounds.maxY
+        let appKit = WindowGeometry.appKitRect(fromGlobal: bounds, primaryHeight: height)
+        let center = CGPoint(x: appKit.midX, y: appKit.midY)
+        let screen = NSScreen.screens.first { $0.frame.contains(center) }
+            ?? NSScreen.screens.max { overlap($0.frame, appKit) < overlap($1.frame, appKit) }
+        guard let screen else { return }
+        place(window, near: WindowGeometry.localRect(bounds, in: screen.frame, primaryHeight: height), on: screen)
     }
 
     /// `stopMonitors` 为假表示只是暂时收起（进入录制、临时选窗口）：麦克风试听与摄像头预览继续跑，录制器直接借用它们；

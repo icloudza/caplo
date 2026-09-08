@@ -398,3 +398,19 @@ extension CaliperSliderTests {
         #expect(window.firstResponder !== a && window.firstResponder !== b && CaliperView.focusedForTesting == nil)
     }
 }
+
+/// 档位落在范围之外时不画菱形：视图不裁切，画了会漏到轨道外（时间线缩放的 0 档在短录制里低于下限）。
+@MainActor
+@Test func detentsOutsideRangeAreNotDrawn() {
+    func make(range: ClosedRange<Double>) -> CaliperView {
+        let view = CaliperView(configuration: CaliperConfiguration(track: .fixed, size: .compact, range: range, step: 0.5, tickStep: 1, major: 4, mid: 2,
+                                                                   detents: [0], magnet: .detents, inertia: false, fade: .off), value: range.upperBound)
+        view.frame = CGRect(x: 0, y: 0, width: 96, height: 26)
+        view.layoutSubtreeIfNeeded()
+        return view
+    }
+    #expect(make(range: 1.96...4).detentMarkerBounds == nil)
+    let inRange = make(range: -2...4)
+    let bounds = try! #require(inRange.detentMarkerBounds)
+    #expect(bounds.minX >= 0 && bounds.maxX <= 96)
+}

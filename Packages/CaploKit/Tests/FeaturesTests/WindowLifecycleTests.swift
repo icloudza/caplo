@@ -24,6 +24,12 @@ struct WindowLifecycleTests {
         try await Task.sleep(for: .milliseconds(120))
         #expect(session.trackedBounds == bounds)
         #expect(session.isShowing)
+        // 阻挡层围住挖空处：没有一条压到目标窗口，且窗口所在显示器上四周都有阻挡（窗口不贴边时）。
+        let primaryHeight = NSScreen.screens.first?.frame.maxY ?? bounds.maxY
+        let windowRect = WindowGeometry.appKitRect(fromGlobal: bounds, primaryHeight: primaryHeight)
+        let frames = session.blockerFrames
+        #expect(!frames.isEmpty)
+        for frame in frames { #expect(frame.intersection(windowRect.insetBy(dx: 1, dy: 1)).isNull) }
         // 同一模型重复开始不重建；撤掉后遮罩消失。
         WindowHighlightSession.begin(model: model)
         #expect(WindowHighlightSession.current === session)
@@ -219,4 +225,24 @@ struct WindowLifecycleTests {
         throw WindowCheckError.timeout
     }
     private enum WindowCheckError: Error { case timeout }
+}
+
+
+/// 阻挡层几何：四条围住挖空处，挖空处本身不被覆盖；窗口不在该显示器上时整屏一条。
+@MainActor @Test func windowBlockerRectsSurroundTheHole() {
+    let screen = CGRect(x: 0, y: 0, width: 1000, height: 600)
+    let hole = CGRect(x: 200, y: 100, width: 400, height: 300)
+    let rects = WindowHighlightSession.blockerRects(screen: screen, hole: hole)
+    #expect(rects.count == 4)
+    for rect in rects { #expect(rect.intersection(hole.insetBy(dx: 0.5, dy: 0.5)).isNull) }
+    // 四条面积之和正好等于屏幕减去挖空处。
+    let covered = rects.reduce(0) { $0 + $1.width * $1.height }
+    #expect(abs(covered - (screen.width * screen.height - hole.width * hole.height)) < 0.001)
+    // 挖空处四周各点都被某一条盖住。
+    for point in [CGPoint(x: 400, y: 50), CGPoint(x: 400, y: 550), CGPoint(x: 100, y: 250), CGPoint(x: 800, y: 250)] {
+        #expect(rects.contains { $0.contains(point) })
+    }
+    // 窗口在别的显示器上：整屏一条阻挡，其余为空。
+    let elsewhere = WindowHighlightSession.blockerRects(screen: screen, hole: CGRect(x: 2000, y: 0, width: 100, height: 100))
+    #expect(elsewhere[0] == screen && elsewhere[1...].allSatisfy { $0 == .zero })
 }

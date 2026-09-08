@@ -4,8 +4,9 @@ import CaploDesignSystem
 
 /// 窗口模式的准备阶段：每个显示器盖一层压暗遮罩，只把选中的窗口挖空并沿边缘包一层虚线，
 /// 60 Hz 跟随窗口移动 / 缩放，窗口不在屏幕上（最小化、关闭、其他空间）时整层隐藏。
-/// 遮罩完全穿透点击，用户可以继续操作目标窗口；切换到别的应用时，把录制目标换成该应用最前面的
-/// 窗口（同一应用内换窗口不改目标）。按 REC、返回录制方式或重新点选时撤掉。
+/// 挖空处仍能点到目标窗口；挖空之外由四条透明阻挡层吃掉点击，避免误点到别的应用或程序坞。
+/// 用键盘（⌘Tab）切换到别的应用时，把录制目标换成该应用最前面的窗口（同一应用内换窗口不改目标）。
+/// 窗口移动时录制条跟着贴到窗口下方（用户拖过录制条后不再跟随）。按 REC、返回录制方式或重新点选时撤掉。
 @MainActor
 final class WindowHighlightSession {
     private(set) static var current: WindowHighlightSession?
@@ -24,6 +25,10 @@ final class WindowHighlightSession {
 
     private weak var model: RecordBarModel?
     private var panels: [(screen: NSScreen, panel: NSPanel, shade: WindowShadeView)] = []
+    /// 每个显示器四条阻挡层（上、下、左、右），围住挖空处；不画任何东西，只吃掉点击。
+    private var blockers: [(screen: NSScreen, panels: [NSPanel])] = []
+    /// 录制条上次贴合的窗口位置，避免每帧都重摆。
+    private var placedBounds: CGRect?
     private var timer: Timer?
     private var activationObserver: NSObjectProtocol?
     /// 用户刚切换到的应用：等它的窗口升到最前后再采用，最多等一秒。
@@ -33,6 +38,8 @@ final class WindowHighlightSession {
     /// 最近一次跟随到的窗口位置（全局左上角原点坐标）；窗口不在屏幕上时为 nil。供测试与调试。
     private(set) var trackedBounds: CGRect?
     var isShowing: Bool { panels.contains { $0.panel.isVisible } }
+    /// 当前显示着的阻挡层位置（AppKit 屏幕坐标）；供测试验证挖空处没有被挡住。
+    var blockerFrames: [CGRect] { blockers.flatMap(\.panels).filter(\.isVisible).map(\.frame) }
 
     private init(model: RecordBarModel) {
         self.model = model
@@ -58,6 +65,8 @@ final class WindowHighlightSession {
         activationObserver = nil
         for entry in panels { entry.panel.orderOut(nil); entry.panel.contentView = nil }
         panels.removeAll()
+        for entry in blockers { entry.panels.forEach { $0.orderOut(nil) } }
+        blockers.removeAll()
     }
 
     /// 每个显示器一层：置顶层级（菜单栏与程序坞之上）、录制条之下；完全穿透，不参与点击与键盘。
@@ -79,6 +88,37 @@ final class WindowHighlightSession {
             panel.contentView = shade
             return (screen, panel, shade)
         }
+        for entry in blockers { entry.panels.forEach { $0.orderOut(nil) } }
+        blockers = NSScreen.screens.map { screen in
+            let strips = (0..<4).map { _ in
+                let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+                // 阻挡层在遮罩之下一档：遮罩穿透，点击落到阻挡层上被吃掉；不激活本应用，也不抢键盘。
+                panel.level = NSWindow.Level(rawValue: StudioLevel.overlay.rawValue - 1)
+                panel.isOpaque = false
+                panel.backgroundColor = .clear
+                panel.hasShadow = false
+                panel.ignoresMouseEvents = false
+                panel.hidesOnDeactivate = false
+                panel.isExcludedFromWindowsMenu = true
+                panel.animationBehavior = .none
+                panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
+                panel.sharingType = .none
+                return panel
+            }
+            return (screen, strips)
+        }
+    }
+
+    /// 阻挡层围住挖空处：上、下两条横贯整个显示器，左、右两条只占挖空处那一段高度；窗口不在这块显示器上时上条盖满整屏。
+    static func blockerRects(screen: CGRect, hole: CGRect) -> [CGRect] {
+        let hole = hole.intersection(screen)
+        guard !hole.isNull, hole.width > 0, hole.height > 0 else { return [screen, .zero, .zero, .zero] }
+        return [
+            CGRect(x: screen.minX, y: hole.maxY, width: screen.width, height: max(0, screen.maxY - hole.maxY)),
+            CGRect(x: screen.minX, y: screen.minY, width: screen.width, height: max(0, hole.minY - screen.minY)),
+            CGRect(x: screen.minX, y: hole.minY, width: max(0, hole.minX - screen.minX), height: hole.height),
+            CGRect(x: hole.maxX, y: hole.minY, width: max(0, screen.maxX - hole.maxX), height: hole.height),
+        ]
     }
 
     private func applicationActivated(_ pid: pid_t?) {
@@ -102,6 +142,18 @@ final class WindowHighlightSession {
             entry.shade.update(hole: hole, name: source.applicationName ?? "窗口", pixelSize: pixelSize)
             if !entry.panel.isVisible { entry.panel.orderFrontRegardless() }
         }
+        for entry in blockers {
+            let rects = Self.blockerRects(screen: entry.screen.frame, hole: windowRect)
+            for (panel, rect) in zip(entry.panels, rects) {
+                if rect.width <= 0 || rect.height <= 0 { if panel.isVisible { panel.orderOut(nil) }; continue }
+                if panel.frame != rect { panel.setFrame(rect, display: false) }
+                if !panel.isVisible { panel.orderFrontRegardless() }
+            }
+        }
+        if placedBounds != bounds {
+            placedBounds = bounds
+            StudioWindows.followWindow(bounds, primaryHeight: primaryHeight)
+        }
     }
 
     private func resolvePending(_ pid: pid_t, currentWindowID: UInt32) {
@@ -118,8 +170,9 @@ final class WindowHighlightSession {
     }
 
     private func hide() {
-        trackedBounds = nil
+        trackedBounds = nil; placedBounds = nil
         for entry in panels where entry.panel.isVisible { entry.panel.orderOut(nil) }
+        for entry in blockers { for panel in entry.panels where panel.isVisible { panel.orderOut(nil) } }
     }
 }
 
@@ -187,7 +240,7 @@ private final class WindowShadeView: NSView {
         let visibleHole = hole.intersection(bounds)
         let shade = NSBezierPath(rect: bounds)
         if !visibleHole.isEmpty { shade.append(NSBezierPath(rect: visibleHole)); shade.windingRule = .evenOdd }
-        NSColor.black.withAlphaComponent(0.32).setFill()
+        NSColor.black.withAlphaComponent(0.45).setFill()
         shade.fill()
         guard !visibleHole.isEmpty else { return }
 

@@ -171,7 +171,7 @@ private final class RegionOverlay: NSView {
         }
         let shade = NSBezierPath(rect: bounds)
         if !selection.isEmpty { shade.append(NSBezierPath(rect: selection)); shade.windingRule = .evenOdd }
-        NSColor.black.withAlphaComponent(0.32).setFill()
+        NSColor.black.withAlphaComponent(0.45).setFill()
         shade.fill()
         if !selection.isEmpty {
             // 无边框透明窗口在 alpha 为 0 的像素上会让点击穿透到下层应用；

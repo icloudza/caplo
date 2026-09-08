@@ -287,7 +287,8 @@ public final class CaliperView: NSView {
             }
         }
         let detents = CGMutablePath()
-        for d in c.detents {
+        // 范围外的档位不画：视图不裁切，画了就会漏到轨道外面（时间线缩放的 0 档在短录制里低于"适合窗口"下限）。
+        for d in c.detents where c.range.contains(d) {
             let x = contentX(d).rounded() + 0.5
             if detentsOnly {
                 major.move(to: CGPoint(x: x, y: baseline)); major.addLine(to: CGPoint(x: x, y: baseline - (compact ? 12 : 22)))
@@ -297,7 +298,7 @@ public final class CaliperView: NSView {
             let y = compact ? baseline - 12 : tickTop - 2, half: CGFloat = compact ? 2.5 : 3
             detents.move(to: CGPoint(x: x, y: y - half)); detents.addLine(to: CGPoint(x: x + half, y: y)); detents.addLine(to: CGPoint(x: x, y: y + half)); detents.addLine(to: CGPoint(x: x - half, y: y)); detents.closeSubpath()
         }
-        minorLayer.path = minor; midLayer.path = mid; majorLayer.path = major; detentLayer.path = detents
+        minorLayer.path = minor; midLayer.path = mid; majorLayer.path = major; detentLayer.path = detents.isEmpty ? nil : detents
         for shape in [minorLayer, midLayer, majorLayer, detentLayer] { shape.frame = content.bounds }
         // 游标：竖线 + 顶部一个小三角（紧凑 6×3、常规 8×4），只是个方向提示，不要压过刻度；路径以 x = 0 为中心，摆放只改 position。
         for pointer in [pointerLayer, upperPointerLayer] {
@@ -324,6 +325,11 @@ public final class CaliperView: NSView {
         place()
     }
     /// 刻度层的父层：渐隐遮罩挂在这里，遮罩随视图而不是随刻度移动。
+    /// 档位菱形在视图坐标里的总范围（测试用）；没有画任何档位时为 nil。
+    public var detentMarkerBounds: CGRect? {
+        guard let path = detentLayer.path, !path.isEmpty else { return nil }
+        return path.boundingBox.offsetBy(dx: content.frame.minX, dy: content.frame.minY)
+    }
     private lazy var maskHost: CALayer = {
         let host = CALayer(); host.frame = bounds
         layer?.insertSublayer(host, above: rangeLayer)

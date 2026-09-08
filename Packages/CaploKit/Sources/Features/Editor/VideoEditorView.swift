@@ -65,6 +65,8 @@ struct VideoEditorView: View {
         .tint(CaploColor.accent)
         .task {
             await model.open()
+            // 打开即"缩放到适合窗口"：整条时间线正好铺满视口，与工具栏那个按钮一致。
+            viewport.fit(duration: model.edit.duration)
             // 预热光标面板会先显示的那组样式预览（后台低优先级），切到"光标与点击"时直接命中缓存；其余组按需加载。
             CursorPreviews.shared.warmUp(group: model.edit.pointer?.cursorStyle.flatMap(CursorStyle.style(id:))?.group ?? .arrow)
             if tab == "片段", model.selectedClip == nil { model.selectedClip = model.edit.clips.first?.id }
