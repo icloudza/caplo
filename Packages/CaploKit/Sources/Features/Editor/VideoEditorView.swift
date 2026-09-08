@@ -124,10 +124,10 @@ private struct EditorTopBar: View {
                 Text("\(Int(model.progress * 100))%").font(CaploFont.value).foregroundStyle(CaploColor.textSecondary)
                 Button("取消") { model.cancelExport() }.buttonStyle(StudioButtonStyle(.quiet))
             } else {
-                SourceDropdown(symbol: "film", title: model.exportSize == 1920 ? "1080p" : (model.edit.layout.ratio == .square ? "2160p" : "4K"), accessibilityName: "导出分辨率") {
-                    Button("1080p · 30 fps") { model.exportSize = 1920 }
-                    Button("4K / 2160p · 30 fps") { model.exportSize = 3840 }
-                }
+                SourceDropdown(symbol: "film", title: model.exportSize == 1920 ? "1080p" : (model.edit.layout.ratio == .square ? "2160p" : "4K"), accessibilityName: "导出分辨率") { [
+                    .item("1080p · 30 fps", checked: model.exportSize == 1920) { model.exportSize = 1920 },
+                    .item("4K / 2160p · 30 fps", checked: model.exportSize == 3840) { model.exportSize = 3840 },
+                ] }
                 Button { model.export() } label: { Label("导出", systemImage: "square.and.arrow.up") }
                     .buttonStyle(StudioButtonStyle(.primary, size: .large))
                     .disabled(!model.ready || (model.edit.duration <= 0) || model.loading)

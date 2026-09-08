@@ -84,17 +84,17 @@ public struct CaploSettingsView: View {
             }
         }
         SettingsGroup("开始录制") {
-            SettingsRow("倒计时", caption: "按 REC 后等待的秒数，方便切换到要录制的窗口。") {
+            SettingsRow("倒计时") {
                 ChipGroup([0, 3, 5, 10], selection: $countdown) { $0 == 0 ? "不倒计时" : "\($0) 秒" }
             }
         }
-        SettingsGroup("默认输入", footer: "决定录制条打开时三路输入的初始开关；录制条上随时可以改，具体设备也在那里选。") {
+        SettingsGroup("默认输入") {
             SettingsRow("麦克风") { Toggle("麦克风", isOn: $microphone).toggleStyle(StudioToggleStyle(embedded: true)) }
             SettingsRow("系统声音") { Toggle("系统声音", isOn: $systemAudio).toggleStyle(StudioToggleStyle(embedded: true)) }
             SettingsRow("摄像头") { Toggle("摄像头", isOn: $camera).toggleStyle(StudioToggleStyle(embedded: true)) }
         }
-        SettingsGroup("麦克风", footer: "回声消除与降噪在编辑器的“声音混合”面板里离线完成，以录下的系统声音为参考；录制始终保存原始麦克风。") {
-            SettingsRow("麦克风模式", caption: "系统的“语音隔离”在 iPhone 或 Mac 上就地压制非人声背景，只能在系统面板里选择。") {
+        SettingsGroup("麦克风") {
+            SettingsRow("麦克风模式", caption: "在系统面板里选择。") {
                 Button("更改…") { MicrophoneModes.showSystemPicker() }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
             }
         }
@@ -103,7 +103,7 @@ public struct CaploSettingsView: View {
     // MARK: 存储
 
     @ViewBuilder private var storage: some View {
-        SettingsGroup("工程", footer: "工程保存在这台 Mac 的应用支持目录；用\u{201C}打开工程…\u{201D}可以使用其他位置的工程。") {
+        SettingsGroup("工程", footer: "默认保存在应用支持目录。") {
             SettingsRow("保存位置", caption: ProjectStoragePaths.libraryDescription) {
                 Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([ProjectStoragePaths.libraryURL]) }
                     .buttonStyle(StudioButtonStyle(.secondary, size: .small))

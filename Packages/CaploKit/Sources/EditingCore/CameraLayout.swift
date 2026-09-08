@@ -3,6 +3,7 @@ import CoreGraphics
 
 /// 人像位置相对可移动区域归一化，左上为零；更换画布比例后仍保留边距且不会出界。
 /// 镜头聚焦只变换屏幕，人像作为最后一层独立合成。
+/// 这是编辑器里成片人像的唯一布局来源，与录制时屏幕上那个可拖动的画中画取景窗无关（那个不保存位置）。
 public struct CameraLayout: Codable, Equatable, Sendable {
     public enum Shape: String, Codable, CaseIterable, Sendable { case circle, roundedRectangle }
     public var enabled = true

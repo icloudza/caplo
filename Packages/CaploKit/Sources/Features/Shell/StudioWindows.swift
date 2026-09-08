@@ -68,7 +68,6 @@ public enum StudioWindows {
             recordBar?.replaceContent(RecordBarView(model: model))
         }
         recordBarModel = model
-        model.syncMicrophoneMonitor()
         // 从倒计时取消或启动失败回到录制条：区域框恢复可编辑外观。
         if model.mode == .region { RegionSession.current?.setRecordingLook(false) }
         guard let window = recordBar?.window else { return }
@@ -89,6 +88,9 @@ public enum StudioWindows {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
+        // 窗口显示之后再起试听与预览：同步逻辑只在录制条显示着时才允许起监视。
+        model.syncMicrophoneMonitor()
+        model.syncCameraMonitor()
     }
 
     /// 录制条贴在区域框正下方并水平居中；下方放不下时放到框上方；左右钳在可见区域内。
@@ -114,13 +116,18 @@ public enum StudioWindows {
         place(window, near: region, on: screen)
     }
 
-    static func hideRecordBar() {
-        MicrophoneMonitor.shared.stop()
+    /// `stopMonitors` 为假表示只是暂时收起（进入录制、临时选窗口）：麦克风试听与摄像头预览继续跑，录制器直接借用它们；
+    /// 离开录制流程（关闭录制条、回到入口、打开编辑器）才停。
+    static func hideRecordBar(stopMonitors: Bool = true) {
+        // 录制中采集归录制器（借用着试听与预览），这里绝不停。
+        if stopMonitors, !ScreenRecorder.shared.isBusy { MicrophoneMonitor.shared.stop(); CameraMonitor.shared.stop() }
         WindowHighlightSession.dismiss()
         recordBar?.window?.orderOut(nil)
         settings?.level = .normal
+        CameraPreviewCoordinator.refresh()
     }
     static var currentRecordBarModel: RecordBarModel? { recordBarModel }
+    static var isRecordBarVisible: Bool { recordBar?.window?.isVisible == true }
 
     /// 区域模式：开始或重置屏幕框选；首次拖完出现录制条，之后的移动 / 调整实时同步到录制条。
     static func beginRegionSelection(reset: Bool = false) {
@@ -160,18 +167,18 @@ public enum StudioWindows {
     static func prepareForRecording() -> Bool {
         guard VideoEditorSessions.closeCurrent(close: false) else { VideoEditorWindow.shared.reveal(); return false }
         VideoEditorWindow.shared.pauseAndHide()
-        hidePreparationWindows(keepRegionOutline: recordBarModel?.mode == .region)
+        hidePreparationWindows(keepRegionOutline: recordBarModel?.mode == .region, stopMonitors: false)
         return true
     }
 
     /// `keepRegionOutline`：已有的区域框选会话改为只显示虚线的录制外观，而不是撤掉。
     /// `keepRegionOutline` 为 true 表示进入录制流程：区域框与全屏四角都保留；否则（打开编辑器等）一并撤下。
-    static func hidePreparationWindows(keepRegionOutline: Bool = false) {
+    static func hidePreparationWindows(keepRegionOutline: Bool = false, stopMonitors: Bool = true) {
         if keepRegionOutline, let session = RegionSession.current { session.setRecordingLook(true) } else { RegionSession.dismiss() }
         if !keepRegionOutline { RecordingFrameSession.dismiss() }
         WindowPicker.cancel()
         hideRecorder()
-        hideRecordBar()
+        hideRecordBar(stopMonitors: stopMonitors)
         ProjectLibraryWindow.shared.hide()
         settings?.orderOut(nil)
     }

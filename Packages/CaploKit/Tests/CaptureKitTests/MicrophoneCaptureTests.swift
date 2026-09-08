@@ -2,6 +2,7 @@ import AVFoundation
 import CoreAudio
 import CoreMedia
 import Testing
+import ProjectKit
 @testable import CaptureKit
 
 /// 采样块转样本：时间戳按给定值、帧数与格式保持；需要转换时（24 kHz 立体声 → 48 kHz 单声道）帧数按比例变化、时间戳不变。
@@ -80,4 +81,44 @@ import Testing
     #expect(MicrophoneCapture.audioDeviceID(forUID: uid) == device)
     #expect(!MicrophoneCapture.isSelectableMicrophone(uid: uid))
     #expect(MicrophoneCapture.isSelectableMicrophone(uid: "caplo-no-such-device"))
+}
+
+/// 录制器借用试听中的采集：写入器随时挂上 / 摘下，引擎不动；没在试听时借不到（摄像头会话同理），录制器自己起一路。
+@MainActor @Test func recorderBorrowsTheMonitoredCaptureWithoutRestarting() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let url = try ProjectStorage.create(in: root, name: "借用麦克风")
+    let writer = SegmentedCaptureWriter(project: url, width: 320, height: 180, systemAudio: false, microphone: true, onStarted: {}, onFailure: { _ in })
+    let capture = MicrophoneCapture(writer: nil, onFailure: { _ in })
+    #expect(!capture.isAttached)
+    capture.attach(writer: writer, onFailure: { _ in })
+    #expect(capture.isAttached)
+    capture.detach()
+    #expect(!capture.isAttached)
+    let recording = MicrophoneCapture(writer: writer, onFailure: { _ in })
+    #expect(recording.isAttached)
+    #expect(!MicrophoneMonitor.shared.active && MicrophoneMonitor.shared.deviceUID == nil)
+    let borrowed = MicrophoneMonitor.shared.borrow(deviceID: "any", writer: writer, onFailure: { _ in })
+    #expect(!borrowed)
+    MicrophoneMonitor.shared.release()
+    #expect(CameraMonitor.shared.borrowFeed(for: "any", format: nil) == nil)
+}
+
+/// 音波按"比底噪响多少"显示：安静与环境噪声为 0，说话明显起来；底噪读数更低立刻跟下去、更高只慢慢抬。
+@Test func microphoneMeterIsRelativeToTheNoiseFloor() {
+    #expect(MicrophoneMonitor.displayLevel(decibels: -55, floor: -55) == 0)
+    #expect(MicrophoneMonitor.displayLevel(decibels: -40, floor: -42) == 0)
+    #expect(abs(MicrophoneMonitor.displayLevel(decibels: -25, floor: -42) - 11 / 24) < 0.001)
+    #expect(MicrophoneMonitor.displayLevel(decibels: -10, floor: -42) == 1)
+    #expect(MicrophoneMonitor.updatedFloor(nil, reading: -40) == -40)
+    #expect(MicrophoneMonitor.updatedFloor(-40, reading: -50) == -50)
+    #expect(abs(MicrophoneMonitor.updatedFloor(-40, reading: -20) - -39.995) < 0.0001)
+}
+
+/// 停止立即返回且之后不再交样本：没起来的采集停一下也不出错。
+@Test func stoppingReturnsImmediately() {
+    let capture = MicrophoneCapture(writer: nil, onFailure: { _ in })
+    let started = ContinuousClock.now
+    capture.stop(); capture.stop()
+    #expect(ContinuousClock.now - started < .milliseconds(50))
 }

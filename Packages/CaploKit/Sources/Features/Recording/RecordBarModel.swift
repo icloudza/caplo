@@ -20,11 +20,34 @@ public final class RecordBarModel {
     /// 离屏预览用的静态模型（来源 id 为 preview）：不枚举来源，也不启动麦克风试听。
     var isPreview: Bool { source?.id == "preview" }
 
+    /// 偏好里打开且所选设备在线才算"有效开启"：设备不在线一律当关闭（界面显示"关"，不试听、不预览、录制时不带）。
+    static func microphoneEnabled(defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: "recording.microphone") && RecordingDeviceNames.available(id: defaults.string(forKey: "recording.microphoneDeviceID") ?? "", in: AudioInputCatalog.microphones().map(\.id))
+    }
+    static func cameraEnabled(defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: "recording.camera") && RecordingDeviceNames.available(id: defaults.string(forKey: "recording.cameraDeviceID") ?? "", in: CameraInputCatalog.cameras().map(\.id))
+    }
+
     /// 选中麦克风就开始试听（只算电平不写盘、不回放）：方便调整设备与系统麦克风模式；录制中或预览模型不试听。
     func syncMicrophoneMonitor(defaults: UserDefaults = .standard) {
-        guard !isPreview, !recorder.isBusy, defaults.bool(forKey: "recording.microphone") else { MicrophoneMonitor.shared.stop(); return }
+        // 录制中采集归录制器（它正借用着试听），这里不动；录制条没显示着（关掉了、临时收起）也不动——
+        // 录制条视图在窗口收起后仍活着，设置页开关与设备插拔都会经过它，不能把已经退出的试听重新拉起来。
+        guard !recorder.isBusy, StudioWindows.isRecordBarVisible else { return }
+        guard !isPreview, Self.microphoneEnabled(defaults: defaults) else { MicrophoneMonitor.shared.stop(); return }
         let id = defaults.string(forKey: "recording.microphoneDeviceID") ?? ""
         MicrophoneMonitor.shared.start(deviceID: id.isEmpty ? nil : id)
+    }
+
+    /// 摄像头有效开启就起预览会话并在屏幕上显示画中画；关掉、设备不在线或离开录制流程撤下。录制中或预览模型不起。
+    func syncCameraMonitor(defaults: UserDefaults = .standard) {
+        guard !recorder.isBusy, StudioWindows.isRecordBarVisible else { return }
+        if !isPreview, Self.cameraEnabled(defaults: defaults) {
+            let id = defaults.string(forKey: "recording.cameraDeviceID") ?? ""
+            CameraMonitor.shared.start(deviceID: id.isEmpty ? nil : id, format: CameraFormat(key: defaults.string(forKey: "recording.cameraFormat")))
+        } else {
+            CameraMonitor.shared.stop()
+        }
+        CameraPreviewCoordinator.refresh()
     }
 
     /// 当前方式下可选的来源。
@@ -99,7 +122,7 @@ public final class RecordBarModel {
     /// 窗口模式：隐藏录制条，在屏幕上悬停点选另一个窗口；取消保留当前窗口。
     func pickWindow() async {
         selectingRegion = true
-        StudioWindows.hideRecordBar()
+        StudioWindows.hideRecordBar(stopMonitors: false)
         await recorder.refreshSources()
         let picked = await WindowPicker.pick(from: recorder.sources)
         selectingRegion = false
@@ -122,10 +145,12 @@ public final class RecordBarModel {
         options.region = mode == .region ? region : nil
         RecordingAudioPreferences.apply(to: &options)
         RecordingCameraPreferences.apply(to: &options)
+        // 所选设备不在线就不带这路输入，而不是报错拦住录制。
+        if options.microphone, !Self.microphoneEnabled(defaults: defaults) { options.microphone = false }
+        if options.camera, !Self.cameraEnabled(defaults: defaults) { options.camera = false }
         guard StudioWindows.prepareForRecording() else { return }
         localError = nil
-        // 试听让位给录制器自己的麦克风采集（同一设备不能两个引擎同时占用）。
-        MicrophoneMonitor.shared.stop()
+        // 试听与预览不停：录制器直接借用正在跑的麦克风采集与摄像头会话（只加写盘出口），设备从打开到录完一直亮着。
         Task {
             await recorder.start(sourceID: source.id, options: options)
             if !recorder.isBusy, recorder.completedURL == nil { StudioWindows.showRecordBar(self) }

@@ -1,7 +1,9 @@
+import AppKit
 import SwiftUI
 
 /// 录制条上的来源 / 设备下拉："图标 + 当前值 + ▾"，关闭态降低对比并在图标上加斜线。
-public struct SourceDropdown<Content: View>: View {
+/// 自绘按钮 + `NSMenu`（见 `PopupMenuEntry`）：标签里的子视图能自己刷新（试听音波），SwiftUI 重绘不会收起菜单。
+public struct SourceDropdown: View {
     private let symbol: String
     private let offSymbol: String?
     private let title: String
@@ -9,18 +11,20 @@ public struct SourceDropdown<Content: View>: View {
     private let accessibilityName: String
     private let maxTitleWidth: CGFloat?
     private let leading: AnyView?
-    private let menu: Content
+    private let menu: @MainActor () -> [PopupMenuEntry]
     @Environment(\.isEnabled) private var enabled
     @State private var hovered = false
+    @State private var anchor = MenuAnchor()
 
-    /// `leading` 替换前置的符号图标（麦克风试听时的跳动音波）。
-    public init(symbol: String, offSymbol: String? = nil, title: String, isOff: Bool = false, accessibilityName: String, maxTitleWidth: CGFloat? = nil, leading: AnyView? = nil, @ViewBuilder menu: () -> Content) {
+    /// `leading` 替换前置的符号图标（麦克风试听时的跳动音波）；`menu` 在点击时才构建。
+    public init(symbol: String, offSymbol: String? = nil, title: String, isOff: Bool = false, accessibilityName: String, maxTitleWidth: CGFloat? = nil,
+                leading: AnyView? = nil, menu: @escaping @MainActor () -> [PopupMenuEntry]) {
         self.symbol = symbol; self.offSymbol = offSymbol; self.title = title; self.isOff = isOff
-        self.accessibilityName = accessibilityName; self.maxTitleWidth = maxTitleWidth; self.leading = leading; self.menu = menu()
+        self.accessibilityName = accessibilityName; self.maxTitleWidth = maxTitleWidth; self.leading = leading; self.menu = menu
     }
 
     public var body: some View {
-        Menu { menu } label: {
+        Button { anchor.popUp(menu(), appearance: .darkAqua) } label: {
             HStack(spacing: CaploMetrics.Spacing.xs + 2) {
                 if let leading {
                     leading
@@ -43,11 +47,8 @@ public struct SourceDropdown<Content: View>: View {
             .overlay { CaploGlassBorder(cornerRadius: CaploMetrics.Radius.control) }
             .contentShape(RoundedRectangle(cornerRadius: CaploMetrics.Radius.control))
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .environment(\.colorScheme, .dark)
-        // 无边框菜单按钮用 tint 作为标签颜色；不随外层强调色变化，关闭态用次级文字色，仍可清楚辨认并重新打开。
-        .tint(isOff ? CaploColor.textSecondary : CaploColor.textPrimary)
+        .buttonStyle(PopupButtonStyle())
+        .background(MenuAnchorView(anchor: anchor))
         .fixedSize()
         .opacity(enabled ? 1 : 0.4)
         .onHover { hovered = $0 }
@@ -57,20 +58,21 @@ public struct SourceDropdown<Content: View>: View {
 }
 
 /// 只有图标的下拉（录制条上的齿轮）："图标 + ▾"，高度与 `SourceDropdown` 一致。
-public struct IconDropdown<Content: View>: View {
+public struct IconDropdown: View {
     private let symbol: String
     private let accessibilityName: String
     private let help: String?
-    private let menu: Content
+    private let menu: @MainActor () -> [PopupMenuEntry]
     @Environment(\.isEnabled) private var enabled
     @State private var hovered = false
+    @State private var anchor = MenuAnchor()
 
-    public init(symbol: String, accessibilityName: String, help: String? = nil, @ViewBuilder menu: () -> Content) {
-        self.symbol = symbol; self.accessibilityName = accessibilityName; self.help = help; self.menu = menu()
+    public init(symbol: String, accessibilityName: String, help: String? = nil, menu: @escaping @MainActor () -> [PopupMenuEntry]) {
+        self.symbol = symbol; self.accessibilityName = accessibilityName; self.help = help; self.menu = menu
     }
 
     public var body: some View {
-        Menu { menu } label: {
+        Button { anchor.popUp(menu(), appearance: .darkAqua) } label: {
             HStack(spacing: CaploMetrics.Spacing.xs) {
                 Image(systemName: symbol).font(.system(size: 13, weight: .medium)).frame(width: CaploMetrics.Icon.control)
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(CaploColor.textTertiary)
@@ -85,10 +87,8 @@ public struct IconDropdown<Content: View>: View {
             }
             .contentShape(RoundedRectangle(cornerRadius: CaploMetrics.Radius.control))
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .environment(\.colorScheme, .dark)
-        .tint(CaploColor.textPrimary)
+        .buttonStyle(PopupButtonStyle())
+        .background(MenuAnchorView(anchor: anchor))
         .fixedSize()
         .opacity(enabled ? 1 : 0.4)
         .onHover { hovered = $0 }

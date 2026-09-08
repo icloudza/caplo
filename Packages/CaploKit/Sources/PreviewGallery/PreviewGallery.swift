@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Features
+import CaptureKit
 import CaploDesignSystem
 import ProjectKit
 import EditingCore
@@ -76,6 +77,12 @@ struct PreviewGallery {
         try await render(ModePickerView().background(CaploColor.surfaceCanvasWell), name: "mode-picker-dark", size: ModePickerView.size, scheme: .dark, output: output)
         try await render(RecordBarView(model: .preview()).background(CaploColor.surfaceCanvasWell), name: "record-bar", size: RecordBarView.panelSize, scheme: .light, output: output)
         try await render(RecordBarView(model: .preview()).background(CaploColor.surfaceCanvasWell), name: "record-bar-dark", size: RecordBarView.panelSize, scheme: .dark, output: output)
+        // 麦克风试听中：跳动图标替换话筒图标，核对与标题的对齐。
+        UserDefaults.standard.set(true, forKey: "recording.microphone")
+        MicrophoneMonitor.shared.simulate(level: 0.8)
+        try await render(RecordBarView(model: .preview()).background(CaploColor.surfaceCanvasWell), name: "record-bar-monitoring", size: RecordBarView.panelSize, scheme: .dark, output: output)
+        MicrophoneMonitor.shared.stop()
+        UserDefaults.standard.removeObject(forKey: "recording.microphone")
         try await render(RecordingControls(state: .countdown(3)).background(CaploColor.surfaceCanvasWell), name: "record-countdown", size: RecordingControls.panelSize, scheme: .dark, output: output)
         try await render(RecordingControls(state: .recording(elapsed: 12.4, paused: false, stopping: false, canStop: true)).background(CaploColor.surfaceCanvasWell), name: "record-controls", size: RecordingControls.panelSize, scheme: .dark, output: output)
         try await render(RecordingControls(state: .recording(elapsed: 12.4, paused: false, stopping: false, canStop: true)).background(CaploColor.surfaceCanvasWell), name: "record-controls-light", size: RecordingControls.panelSize, scheme: .light, output: output)

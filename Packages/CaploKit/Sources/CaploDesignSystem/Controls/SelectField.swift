@@ -34,7 +34,7 @@ public struct SelectField: View {
     }
 
     public var body: some View {
-        Button { anchor.popUp(sections) } label: {
+        Button { anchor.popUp(Self.entries(sections)) } label: {
             HStack(spacing: CaploMetrics.Spacing.xs + 2) {
                 Text(value ?? placeholder).font(CaploFont.body).lineLimit(1).truncationMode(.middle)
                     .foregroundStyle(value == nil ? CaploColor.textSecondary : CaploColor.textPrimary)
@@ -52,77 +52,22 @@ public struct SelectField: View {
             .overlay { CaploGlassBorder(cornerRadius: CaploMetrics.Radius.control) }
             .contentShape(RoundedRectangle(cornerRadius: CaploMetrics.Radius.control))
         }
-        .buttonStyle(SelectButtonStyle())
+        .buttonStyle(PopupButtonStyle())
         .background(MenuAnchorView(anchor: anchor))
         .opacity(enabled ? 1 : 0.4)
         .onHover { hovered = $0 }
         .accessibilityLabel(accessibilityName)
         .accessibilityValue(value ?? "未选择")
     }
-}
 
-/// 按下变淡；键盘焦点用强调色描边（系统焦点环与圆角底板不贴合）。
-private struct SelectButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View { StyleBody(configuration: configuration) }
-
-    private struct StyleBody: View {
-        let configuration: Configuration
-        @FocusState private var focused: Bool
-        var body: some View {
-            configuration.label
-                .overlay {
-                    if focused { RoundedRectangle(cornerRadius: CaploMetrics.Radius.control).strokeBorder(CaploColor.accent.opacity(0.9), lineWidth: 2) }
-                }
-                .opacity(configuration.isPressed ? 0.8 : 1)
-                .focused($focused)
-                .focusEffectDisabled()
-        }
-    }
-}
-
-/// 记住控件对应的 AppKit 视图，弹菜单时据此定位；菜单项的目标对象在菜单关闭前保持存活。
-@MainActor
-private final class MenuAnchor {
-    weak var view: NSView?
-    private var targets: [MenuTarget] = []
-
-    func popUp(_ sections: [SelectField.Section]) {
-        guard let view else { return }
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        targets = []
+    /// 分组 → 菜单条目：组间分隔线，有标题的组加节标题。
+    static func entries(_ sections: [Section]) -> [PopupMenuEntry] {
+        var entries: [PopupMenuEntry] = []
         for (index, section) in sections.enumerated() {
-            if index > 0 { menu.addItem(.separator()) }
-            if let title = section.title { menu.addItem(NSMenuItem.sectionHeader(title: title)) }
-            for item in section.items {
-                let target = MenuTarget(item.action)
-                targets.append(target)
-                let entry = NSMenuItem(title: item.title, action: #selector(MenuTarget.fire), keyEquivalent: "")
-                entry.target = target
-                entry.state = item.checked ? .on : .off
-                menu.addItem(entry)
-            }
+            if index > 0 { entries.append(.separator) }
+            if let title = section.title { entries.append(.header(title)) }
+            for item in section.items { entries.append(.item(item.title, checked: item.checked, action: item.action)) }
         }
-        menu.minimumWidth = view.bounds.width
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: view.isFlipped ? view.bounds.height + 4 : -4), in: view)
-    }
-}
-
-@MainActor
-private final class MenuTarget: NSObject {
-    private let run: @MainActor () -> Void
-    init(_ run: @escaping @MainActor () -> Void) { self.run = run }
-    @objc func fire() { run() }
-}
-
-/// 零尺寸、不响应点击的锚点视图，铺在按钮底下，尺寸即按钮尺寸。
-private struct MenuAnchorView: NSViewRepresentable {
-    let anchor: MenuAnchor
-    func makeNSView(context: Context) -> AnchorView { let view = AnchorView(); anchor.view = view; return view }
-    func updateNSView(_ view: AnchorView, context: Context) { anchor.view = view }
-
-    final class AnchorView: NSView {
-        override var isOpaque: Bool { false }
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        return entries
     }
 }

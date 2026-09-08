@@ -1,4 +1,6 @@
 import AppKit
+import AVFoundation
+import CaptureKit
 import Foundation
 import SwiftUI
 import CaploDesignSystem
@@ -19,6 +21,7 @@ public enum WindowSmokeTest {
             ("设置", { StudioWindows.showSettings() }),
             ("项目中心", { ProjectLibraryWindow.shared.show() }),
             ("录制条", { StudioWindows.showRecordBar(.preview()) }),
+            ("摄像头画中画", { CameraPreviewSession.show(feed: CameraFeed(queue: DispatchQueue(label: "smoke.camera")), on: NSScreen.main ?? NSScreen.screens[0]) }),
             ("录制条（窗口）", { StudioWindows.showRecordBar(.preview(mode: "窗口", sourceTitle: "预览 — 窗口")) }),
             // 设计系统的全部控件在真实窗口里走一遍显示周期（离屏位图看不出菜单、材质与焦点环的真实表现）。
             ("组件画廊", {

@@ -74,10 +74,10 @@ public struct DesignSystemGallery: View {
                     Button { } label: { Image(systemName: "xmark") }.buttonStyle(StudioIconButtonStyle(size: .small))
                     Image(systemName: "display").font(.system(size: 14, weight: .medium)).foregroundStyle(CaploColor.textSecondary)
                         .frame(width: CaploMetrics.ControlHeight.medium, height: CaploMetrics.ControlHeight.medium)
-                    IconDropdown(symbol: "gearshape", accessibilityName: "录制设置") { Button("主显示器") {} }
-                    SourceDropdown(symbol: "video", offSymbol: "video.slash", title: "摄像头 关", isOff: true, accessibilityName: "摄像头") { Button("关闭") {} }
-                    SourceDropdown(symbol: "mic", title: "内建麦克风", accessibilityName: "麦克风") { Button("内建麦克风") {} }
-                    SourceDropdown(symbol: "speaker.wave.2", title: "全部系统声音", accessibilityName: "系统声音") { Button("全部系统声音") {} }
+                    IconDropdown(symbol: "gearshape", accessibilityName: "录制设置") { [.item("主显示器", checked: true, action: {})] }
+                    SourceDropdown(symbol: "video", offSymbol: "video.slash", title: "摄像头 关", isOff: true, accessibilityName: "摄像头") { [.item("关闭", checked: true, action: {})] }
+                    SourceDropdown(symbol: "mic", title: "内建麦克风", accessibilityName: "麦克风") { [.item("内建麦克风", checked: true, action: {})] }
+                    SourceDropdown(symbol: "speaker.wave.2", title: "系统声音", accessibilityName: "系统声音") { [.item("全部系统声音", checked: true, action: {})] }
                     FloatingBarDivider()
                     RecordButton {}
                 }

@@ -30,6 +30,8 @@ public struct RecordingOptions: Sendable {
     public var microphoneDeviceID: String?
     public var camera = false
     public var cameraDeviceID: String?
+    /// 用户选的摄像头格式（nil 自动：不超过 1080p 的最大尺寸、30 fps）。
+    public var cameraFormat: CameraFormat?
     public var systemAudioApplicationBundleIDs: [String]?
     public var countdown = 3
     public var capturePointer = true
@@ -68,7 +70,12 @@ public final class ScreenRecorder {
     private var systemAudioStream: SCStream?
     private var microphoneObserver: NSObjectProtocol?
     private var cameraCapture: CameraCapture?
+    /// 本次录制是否带摄像头（倒计时阶段就为真，画中画先显示占位）；录制中的摄像头会话给屏幕上的画中画预览用。
+    public private(set) var sessionUsesCamera = false
+    public var cameraPreviewFeed: CameraFeed? { cameraCapture?.previewFeed }
     private var microphoneCapture: MicrophoneCapture?
+    /// 麦克风借用了录制条试听中的采集（没有重启引擎）：结束时只摘写入器。
+    private var microphoneBorrowed = false
     private var writer: SegmentedCaptureWriter?
     private var delegate: StreamDelegate?
     private var lease: ProjectLease?
@@ -118,6 +125,7 @@ public final class ScreenRecorder {
         }
         phase = .starting
         errorMessage = nil; completedURL = nil; projectURL = nil
+        sessionUsesCamera = options.camera; microphoneBorrowed = false
         elapsedBeforeResume = 0; activeIntervalStart = nil; elapsedOrigin = nil
         let id = UUID(); sessionID = id
         do {
@@ -243,17 +251,25 @@ public final class ScreenRecorder {
             // 麦克风在本进程用 AVCaptureSession 采集：用户在控制中心选的麦克风模式（语音突显等）作用于本进程的采集，
             // 交给屏幕采集服务录麦克风时它不生效。录制时不做任何自己的处理，系统给什么就录什么；会话起不来退回屏幕采集流。
             if let deviceID = audioPlan.microphoneDeviceID {
-                let microphone = MicrophoneCapture(writer: output) { [weak self] message in
+                let failure: @Sendable (String) -> Void = { [weak self] message in
                     Task { @MainActor in await self?.handleFailure(message, sessionID: id) }
                 }
-                do {
-                    try await microphone.start(deviceID: deviceID)
-                    guard sessionID == id, phase != .stopping else { microphone.stop(); return }
-                    microphoneCapture = microphone
+                if MicrophoneMonitor.shared.borrow(deviceID: deviceID, writer: output, onFailure: failure) {
+                    // 录制条已经在试听同一只麦克风：把写入器挂上去即可，引擎不停不重开（iPhone 麦克风不闪、系统模式不丢）。
+                    microphoneBorrowed = true
                     config.captureMicrophone = false; config.microphoneCaptureDeviceID = nil
-                    MicrophoneModes.shared.startObserving()
-                } catch {
-                    NSLog("Caplo：本进程麦克风采集不可用，改由屏幕采集流录制：%@", error.localizedDescription)
+                    NSLog("Caplo：麦克风沿用录制条试听中的采集，不重启")
+                } else {
+                    let microphone = MicrophoneCapture(writer: output, onFailure: failure)
+                    do {
+                        try await microphone.start(deviceID: deviceID)
+                        guard sessionID == id, phase != .stopping else { microphone.stop(); return }
+                        microphoneCapture = microphone
+                        config.captureMicrophone = false; config.microphoneCaptureDeviceID = nil
+                        MicrophoneModes.shared.startObserving()
+                    } catch {
+                        NSLog("Caplo：本进程麦克风采集不可用，改由屏幕采集流录制：%@", error.localizedDescription)
+                    }
                 }
             }
             initial.capture?.cursorEmbedded = config.showsCursor
@@ -266,7 +282,10 @@ public final class ScreenRecorder {
                     Task { @MainActor in await self?.handleFailure(message, sessionID: id) }
                 }
                 cameraCapture = camera
-                try await camera.start(deviceID: deviceID)
+                // 录制条的预览采集图还在跑就借来只挂消费者，摄像头不灭不重开、画面不断；没有才自己起。
+                // 与预览用同一条规则落实格式，这样借用判断才会一致。
+                let format = AVCaptureDevice(uniqueID: deviceID).flatMap { CameraFormat.resolve(available: CameraFormat.available(on: $0), wanted: cameraPlan.format) }
+                try await camera.start(deviceID: deviceID, format: format, adopting: CameraMonitor.shared.borrowFeed(for: deviceID, format: format))
                 guard sessionID == id, phase != .stopping else { await camera.stop(); return }
             }
             if audioPlan.systemAudio {
@@ -310,7 +329,7 @@ public final class ScreenRecorder {
 
     public func cancelCountdown() {
         guard phase == .countdown else { return }
-        sessionID = nil; countdownRemaining = 0; phase = .idle
+        sessionID = nil; countdownRemaining = 0; phase = .idle; sessionUsesCamera = false
     }
 
     public func pause() async {
@@ -395,6 +414,7 @@ public final class ScreenRecorder {
         if let cameraCapture { await cameraCapture.stop() }
         cameraCapture = nil
         microphoneCapture?.stop(); microphoneCapture = nil
+        if microphoneBorrowed { MicrophoneMonitor.shared.release(); microphoneBorrowed = false }
         if let stream {
             do { try await stream.stopCapture() } catch { issue = issue ?? error.localizedDescription }
         }
@@ -415,7 +435,7 @@ public final class ScreenRecorder {
         }
         errorMessage = issue
         stream = nil; systemAudioStream = nil; writer = nil; delegate = nil; sessionID = nil; lease = nil
-        startedAt = nil; phase = .idle
+        startedAt = nil; phase = .idle; sessionUsesCamera = false
     }
 
     private func resolveAudio(_ options: RecordingOptions, content: SCShareableContent) throws -> RecordingAudioPlan {
@@ -427,7 +447,7 @@ public final class ScreenRecorder {
     private func resolveCamera(_ options: RecordingOptions) throws -> RecordingCameraPlan {
         try RecordingCameraPlan.resolve(enabled: options.camera, selectedID: options.cameraDeviceID,
             cameras: options.camera ? CameraInputCatalog.cameras() : [],
-            defaultID: options.camera ? AVCaptureDevice.default(for: .video)?.uniqueID : nil)
+            defaultID: options.camera ? AVCaptureDevice.default(for: .video)?.uniqueID : nil, format: options.cameraFormat)
     }
 
     private func observeMicrophone(_ deviceID: String?, session: UUID) {

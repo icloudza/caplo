@@ -15,6 +15,7 @@ public struct RecordBarView: View {
     @AppStorage("recording.systemAudio") private var systemAudio = false
     @AppStorage("recording.camera") private var camera = false
     @AppStorage("recording.cameraDeviceID") private var cameraID = ""
+    @AppStorage("recording.cameraFormat") private var cameraFormat = ""
     @AppStorage("recording.microphoneDeviceID") private var microphoneID = ""
     @AppStorage("recording.systemAudioScope") private var scope = "all"
     @AppStorage("recording.systemAudioApplications") private var applicationData = Data()
@@ -22,6 +23,7 @@ public struct RecordBarView: View {
     @AppStorage("recording.frameRate") private var frameRate = 60
     @State private var devices: [CaptureMicrophone] = []
     @State private var cameras: [CaptureCamera] = []
+    @State private var cameraFormats: [CameraFormat] = []
     @State private var applications: [CaptureAudioApplication] = []
     @State private var choosingApplications = false
 
@@ -58,15 +60,19 @@ public struct RecordBarView: View {
         .padding(.bottom, CaploMetrics.floatingBarInset)
         .frame(width: Self.panelSize.width, height: Self.panelSize.height, alignment: .bottom)
         // 选中麦克风即开始试听；开关、设备一变就同步。
-        .onAppear { model.syncMicrophoneMonitor() }
+        .onAppear { model.syncMicrophoneMonitor(); model.syncCameraMonitor() }
         .onChange(of: microphone) { model.syncMicrophoneMonitor() }
         .onChange(of: microphoneID) { model.syncMicrophoneMonitor() }
+        .onChange(of: camera) { model.syncCameraMonitor() }
+        .onChange(of: cameraID) { refreshCameraFormats(); model.syncCameraMonitor() }
+        .onChange(of: cameraFormat) { model.syncCameraMonitor() }
         .foregroundStyle(CaploColor.textPrimary)
         .tint(CaploColor.accent)
         .preferredColorScheme(.dark)
         .task { refreshDevices() }
-        .onReceive(NotificationCenter.default.publisher(for: AVCaptureDevice.wasConnectedNotification)) { _ in refreshDevices() }
-        .onReceive(NotificationCenter.default.publisher(for: AVCaptureDevice.wasDisconnectedNotification)) { _ in refreshDevices() }
+        // 设备插拔：刷新列表，试听与画中画按可用性重新同步（设备回来自动接上，拔掉自动撤下）。
+        .onReceive(NotificationCenter.default.publisher(for: AVCaptureDevice.wasConnectedNotification)) { deviceChanged($0, connected: true) }
+        .onReceive(NotificationCenter.default.publisher(for: AVCaptureDevice.wasDisconnectedNotification)) { deviceChanged($0, connected: false) }
     }
 
     /// 当前录制方式的图标，只作状态提示；悬停显示来源名称。
@@ -81,94 +87,117 @@ public struct RecordBarView: View {
 
     private var settingsDropdown: some View {
         IconDropdown(symbol: "gearshape", accessibilityName: "录制设置", help: "来源与录制设置 · \(model.sourceTitle)") {
-            Section(model.mode == .window ? "窗口" : "显示器") {
-                ForEach(model.sources) { source in
-                    Button { model.choose(source) } label: {
-                        Label(source.title, systemImage: source.id == model.source?.id ? "checkmark" : model.mode.symbol)
-                    }
-                }
-                if model.mode == .region { Button("重新框选区域…") { Task { await model.pickRegion() } } }
-                if model.mode == .window { Button("在屏幕上选择窗口…") { Task { await model.pickWindow() } } }
-                Button("刷新来源") { Task { await model.refreshSources() } }
-            }
-            Section("录制") {
-                Menu("倒计时 · " + (countdown == 0 ? "关" : "\(countdown) 秒")) {
-                    ForEach([0, 3, 5, 10], id: \.self) { seconds in
-                        choice(seconds == 0 ? "不倒计时" : "\(seconds) 秒", selected: countdown == seconds) { countdown = seconds }
-                    }
-                }
-                Menu("帧率 · \(frameRate) fps") {
-                    ForEach([30, 60], id: \.self) { rate in choice("\(rate) fps", selected: frameRate == rate) { frameRate = rate } }
-                }
-            }
-            Divider()
-            Button("更多设置…") { StudioWindows.showSettings() }
+            var entries: [PopupMenuEntry] = [.header(model.mode == .window ? "窗口" : "显示器")]
+            entries += model.sources.map { source in .item(source.title, checked: source.id == model.source?.id) { model.choose(source) } }
+            if model.mode == .region { entries.append(.item("重新框选区域…") { Task { await model.pickRegion() } }) }
+            if model.mode == .window { entries.append(.item("在屏幕上选择窗口…") { Task { await model.pickWindow() } }) }
+            entries.append(.item("刷新来源") { Task { await model.refreshSources() } })
+            entries += [
+                .separator, .header("录制"),
+                .submenu("倒计时 · " + (countdown == 0 ? "关" : "\(countdown) 秒"), [0, 3, 5, 10].map { seconds in
+                    choice(seconds == 0 ? "不倒计时" : "\(seconds) 秒", selected: countdown == seconds) { countdown = seconds }
+                }),
+                .submenu("帧率 · \(frameRate) fps", [30, 60].map { rate in choice("\(rate) fps", selected: frameRate == rate) { frameRate = rate } }),
+                .separator,
+                .item("更多设置…") { StudioWindows.showSettings() },
+            ]
+            return entries
         }
-        .environment(\.colorScheme, .dark)
     }
+
+    // 所选设备不在线就按"关"显示（不出现"未连接"这种中间态），设备回来自动恢复。
+    private var cameraTitle: String? { camera ? RecordingDeviceNames.camera(id: cameraID, cameras: cameras) : nil }
+    private var microphoneTitle: String? { microphone ? RecordingDeviceNames.microphone(id: microphoneID, devices: devices) : nil }
 
     private var cameraDropdown: some View {
         SourceDropdown(symbol: "video", offSymbol: "video.slash",
-                       title: camera ? RecordingDeviceNames.camera(id: cameraID, cameras: cameras) : "摄像头 关",
-                       isOff: !camera, accessibilityName: "摄像头", maxTitleWidth: 140) {
-            choice("关闭", selected: !camera) { camera = false }
-            choice("系统默认摄像头", selected: camera && cameraID.isEmpty) { camera = true; cameraID = "" }
-            if !cameras.isEmpty { Divider() }
-            ForEach(cameras) { device in
-                choice(device.name, selected: camera && cameraID == device.id) { camera = true; cameraID = device.id }
+                       title: cameraTitle ?? "摄像头 关",
+                       isOff: cameraTitle == nil, accessibilityName: "摄像头", maxTitleWidth: 140) {
+            var entries: [PopupMenuEntry] = [
+                choice("关闭", selected: !camera) { camera = false },
+                choice("默认摄像头", selected: camera && cameraID.isEmpty) { camera = true; cameraID = "" },
+            ]
+            if !cameras.isEmpty { entries.append(.separator) }
+            entries += cameras.map { device in choice(device.name, selected: camera && cameraID == device.id) { camera = true; cameraID = device.id } }
+            if !cameraFormats.isEmpty {
+                // 设备真实支持的格式（尺寸 × 帧率）全列出来；预览与录制共用同一个选择。
+                let effective = CameraFormat.resolve(available: cameraFormats, wanted: CameraFormat(key: cameraFormat))
+                entries += [.separator, .submenu("分辨率 · " + (effective?.title ?? "自动"), cameraFormats.map { format in
+                    choice(format.title, selected: format == effective) { cameraFormat = format.key }
+                })]
             }
+            return entries
         }
-        .environment(\.colorScheme, .dark)
     }
 
     private var microphoneDropdown: some View {
+        // 试听时的跳动图标就在按钮标签里：标签是普通视图，图标自己观察电平刷新，录制条主体不因电平重绘。
         SourceDropdown(symbol: "mic", offSymbol: "mic.slash",
-                       title: microphone ? RecordingDeviceNames.microphone(id: microphoneID, devices: devices) : "麦克风 关",
-                       isOff: !microphone, accessibilityName: "麦克风", maxTitleWidth: 140,
-                       leading: microphone && MicrophoneMonitor.shared.active ? AnyView(MicrophoneActivityIcon(level: MicrophoneMonitor.shared.level)) : nil) {
-            choice("关闭", selected: !microphone) { microphone = false }
-            choice("系统默认输入", selected: microphone && microphoneID.isEmpty) { microphone = true; microphoneID = "" }
-            if !devices.isEmpty { Divider() }
-            ForEach(devices) { device in
-                choice(device.name, selected: microphone && microphoneID == device.id) { microphone = true; microphoneID = device.id }
-            }
-            Divider()
+                       title: microphoneTitle ?? "麦克风 关",
+                       isOff: microphoneTitle == nil, accessibilityName: "麦克风", maxTitleWidth: 140,
+                       leading: microphone && MicrophoneMonitor.shared.active ? AnyView(MicrophoneMonitorIcon()) : nil) {
+            var entries: [PopupMenuEntry] = [
+                choice("关闭", selected: !microphone) { microphone = false },
+                choice("默认麦克风", selected: microphone && microphoneID.isEmpty) { microphone = true; microphoneID = "" },
+            ]
+            if !devices.isEmpty { entries.append(.separator) }
+            entries += devices.map { device in choice(device.name, selected: microphone && microphoneID == device.id) { microphone = true; microphoneID = device.id } }
             // 麦克风模式（语音隔离等）只能由用户在系统面板里选；回声消除与降噪在编辑器的声音面板里离线做。
-            Text("麦克风模式 · " + MicrophoneModes.shared.currentName)
-            Button("更改麦克风模式…") { MicrophoneModes.showSystemPicker() }
+            entries += [.separator, .text("麦克风模式 · " + MicrophoneModes.shared.currentName), .item("更改麦克风模式…") { MicrophoneModes.showSystemPicker() }]
+            return entries
         }
-        .environment(\.colorScheme, .dark)
     }
 
     private var systemAudioDropdown: some View {
         SourceDropdown(symbol: "speaker.wave.2", offSymbol: "speaker.slash",
                        title: systemAudio ? RecordingDeviceNames.systemAudio(scope: scope, selected: selectedApplications, applications: applications) : "系统声音 关",
-                       isOff: !systemAudio, accessibilityName: "系统声音", maxTitleWidth: 150) {
-            choice("关闭", selected: !systemAudio) { systemAudio = false }
-            choice("全部系统声音", selected: systemAudio && scope == "all") { systemAudio = true; scope = "all" }
+                       isOff: !systemAudio, accessibilityName: "系统声音", maxTitleWidth: 150) { [
+            choice("关闭", selected: !systemAudio) { systemAudio = false },
+            choice("全部系统声音", selected: systemAudio && scope == "all") { systemAudio = true; scope = "all" },
             choice("仅指定应用…", selected: systemAudio && scope == "applications") {
                 systemAudio = true; scope = "applications"; applications = AudioInputCatalog.applications(); choosingApplications = true
-            }
-        }
-        // 只为原生菜单采用浅字外观；不改变录制条根部保存的通透 / 深色偏好。
-        .environment(\.colorScheme, .dark)
+            },
+        ] }
         .popover(isPresented: $choosingApplications, arrowEdge: .top) {
             SystemAudioApplicationPicker { choosingApplications = false }
         }
     }
 
-    /// 菜单里的单选项：用 Toggle 让系统画原生勾选标记，不再给未选中项传空的符号名（会刷 "No symbol named ''" 日志）。
-    /// 点已选中的项保持选中，不会取消。
-    private func choice(_ title: String, selected: Bool, select: @escaping () -> Void) -> some View {
-        Toggle(title, isOn: Binding(get: { selected }, set: { if $0 { select() } }))
+    /// 菜单里的单选项：选中的画原生勾选标记。
+    private func choice(_ title: String, selected: Bool, select: @escaping @MainActor () -> Void) -> PopupMenuEntry {
+        .item(title, checked: selected, action: select)
     }
 
+    /// 只在列表真的变了才写状态：录制条整体重绘会让打开着的下拉菜单收起。
     private func refreshDevices() {
-        devices = AudioInputCatalog.microphones()
-        cameras = CameraInputCatalog.cameras()
-        applications = AudioInputCatalog.applications()
+        let microphones = AudioInputCatalog.microphones()
+        if microphones != devices { devices = microphones }
+        let videoDevices = CameraInputCatalog.cameras()
+        if videoDevices != cameras { cameras = videoDevices }
+        refreshCameraFormats()
+        let running = AudioInputCatalog.applications()
+        if running != applications { applications = running }
+    }
+
+    private func refreshCameraFormats() {
+        let formats = CameraInputCatalog.formats(for: cameraID.isEmpty ? nil : cameraID)
+        if formats != cameraFormats { cameraFormats = formats }
+    }
+
+    /// 录制中设备变化由录制器自己处理（它借用着试听与预览），这里不刷新也不同步；录制条没显示着也不刷新
+    /// （收起录制条停掉试听 / 预览会引来一串设备通知，枚举设备是同步的，别让它拖慢切换）。
+    private func deviceChanged(_ note: Notification, connected: Bool) {
+        NSLog("Caplo：设备%@：%@", connected ? "接入" : "拔出", (note.object as? AVCaptureDevice)?.localizedName ?? "未知")
+        guard !model.recorder.isBusy, StudioWindows.isRecordBarVisible else { return }
+        refreshDevices(); model.syncMicrophoneMonitor(); model.syncCameraMonitor()
     }
 }
+
+/// 电平单独观察：只有这个图标随音频块刷新，录制条整体不重绘（整体重绘会让打开着的菜单收起）。
+private struct MicrophoneMonitorIcon: View {
+    var body: some View { MicrophoneActivityIcon(level: MicrophoneMonitor.shared.level) }
+}
+
 
 /// 试听中的麦克风图标：绿色话筒随电平轻微放大，右侧三根绿色音波柱按电平跳动，没有声音时缩成小点。
 struct MicrophoneActivityIcon: View {

@@ -381,3 +381,45 @@ private func cameraFrame(at seconds: Double, red: Bool, width: Int = 160, split:
     #expect(reader.status == .completed, "解码错误：\(String(describing: reader.error))")
     return frames
 }
+
+/// 只有正在跑、且输入就是这台设备的采集图才能借给录制器；没起来的采集图借不到。
+@Test func onlyARunningFeedWithTheSameDeviceCanBeBorrowed() {
+    let feed = CameraFeed(queue: DispatchQueue(label: "test.camera-feed"))
+    #expect(!feed.isRunning && !feed.isRunning(device: "any", format: nil) && feed.deviceID == nil)
+}
+
+/// 格式表：按设备格式去重、只列范围盖住的 30 / 60 fps、按像素数与帧率排序；偏好串解析；默认取不超过 1080p 的最大尺寸 30 fps。
+@Test func cameraFormatCatalogAndChoice() throws {
+    let formats = CameraFormat.catalog([
+        (1920, 1080, [1...30]), (1920, 1080, [1...60]), (1280, 720, [1...60]), (640, 480, [1...60]), (1920, 1440, [1...60]), (3840, 2160, [1...24]),
+    ])
+    #expect(formats.map(\.title) == ["640 × 480 · 30 fps", "640 × 480 · 60 fps", "1280 × 720 · 30 fps", "1280 × 720 · 60 fps",
+                                     "1920 × 1080 · 30 fps", "1920 × 1080 · 60 fps", "1920 × 1440 · 30 fps", "1920 × 1440 · 60 fps"])
+    let wanted = CameraFormat(key: "1920x1440@60")
+    #expect(wanted == CameraFormat(width: 1920, height: 1440, frameRate: 60) && wanted?.key == "1920x1440@60")
+    #expect(CameraFormat(key: "乱") == nil && CameraFormat(key: nil) == nil && CameraFormat(key: "0x0@30") == nil)
+    #expect(CameraFormat.resolve(available: formats, wanted: wanted) == wanted)
+    #expect(CameraFormat.resolve(available: formats, wanted: nil) == CameraFormat(width: 1920, height: 1080, frameRate: 30))
+    #expect(CameraFormat.resolve(available: formats, wanted: CameraFormat(key: "4000x3000@30")) == CameraFormat(width: 1920, height: 1080, frameRate: 30))
+    #expect(CameraFormat.resolve(available: [], wanted: nil) == nil)
+    let cameras = [CaptureCamera(id: "usb", name: "USB")]
+    #expect(try RecordingCameraPlan.resolve(enabled: true, selectedID: "usb", cameras: cameras, defaultID: nil, format: wanted).format == wanted)
+    #expect(try RecordingCameraPlan.resolve(enabled: true, selectedID: "usb", cameras: cameras, defaultID: nil).format == nil)
+    let feed = CameraFeed(queue: DispatchQueue(label: "test.camera-feed-format"))
+    #expect(feed.format == nil && !feed.isRunning(device: "usb", format: nil))
+}
+
+/// 找不到设备时没有格式表（下拉不显示分辨率项）。
+@MainActor @Test func unknownCameraOffersNoFormats() {
+    #expect(CameraInputCatalog.formats(for: "no-such-camera").isEmpty)
+}
+
+/// 就地换格式只对已有摄像头输入的采集图有效；空采集图报错而不是崩，格式也不变。
+@Test func changingFormatNeedsARunningInput() {
+    let queue = DispatchQueue(label: "test.camera-feed-change")
+    let feed = CameraFeed(queue: queue)
+    queue.sync {
+        #expect(throws: RecordingError.self) { try feed.change(to: CameraFormat(width: 1280, height: 720, frameRate: 30)) }
+    }
+    #expect(feed.format == nil)
+}

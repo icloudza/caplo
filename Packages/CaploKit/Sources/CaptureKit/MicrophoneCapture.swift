@@ -3,6 +3,7 @@ import Accelerate
 import AudioToolbox
 import CoreAudio
 import CoreMedia
+import os
 
 /// 麦克风采集：录制条试听（只算电平）和录制写盘共用，两条引擎按顺序尝试。
 /// 1. Apple 语音处理 I/O 单元（AUVoiceProcessingIO）：系统的麦克风模式（语音突显 / 宽谱）只作用于走这个单元的采集
@@ -14,8 +15,15 @@ final class MicrophoneCapture: @unchecked Sendable {
     enum Engine: String { case voiceProcessing = "语音处理单元", session = "采集会话" }
     /// 写入器的麦克风轨按 48 kHz 单声道浮点建；两条引擎都交这个格式（会话引擎按原生格式采集后转换）。
     static let targetFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 1, interleaved: true)!
-    private let queue = DispatchQueue(label: "com.caplo.microphone", qos: .userInitiated)
-    private let writer: SegmentedCaptureWriter?
+    /// 所有实例共用一条串行队列：停止（含恢复系统默认输入）与下一次启动（切默认输入）必须按先后顺序执行，
+    /// 否则异步停止的恢复会盖掉新一路刚切好的设备。
+    private static let queue = DispatchQueue(label: "com.caplo.microphone", qos: .userInitiated)
+    private var queue: DispatchQueue { Self.queue }
+    /// 一喊停就立刻生效（不再交样本、不再报电平），拆引擎在队列上异步做，不卡调用方（主线程）。
+    private let halted = OSAllocatedUnfairLock(initialState: false)
+    /// 写盘出口：录制器可以随时挂上 / 摘下（借用试听中的采集时引擎不重启），音频线程读它要加锁。
+    private struct Sink: Sendable { let writer: SegmentedCaptureWriter; let onFailure: @Sendable (String) -> Void }
+    private let sink: OSAllocatedUnfairLock<Sink?>
     private let level: (@Sendable (Float) -> Void)?
     private let onFailure: @Sendable (String) -> Void
     private var voice: VoiceIOEngine?
@@ -28,8 +36,17 @@ final class MicrophoneCapture: @unchecked Sendable {
 
     /// `writer` 为 nil 时只试听（算电平不写盘）；`level` 每个采样块回调一次 0…1 的电平，在音频线程调用。
     init(writer: SegmentedCaptureWriter?, level: (@Sendable (Float) -> Void)? = nil, onFailure: @escaping @Sendable (String) -> Void) {
-        self.writer = writer; self.level = level; self.onFailure = onFailure
+        sink = OSAllocatedUnfairLock(initialState: writer.map { Sink(writer: $0, onFailure: { _ in }) })
+        self.level = level; self.onFailure = onFailure
     }
+
+    /// 录制器借用正在试听的采集：把写入器挂上去，之后的样本直接写盘；采集出错也通知录制器。
+    func attach(writer: SegmentedCaptureWriter, onFailure: @escaping @Sendable (String) -> Void) {
+        sink.withLock { $0 = Sink(writer: writer, onFailure: onFailure) }
+    }
+    /// 录制结束摘下写入器，采集继续只算电平。
+    func detach() { sink.withLock { $0 = nil } }
+    var isAttached: Bool { sink.withLock { $0 != nil } }
 
     /// `deviceID` 是 AVCaptureDevice 的 uniqueID（与 CoreAudio 设备 UID 一致）。两条引擎都起不来才抛错。
     func start(deviceID: String) async throws {
@@ -45,7 +62,10 @@ final class MicrophoneCapture: @unchecked Sendable {
                     let device = Self.audioDeviceID(forUID: deviceID)
                     guard device != kAudioObjectUnknown, AVCaptureDevice(uniqueID: deviceID) != nil else { throw RecordingError.message("所选麦克风未连接。") }
                     let deliver: @Sendable (CMSampleBuffer, Float) -> Void = { [weak self] sample, value in self?.deliver(sample, level: value) }
-                    let failure = onFailure
+                    let failure: @Sendable (String) -> Void = { [weak self] message in
+                        self?.onFailure(message)
+                        self?.sink.withLock { $0 }?.onFailure(message)
+                    }
                     do {
                         let voice = VoiceIOEngine(deliver: deliver, onFailure: failure)
                         try voice.start(device: device)
@@ -63,8 +83,10 @@ final class MicrophoneCapture: @unchecked Sendable {
         }
     }
 
+    /// 立即返回：语音处理单元的拆除与默认输入设备的恢复要几十到几百毫秒，放到采集队列上异步做。
     func stop() {
-        queue.sync {
+        halted.withLock { $0 = true }
+        queue.async { [self] in
             guard consumed, !stopped else { return }
             stopped = true
             voice?.stop(); voice = nil
@@ -74,11 +96,12 @@ final class MicrophoneCapture: @unchecked Sendable {
 
     /// 两条引擎的统一出口：样本已在主机时钟上、48 kHz 单声道浮点。
     private func deliver(_ sample: CMSampleBuffer, level value: Float) {
+        guard !halted.withLock({ $0 }) else { return }
         logDiagnostics(sample, level: value)
         level?(value)
-        guard let writer else { return }
+        guard let sink = sink.withLock({ $0 }) else { return }
         nonisolated(unsafe) let outgoing = sample
-        writer.queue.async { writer.ingest(outgoing, role: .microphone) }
+        sink.writer.queue.async { sink.writer.ingest(outgoing, role: .microphone) }
     }
 
     /// 第一块样本打印采集格式，之后每 5 秒打印一次电平范围，便于对照实机现象。
@@ -461,7 +484,11 @@ final class SessionEngine: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
         observing = true
         (AVCaptureDevice.self as AnyObject).addObserver(self, forKeyPath: "activeMicrophoneMode", options: [.new], context: nil)
     }
-    public func refresh() { current = AVCaptureDevice.activeMicrophoneMode }
+    /// 只在真的变了才写：键值观察可能重复通知，无谓的写入会让观察它的界面重绘。
+    public func refresh() {
+        let mode = AVCaptureDevice.activeMicrophoneMode
+        if mode != current { current = mode }
+    }
 
     public override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
         guard keyPath == "activeMicrophoneMode" else { return }

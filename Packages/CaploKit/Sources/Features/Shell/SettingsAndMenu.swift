@@ -56,6 +56,7 @@ public final class RecordingAppDelegate: NSObject, NSApplicationDelegate {
         // 产品只有深色玻璃一套主题：系统弹窗、菜单与文件面板也统一按深色外观呈现。
         NSApp.appearance = NSAppearance(named: .darkAqua)
         RecordingPresentation.shared.observe()
+        CameraPreviewCoordinator.startObserving()
         NSApp.setActivationPolicy(.regular)
         // 文件打开事件可能紧随启动到达；延后一轮，避免直接打开工程时闪现准备窗口。
         Task { @MainActor in

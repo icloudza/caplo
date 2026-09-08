@@ -18,7 +18,7 @@ final class RecordingPresentation {
             let recorder = ScreenRecorder.shared
             if recorder.isBusy {
                 wasBusy = true
-                StudioWindows.hidePreparationWindows(keepRegionOutline: true)
+                StudioWindows.hidePreparationWindows(keepRegionOutline: true, stopMonitors: false)
                 showPanel()
                 updateFrame(phase: recorder.phase)
             } else {
