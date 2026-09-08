@@ -140,12 +140,14 @@ public struct ProjectLibraryView: View {
         var id: String { entries.map(\.url.path).joined(separator: "\n") }
     }
 
-    public init(previewOnly: Bool = false, previewProjectURL: URL? = nil) {
+    /// `previewError`：预览时直接显示底部提示条，供离线出图核对样式。
+    public init(previewOnly: Bool = false, previewProjectURL: URL? = nil, previewError: String? = nil) {
         self.previewOnly = previewOnly
         let model = previewOnly ? ProjectLibraryModel() : .shared
         if let previewProjectURL, let document = try? ProjectStorage.load(previewProjectURL) {
             model.entries = [LibraryEntry(url: previewProjectURL, document: document)]
         }
+        if previewOnly, let previewError { model.error = previewError }
         _model = State(initialValue: model)
     }
 
@@ -272,12 +274,13 @@ public struct ProjectLibraryView: View {
                 }
             }
             if let error = model.error {
-                HStack(alignment: .top, spacing: CaploMetrics.Spacing.s) {
-                    Image(systemName: "exclamationmark.circle").foregroundStyle(CaploColor.warning)
-                    Text(error).font(CaploFont.caption).textSelection(.enabled).lineLimit(3)
+                // 图标、文字与右侧 24 点高的关闭按钮按中线对齐；原先顶对齐会让单行文字比按钮中线高出几点。
+                HStack(alignment: .center, spacing: CaploMetrics.Spacing.s) {
+                    Image(systemName: "exclamationmark.circle").font(.system(size: 13, weight: .medium)).foregroundStyle(CaploColor.warning)
+                    Text(error).font(CaploFont.caption).textSelection(.enabled).lineLimit(3).fixedSize(horizontal: false, vertical: true)
                     Spacer()
                     Button { model.error = nil } label: { Image(systemName: "xmark") }.buttonStyle(StudioIconButtonStyle(size: .small)).accessibilityLabel("关闭提示")
-                }.padding(CaploMetrics.Spacing.m).background(CaploColor.warning.opacity(0.1))
+                }.padding(.horizontal, CaploMetrics.Spacing.m).padding(.vertical, CaploMetrics.Spacing.s).background(CaploColor.warning.opacity(0.1))
             }
         }
         .frame(minWidth: 720, minHeight: 460)

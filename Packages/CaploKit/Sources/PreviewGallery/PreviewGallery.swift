@@ -105,6 +105,7 @@ struct PreviewGallery {
             else { path = argument }
             try await render(ProjectLibraryView(previewOnly: true, previewProjectURL: URL(fileURLWithPath: path)), name: "project-center", size: CGSize(width: 900, height: 620), scheme: .light, output: output)
             try await render(ProjectLibraryView(previewOnly: true, previewProjectURL: URL(fileURLWithPath: path)), name: "project-center-dark", size: CGSize(width: 900, height: 620), scheme: .dark, output: output)
+            try await render(ProjectLibraryView(previewOnly: true, previewProjectURL: URL(fileURLWithPath: path), previewError: "工程正在编辑，请先关闭编辑器。"), name: "project-center-error", size: CGSize(width: 900, height: 620), scheme: .dark, output: output)
             try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path)), name: "editor-light", size: CGSize(width: 1360, height: 860), scheme: .light, output: output)
             try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path)), name: "editor-dark", size: CGSize(width: 1360, height: 860), scheme: .dark, output: output)
             try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path), time: 2.5), name: "editor-focus", size: CGSize(width: 1360, height: 860), scheme: .dark, output: output)
