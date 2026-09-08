@@ -1,0 +1,2 @@
+// 将此文件复制为 Local.xcconfig，并填写 Xcode 开发账户的 Team ID。
+DEVELOPMENT_TEAM = YOUR_TEAM_ID

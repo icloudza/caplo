@@ -1,0 +1,376 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		49C0DC4F42755BAA2B3B0E82 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0C2B074D2FF9F4912C052602 /* Assets.xcassets */; };
+		691A1A0742FBDB7B27A2B370 /* CaploApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B05EA710D7510E552A8FC0B /* CaploApp.swift */; };
+		A149F3728C75B724E5A54940 /* Features in Frameworks */ = {isa = PBXBuildFile; productRef = A6D11CDD33D37BD2EA5CE48E /* Features */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0C2B074D2FF9F4912C052602 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		2B05EA710D7510E552A8FC0B /* CaploApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaploApp.swift; sourceTree = "<group>"; };
+		9CEA070E7CA97D5928973DB3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		BCE25A7738C2451E79E6B8CF /* Caplo.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Caplo.entitlements; sourceTree = "<group>"; };
+		C48ECE4C20E3E6B1D0355F03 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		F2CCE81DA343592F297F625F /* Caplo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Caplo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F7603A3339207566C2940BCD /* CaploKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CaploKit; path = Packages/CaploKit; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		2CEA458AE40C71A14303992B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A149F3728C75B724E5A54940 /* Features in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2316D9674BEB4048A6FB6831 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F2CCE81DA343592F297F625F /* Caplo.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		26509C9E35479A640B2906EE /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				F7603A3339207566C2940BCD /* CaploKit */,
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
+		461A848A8650C7C6F49674C0 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				0C2B074D2FF9F4912C052602 /* Assets.xcassets */,
+				BCE25A7738C2451E79E6B8CF /* Caplo.entitlements */,
+				2B05EA710D7510E552A8FC0B /* CaploApp.swift */,
+				9CEA070E7CA97D5928973DB3 /* Info.plist */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		5FD3843B75FEE15878DD9E23 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				C48ECE4C20E3E6B1D0355F03 /* Debug.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		D6513E6022B3515823239CCD = {
+			isa = PBXGroup;
+			children = (
+				461A848A8650C7C6F49674C0 /* App */,
+				5FD3843B75FEE15878DD9E23 /* Config */,
+				26509C9E35479A640B2906EE /* Packages */,
+				2316D9674BEB4048A6FB6831 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		ACDF505852B6F93F5196FE78 /* Caplo */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D59D58981BB20B0451946740 /* Build configuration list for PBXNativeTarget "Caplo" */;
+			buildPhases = (
+				013F6B0FCF3019513B13068C /* Sources */,
+				21222B862E595C7B49D1D158 /* Resources */,
+				2CEA458AE40C71A14303992B /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Caplo;
+			packageProductDependencies = (
+				A6D11CDD33D37BD2EA5CE48E /* Features */,
+			);
+			productName = Caplo;
+			productReference = F2CCE81DA343592F297F625F /* Caplo.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		2ABBD3413D7764414091AC45 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					ACDF505852B6F93F5196FE78 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 7BA20EDC3B3887EB1F2AC21F /* Build configuration list for PBXProject "Caplo" */;
+			developmentRegion = "zh-Hans";
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				"zh-Hans",
+			);
+			mainGroup = D6513E6022B3515823239CCD;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				654C45033ECC937A9D532C78 /* XCLocalSwiftPackageReference "Packages/CaploKit" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 2316D9674BEB4048A6FB6831 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				ACDF505852B6F93F5196FE78 /* Caplo */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		21222B862E595C7B49D1D158 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				49C0DC4F42755BAA2B3B0E82 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		013F6B0FCF3019513B13068C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				691A1A0742FBDB7B27A2B370 /* CaploApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		25D11135BC0FCFD0536749B1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CAPLO_APP_IDENTIFIER = com.caplo.app;
+				CAPLO_APP_NAME = Caplo;
+				CODE_SIGN_ENTITLEMENTS = App/Caplo.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Caplo;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(CAPLO_APP_IDENTIFIER)";
+				PRODUCT_NAME = "$(CAPLO_APP_NAME)";
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		318636353DF34D4DDC40F0D0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = C48ECE4C20E3E6B1D0355F03 /* Debug.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CAPLO_APP_IDENTIFIER = com.caplo.app;
+				CAPLO_APP_NAME = Caplo;
+				CODE_SIGN_ENTITLEMENTS = App/Caplo.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Caplo;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(CAPLO_APP_IDENTIFIER)";
+				PRODUCT_NAME = "$(CAPLO_APP_NAME)";
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		AB50A94EBF537309F6D68EDB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		D3F42C0E35E53FF9B7E60D90 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		7BA20EDC3B3887EB1F2AC21F /* Build configuration list for PBXProject "Caplo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AB50A94EBF537309F6D68EDB /* Debug */,
+				D3F42C0E35E53FF9B7E60D90 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D59D58981BB20B0451946740 /* Build configuration list for PBXNativeTarget "Caplo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				318636353DF34D4DDC40F0D0 /* Debug */,
+				25D11135BC0FCFD0536749B1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		654C45033ECC937A9D532C78 /* XCLocalSwiftPackageReference "Packages/CaploKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/CaploKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A6D11CDD33D37BD2EA5CE48E /* Features */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Features;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 2ABBD3413D7764414091AC45 /* Project object */;
+}

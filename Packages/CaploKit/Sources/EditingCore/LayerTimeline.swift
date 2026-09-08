@@ -1,0 +1,239 @@
+import Foundation
+
+/// 每个媒体块独立定位；旧工程在第一次编辑时展开，保留原来的音画对应关系。
+public enum TimelineMedia: String, Sendable { case screen, camera, system, microphone }
+
+extension VideoEdit {
+    public func mediaClips(_ role: TimelineMedia) -> [VideoClip] {
+        switch role { case .screen: orderedScreenClips; case .camera: orderedCameraClips; case .system: systemClips ?? clips; case .microphone: microphoneClips ?? clips }
+    }
+    public mutating func setMediaClips(_ role: TimelineMedia, _ values: [VideoClip]) {
+        switch role { case .screen: clips = values; case .camera: cameraClips = values; case .system: systemClips = values; case .microphone: microphoneClips = values }
+        normalizeTimelineRows()
+    }
+    /// 给时间线上的块（任一媒体片段或镜头）起名；空白视为清除，恢复默认名称。
+    public mutating func renameBlock(_ id: UUID, title: String?) {
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = trimmed.flatMap { $0.isEmpty ? nil : $0 }
+        if let index = focuses.firstIndex(where: { $0.id == id }) { focuses[index].title = value; return }
+        for role in [TimelineMedia.screen, .camera, .system, .microphone] {
+            var values = role == .screen ? clips : mediaClips(role)
+            guard let index = values.firstIndex(where: { $0.id == id }) else { continue }
+            values[index].title = value
+            switch role { case .screen: clips = values; case .camera: cameraClips = values; case .system: systemClips = values; case .microphone: microphoneClips = values }
+            return
+        }
+    }
+    public mutating func materializeLayers() {
+        let index = TimelineIndex(clips: clips)
+        for number in clips.indices { clips[number].timelineStart = index.boundaries[number] }
+        for role in [TimelineMedia.camera, .system, .microphone] {
+            let absent = role == .camera ? cameraClips == nil : role == .system ? systemClips == nil : microphoneClips == nil
+            if absent { setMediaClips(role, clips.map { var copy = $0; copy.id = UUID(); return copy }) }
+        }
+    }
+    public func hasSameMedia(as other: VideoEdit) -> Bool {
+        // 语音处理开关换的是麦克风素材文件本身，也算素材变化（要重建播放项）。
+        layerOrder == other.layerOrder && clips == other.clips && cameraClips == other.cameraClips && systemClips == other.systemClips && microphoneClips == other.microphoneClips && duration == other.duration && audio.voiceProcessing == other.audio.voiceProcessing
+    }
+    /// 只改变选中块的起止，不推挤相邻图层；左边缘受源起点限制，右边缘可进入末帧保持区。
+    public mutating func dragMedia(_ role: TimelineMedia, id: UUID, edge: FocusDragEdge, delta: Double, sourceDuration: Double) {
+        guard delta.isFinite else { return }
+        materializeLayers()
+        var values = role == .screen ? clips : mediaClips(role)
+        guard let number = values.firstIndex(where: { $0.id == id }) else { return }
+        var clip = values[number]
+        let start = clip.timelineStart ?? 0, minimum = Self.minimumClipDuration
+        switch edge {
+        case .body: clip.timelineStart = max(0, start + delta)
+        case .leading:
+            let change = min(clip.duration - minimum, max(-min(start, clip.sourceStart), delta))
+            clip.timelineStart = start + change; clip.sourceStart += min(change, clip.playableDuration - 0.00001)
+            clip.duration -= change
+            clip.mediaDuration = min(clip.duration, max(0.00001, sourceDuration - clip.sourceStart))
+        case .trailing:
+            clip.duration = max(minimum, clip.duration + delta)
+            clip.mediaDuration = min(clip.duration, max(0.00001, sourceDuration - clip.sourceStart))
+        }
+        values[number] = clip; setMediaClips(role, values)
+        if role == .screen, edge == .body {
+            let shift = (clip.timelineStart ?? 0) - start
+            for number in focuses.indices where focuses[number].targetClipID == id {
+                focuses[number].timelineStart = max(0, focuses[number].editingStart + shift)
+            }
+        }
+    }
+    /// 分割作为一次原子编辑同时安排新块行序，返回稳定 ID，调用方不应通过排序后的数组猜测尾块。
+    @discardableResult public mutating func splitMedia(_ role: TimelineMedia, id: UUID, at time: Double) -> UUID? {
+        var values = role == .screen ? clips : mediaClips(role); let index = TimelineIndex(clips: values)
+        guard time.isFinite, let number = values.firstIndex(where: { $0.id == id }) else { return nil }
+        let clip = values[number], offset = time - index.boundaries[number]
+        guard offset >= Self.minimumClipDuration, clip.duration - offset >= Self.minimumClipDuration else { return nil }
+        let previousOrder = orderedLayerIDs
+        let previousGroups = rowGroups == nil ? [] : timelineRows.filter { $0.count > 1 }
+        let splitSharesRow = previousGroups.contains { $0.contains(id) }
+        var copiedFocusSources: [UUID: UUID] = [:]
+        var tail = clip; tail.id = UUID(); tail.duration = clip.duration - offset
+        tail.sourceStart += min(offset, clip.playableDuration - 0.00001)
+        if clip.timelineStart != nil { tail.timelineStart = time }
+        if clip.mediaDuration != nil { tail.mediaDuration = max(0.00001, clip.playableDuration - offset) }
+        values[number].duration = offset
+        if clip.mediaDuration != nil { values[number].mediaDuration = min(offset, clip.playableDuration) }
+        values.insert(tail, at: number + 1); setMediaClips(role, values)
+        if role == .screen, clip.timelineStart != nil {
+            // 智能镜头跨剪切保持一个连续块；旧固定 / 烘焙效果仍分割并保留动画相位。
+            var copies: [FocusSegment] = []
+            for position in focuses.indices where focuses[position].targetClipID == id {
+                let focus = focuses[position], end = focus.editingStart + focus.duration
+                if focus.editingStart >= time { focuses[position].targetClipID = tail.id }
+                else if end > time {
+                    if focus.followsTimeline == true {
+                        focuses[position].targetClipID = nil
+                        continue
+                    }
+                    var copy = focus; copy.id = UUID(); copy.timelineStart = time; copy.duration = end - time; copy.targetClipID = tail.id
+                    copy.transitionDuration = focus.transitionDuration ?? focus.duration
+                    copy.transitionOffset = (focus.transitionOffset ?? 0) + time - focus.editingStart
+                    focuses[position].duration = time - focus.editingStart
+                    focuses[position].transitionDuration = focus.transitionDuration ?? focus.duration
+                    focuses[position].transitionOffset = focus.transitionOffset ?? 0
+                    copiedFocusSources[copy.id] = focus.id
+                    copies.append(copy)
+                }
+            }
+            focuses += copies
+        }
+        if clip.timelineStart != nil {
+            // 新尾块放在原块上方，两侧关联效果分别紧贴各自素材。仅整理此次分割涉及的组，
+            // 其他媒体与效果保留相对顺序；旧连续剪辑不创建行序，避免改变其拼接语义。
+            let ranks = Dictionary(uniqueKeysWithValues: previousOrder.enumerated().map { ($0.element, $0.offset) })
+            let linked = role == .screen ? focuses.filter { $0.targetClipID == id || $0.targetClipID == tail.id } : []
+            let headEffects = linked.filter { $0.targetClipID == id }.sorted { (ranks[$0.id] ?? Int.max) < (ranks[$1.id] ?? Int.max) }.map(\.id)
+            let tailEffects = linked.filter { $0.targetClipID == tail.id }.sorted {
+                (ranks[copiedFocusSources[$0.id] ?? $0.id] ?? Int.max) < (ranks[copiedFocusSources[$1.id] ?? $1.id] ?? Int.max)
+            }.map(\.id)
+            let affected = Set(headEffects + tailEffects + [id, tail.id])
+            // 以原素材的位置作锚点；即使用户把关联效果移到远处，也不能把素材整组搬过去。
+            let anchor = previousOrder.firstIndex(of: id) ?? previousOrder.count
+            let insertion = previousOrder.prefix(anchor).filter { !affected.contains($0) }.count
+            var order = previousOrder.filter { !affected.contains($0) }
+            order.insert(contentsOf: tailEffects + [tail.id] + headEffects + [id], at: insertion)
+            layerOrder = order
+        }
+        if !previousGroups.isEmpty {
+            // 已同行的素材分割后继续共行；已有聚焦若与其他块同行，其动画副本也保留该行。
+            rowGroups = previousGroups.map { group in
+                let members = Set(group)
+                return group + (members.contains(id) ? [tail.id] : []) + copiedFocusSources.compactMap { members.contains($0.value) ? $0.key : nil }
+            }
+            normalizeTimelineRows()
+            layerOrder = timelineRows.flatMap { $0 }
+            if splitSharesRow, role == .screen {
+                // 新关联效果位于目标整行上方，不能夹在同行成员之间；按整行搬动以保留其他分组。
+                let linked = Set(focuses.filter { $0.targetClipID == id || $0.targetClipID == tail.id }.map(\.id))
+                let rows = timelineRows
+                if let target = rows.firstIndex(where: { $0.contains(id) }) {
+                    let effectRows = Set(rows.indices.filter { $0 != target && rows[$0].contains(where: linked.contains) })
+                    let insertion = rows.indices.prefix(target).filter { !effectRows.contains($0) }.count
+                    var remaining = rows.enumerated().filter { $0.offset != target && !effectRows.contains($0.offset) }.map(\.element)
+                    let effects = rows.indices.filter { effectRows.contains($0) }.map { rows[$0] }
+                    remaining.insert(contentsOf: effects + [rows[target]], at: insertion)
+                    layerOrder = remaining.flatMap { $0 }
+                }
+            }
+            normalizeTimelineRows()
+        }
+        return tail.id
+    }
+
+    /// 将遮挡关系解析为不重叠的素材切片；播放和导出用同一结果，空白区间保留。
+    public func resolvedMedia(_ role: TimelineMedia) -> [VideoClip] {
+        let values = mediaClips(role), index = TimelineIndex(clips: values)
+        return index.spans.map { span in
+            var clip = values[span.index]
+            let offset = span.start - index.boundaries[span.index]
+            let available = clip.playableDuration
+            clip.timelineStart = span.start; clip.duration = span.end - span.start
+            clip.sourceStart += min(offset, available - 0.00001)
+            clip.mediaDuration = max(0, min(clip.duration, available - offset))
+            return clip
+        }
+    }
+}
+
+/// 统一行顺序使用稳定 ID，排序不改变块的时间或效果所关联的素材。
+extension VideoEdit {
+    public mutating func prepareLayerEditing(camera availableCamera: Bool, system: Bool, microphone: Bool) {
+        schemaVersion = 6
+        materializeLayers()
+        if !availableCamera { cameraClips = [] }; if !system { systemClips = [] }; if !microphone { microphoneClips = [] }
+        let appearances = focusSpans()
+        for span in appearances { materializeFocus(span) }
+        if layerOrder == nil {
+            // 默认行序：镜头与录制画面在上，摄像头行紧贴在声音轨上方（不放最顶端），最后是系统声音、麦克风。
+            // 行序只描述编辑器布局；摄像头画中画始终叠在画面之上，不随行序改变。
+            var order: [UUID] = []
+            let effectsByTarget = Dictionary(grouping: focuses.filter { $0.targetClipID != nil }, by: { $0.targetClipID! })
+            for clip in clips.reversed() {
+                order += (effectsByTarget[clip.id] ?? []).map(\.id)
+                order.append(clip.id)
+            }
+            order += focuses.filter { $0.targetClipID == nil }.map(\.id)
+            order += (cameraClips ?? []).map(\.id)
+            order += (systemClips ?? []).map(\.id) + (microphoneClips ?? []).map(\.id)
+            layerOrder = order
+        } else {
+            // 2026-09-08 起摄像头行默认在声音轨上方：老工程若仍是旧默认（摄像头行在最顶端、未与他行合并），迁到新位置；手动排过的顺序不动。
+            let cameraIDs = (cameraClips ?? []).map(\.id)
+            if !cameraIDs.isEmpty, var order = layerOrder, Array(order.prefix(cameraIDs.count)) == cameraIDs,
+               !(rowGroups ?? []).contains(where: { group in group.contains(where: cameraIDs.contains) }) {
+                order.removeFirst(cameraIDs.count)
+                let audio = Set((systemClips ?? []).map(\.id) + (microphoneClips ?? []).map(\.id))
+                let insertion = order.firstIndex(where: audio.contains) ?? order.count
+                order.insert(contentsOf: cameraIDs, at: insertion)
+                layerOrder = order
+            }
+            // 重新生成自动镜头会产生新 ID；已有工程也要把这些新行插到关联素材上方，
+            // 不能依赖 orderedLayerIDs 的兜底追加而落到声音轨之后。保留旧行的手动排序。
+            let existing = Set(layerOrder ?? [])
+            var order = orderedLayerIDs
+            let rowHeads = rowGroups == nil ? [:] : Dictionary(uniqueKeysWithValues: timelineRows.flatMap { row in row.map { ($0, row[0]) } })
+            for focus in focuses where !existing.contains(focus.id) {
+                guard let target = focus.targetClipID, order.contains(target) else { continue }
+                order.removeAll { $0 == focus.id }
+                if let insertion = order.firstIndex(of: rowHeads[target] ?? target) { order.insert(focus.id, at: insertion) }
+            }
+            layerOrder = order
+        }
+        constrainTimelineFocuses()
+        normalizeTimelineRows()
+    }
+    public mutating func moveLayer(_ id: UUID, before target: UUID?) {
+        guard id != target else { return }
+        guard orderedLayerIDs.contains(id) else { return }
+        removeTimelineRowMember(id)
+        var order = orderedLayerIDs
+        order.removeAll { $0 == id }
+        // 新聚焦默认独立成行，即使目标素材已同行，也插在其整行上方。
+        let anchor = target.flatMap { target in rowGroups == nil ? target : timelineRows.first(where: { $0.contains(target) })?.first }
+        let insertion = anchor.flatMap { order.firstIndex(of: $0) } ?? order.count
+        order.insert(id, at: insertion); layerOrder = order
+        normalizeTimelineRows()
+    }
+    public var orderedLayerIDs: [UUID] {
+        let all = clips.map(\.id) + focuses.map(\.id) + (cameraClips ?? []).map(\.id) + (systemClips ?? []).map(\.id) + (microphoneClips ?? []).map(\.id)
+        let valid = Set(all), saved = (layerOrder ?? []).filter { valid.contains($0) }, existing = Set(saved)
+        return saved + all.filter { !existing.contains($0) }
+    }
+    public var orderedCameraClips: [VideoClip] {
+        let values = cameraClips ?? clips
+        guard let layerOrder, cameraClips != nil else { return values }
+        let ranks = Dictionary(uniqueKeysWithValues: layerOrder.enumerated().map { ($0.element, $0.offset) })
+        return values.sorted { (ranks[$0.id] ?? Int.max) < (ranks[$1.id] ?? Int.max) }
+    }
+    public var orderedScreenClips: [VideoClip] {
+        guard let layerOrder else { return clips }
+        let ranks = Dictionary(uniqueKeysWithValues: layerOrder.enumerated().map { ($0.element, $0.offset) })
+        return clips.sorted { (ranks[$0.id] ?? Int.max) < (ranks[$1.id] ?? Int.max) }
+    }
+}

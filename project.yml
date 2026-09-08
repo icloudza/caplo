@@ -1,0 +1,64 @@
+name: Caplo
+options:
+  minimumXcodeGenVersion: 2.44.0
+  deploymentTarget:
+    macOS: '15.0'
+  developmentLanguage: zh-Hans
+settings:
+  base:
+    SWIFT_VERSION: '6.0'
+    SWIFT_STRICT_CONCURRENCY: complete
+    MACOSX_DEPLOYMENT_TARGET: '15.0'
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_HARDENED_RUNTIME: YES
+packages:
+  CaploKit:
+    path: Packages/CaploKit
+targets:
+  Caplo:
+    type: application
+    platform: macOS
+    sources: [App]
+    configFiles:
+      Debug: Config/Debug.xcconfig
+    entitlements:
+      path: App/Caplo.entitlements
+      properties:
+        com.apple.security.device.audio-input: true
+        com.apple.security.device.camera: true
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.video
+        NSMicrophoneUsageDescription: 用于录制讲解声音，麦克风素材会保存在本地工程中。
+        NSCameraUsageDescription: 用于录制讲解人像，摄像头视频会作为独立素材保存在本地工程中。
+        NSCameraUseContinuityCameraDeviceType: true
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Caplo 工程
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Owner
+            LSItemContentTypes: [com.caplo.project]
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.caplo.project
+            UTTypeDescription: Caplo 录制工程
+            UTTypeConformsTo: [com.apple.package]
+            UTTypeTagSpecification:
+              public.filename-extension: [caplo]
+    dependencies:
+      - package: CaploKit
+        product: Features
+    settings:
+      base:
+        CAPLO_APP_IDENTIFIER: com.caplo.app
+        CAPLO_APP_NAME: Caplo
+        PRODUCT_BUNDLE_IDENTIFIER: $(CAPLO_APP_IDENTIFIER)
+        PRODUCT_NAME: $(CAPLO_APP_NAME)
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.video
+        INFOPLIST_KEY_CFBundleDisplayName: Caplo
+    scheme:
+      gatherCoverageData: true

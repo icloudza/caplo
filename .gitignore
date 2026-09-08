@@ -1,0 +1,16 @@
+.DS_Store
+.build/
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+.swiftpm/
+Config/Local.xcconfig
+*.profraw
+
+# 内部资料与工作区状态，不入库
+Docs/
+设计架构规范任务跟踪.md
+AGENTS.md
+.spec-workflow/
+.vscode/

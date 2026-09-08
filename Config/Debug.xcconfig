@@ -1,0 +1,6 @@
+// 开发运行使用稳定证书身份，避免临时签名随构建变化导致屏幕录制授权失效。
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_IDENTITY = Apple Development
+
+// 本机团队设置不进入版本控制；其他开发者可从示例文件复制后填写自己的 Team ID。
+#include? "Local.xcconfig"
