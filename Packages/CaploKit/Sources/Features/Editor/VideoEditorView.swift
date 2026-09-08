@@ -44,7 +44,7 @@ struct VideoEditorView: View {
                 .background(CaploColor.warning.opacity(0.1))
             }
             HStack(spacing: CaploMetrics.Spacing.s) {
-                IconRail(Self.panels, selection: $tab, disabled: model.selectedClip == nil ? ["片段"] : [])
+                IconRail(Self.panels, selection: $tab, disabled: disabledPanels)
                 PanelContainer(panelTitle) {
                     panelContent
                     if let warning = model.entry.document.warning {
@@ -76,6 +76,16 @@ struct VideoEditorView: View {
         .onChange(of: model.edit) { model.previewChanged() }
         .onChange(of: model.selectedMedia) { if let role = model.selectedMedia { tab = role == .camera ? "人像" : "片段" } }
         .onChange(of: model.selectedFocus) { if model.selectedFocus != nil { tab = "聚焦" } }
+        // 摄像头片段被删光（或本就没录）时"人像"不可选；正停在人像面板上就退回布局。
+        .onChange(of: model.hasCameraMedia, initial: true) { if !model.hasCameraMedia, tab == "人像" { tab = "布局" } }
+    }
+
+    /// 工具栏里不可选的面板：没选中片段时"片段"灰掉，没有人像素材时"人像"灰掉。
+    private var disabledPanels: Set<String> {
+        var result: Set<String> = []
+        if model.selectedClip == nil { result.insert("片段") }
+        if !model.hasCameraMedia { result.insert("人像") }
+        return result
     }
 
     private var panelTitle: String {

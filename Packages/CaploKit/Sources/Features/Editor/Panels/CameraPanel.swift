@@ -65,7 +65,7 @@ struct CameraPanel: View {
     }
 
     var body: some View {
-        if model.entry.document.segments.contains(where: { $0.files[.camera] != nil }) {
+        if model.hasCameraMedia {
             Toggle(isOn: Binding(get: { model.edit.camera?.enabled == true }, set: { value in
                 model.commit { edit in
                     if edit.camera == nil { edit.camera = CameraLayout() }
@@ -141,6 +141,8 @@ struct CameraPanel: View {
             Button("重置人像布局") { model.commit { $0.camera = CameraLayout(); $0.layout.screenScale = 1; $0.layout.screenOffsetX = 0; $0.layout.screenOffsetY = 0 } }
                 .buttonStyle(StudioButtonStyle(.secondary))
                 .sheet(isPresented: $customizing) { CustomLayoutSheet(model: model, stills: customStills ?? CustomLayoutStills()) }
+        } else if model.cameraClipsDeleted {
+            PanelNote("摄像头片段已从时间线删除。撤销可以恢复。")
         } else {
             PanelNote("此录制没有摄像头素材。下次录制前可在录制条开启摄像头。")
         }

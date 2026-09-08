@@ -77,6 +77,16 @@ final class VideoEditorModel {
         })
     }
 
+    /// 本工程当前有没有可编辑的人像：录制时开了摄像头，且摄像头片段没有被从时间线上删光。
+    /// 人像面板与工具栏"人像"项都以此为准；`cameraClips == nil` 表示跟随录屏片段，视为有。
+    var hasCameraMedia: Bool {
+        entry.document.segments.contains { $0.files[.camera] != nil } && !edit.mediaClips(.camera).isEmpty
+    }
+    /// 录制时开了摄像头，但片段已被删光（区别于根本没录摄像头）。
+    var cameraClipsDeleted: Bool {
+        entry.document.segments.contains { $0.files[.camera] != nil } && edit.mediaClips(.camera).isEmpty
+    }
+
     func toggleMute(_ track: AudioTrack) {
         guard audioTracks.contains(track) else { return }
         commit { if !$0.audio.muted.insert(track).inserted { $0.audio.muted.remove(track) } }
