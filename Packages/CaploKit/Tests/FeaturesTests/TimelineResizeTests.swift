@@ -165,3 +165,36 @@ extension WindowLifecycleTests {
         try #require(condition(), "真实时间线播放未在等待期限内就绪")
     }
 }
+
+extension WindowLifecycleTests {
+    /// 视图还没量过宽度时就收到"适合窗口"（从项目中心新开窗口的情形）：布局后按真实宽度重算，整条时间线正好铺满。
+    @Test func fitRequestedBeforeLayoutUsesTheRealWidthAfterLayout() async throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = try await makeEditorFixture(root: root)
+        let model = VideoEditorModel(entry: LibraryEntry(url: url, document: try ProjectStorage.load(url)))
+        defer { model.close() }
+        model.edit.clips = (0..<20).map { number in
+            var clip = VideoClip(sourceStart: 0, duration: 4)
+            clip.timelineStart = Double(number) * 4
+            return clip
+        }
+        model.ready = true; model.loading = false
+        let viewport = TimelineViewport()
+        // 视口默认宽 700，这时算出的 zoom 是错的；窗口实际宽 1280。
+        viewport.fit(duration: model.edit.duration)
+        let stale = viewport.zoom
+        let view = TimelineViewportView(model: model, viewport: viewport)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1280, height: 260), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        view.autoresizingMask = [.width, .height]
+        window.contentView = view; window.orderFront(nil)
+        defer { view.detach(); window.contentView = nil; window.close() }
+        view.update(edit: model.edit, analysis: model.analysis, selection: [], primary: nil, focus: nil, zoom: viewport.zoom, fit: viewport.fitRequest)
+        window.contentView?.layoutSubtreeIfNeeded()
+        #expect(viewport.width > 1000)
+        #expect(abs(viewport.zoom - viewport.minimumZoom(for: model.edit.duration)) < 1e-6)
+        #expect(abs(viewport.zoom - stale) > 0.1)
+    }
+}

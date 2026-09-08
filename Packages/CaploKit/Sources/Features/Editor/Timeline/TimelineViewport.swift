@@ -20,8 +20,12 @@ final class TimelineViewport {
     func minimumZoom(for duration: Double) -> Double {
         min(4, max(-12, log2(width / max(1, duration) / 60)))
     }
+    /// `fit(duration:)` 留下的时长：视图在下一次布局里按真实宽度重算倍率后清掉。
+    /// 只拨 `fitRequest` 不设它，表示只把偏移归零、倍率按 `zoom` 来（评审图与测试用这种方式）。
+    @ObservationIgnored var pendingFitDuration: Double?
     func fit(duration: Double) {
         zoom = minimumZoom(for: duration)
+        pendingFitDuration = duration
         fitRequest &+= 1
     }
 }
@@ -56,6 +60,8 @@ final class TimelineViewportView: NSView {
     private var scale = 60.0
     private var offset = 0.0
     private var fitRequest = 0
+    /// 收到"适合窗口"请求但还没按真实宽度算过。
+    private var pendingFit = false
     private var detached = false
     private var playbackPosition = 0.0
     private var drag: Drag?
@@ -271,6 +277,9 @@ final class TimelineViewportView: NSView {
         if fit != fitRequest {
             fitRequest = fit
             offset = 0; retainedExtent = 0
+            // 适合窗口以视图当下的真实宽度为准：窗口刚创建（从项目中心打开）时视口还没量过宽度，
+            // SwiftUI 那边按默认宽度算出的 zoom 不准，留到 layout 里用实际宽度重算。只拨 fitRequest 不受影响。
+            if viewport.pendingFitDuration != nil { pendingFit = true; needsLayout = true }
             changed = true
         }
         if let reveal, reveal.serial != lastReveal {
@@ -314,6 +323,7 @@ final class TimelineViewportView: NSView {
     override func layout() {
         super.layout()
         viewport.width = contentWidth
+        if pendingFit, bounds.width > timeOrigin + 8 { pendingFit = false; fitToWidth() }
         navigator.frame = CGRect(x: timeOrigin, y: max(28, bounds.height - TimelineNavigatorView.preferredHeight), width: contentWidth, height: TimelineNavigatorView.preferredHeight)
         clampOffset(); refreshHoveredPreview(); updateScroller(); updatePlayhead()
         // 纵向范围可能随高度重新约束，图层按钮和行底图必须在同一布局周期刷新。
@@ -383,6 +393,14 @@ final class TimelineViewportView: NSView {
         guard abs(next - offset) > 0.00001 else { return }
         offset = next
         changedViewport()
+    }
+    /// 整条时间线正好铺满视口：按当前真实宽度定倍率并写回视口，让工具栏滑块与之一致。
+    private func fitToWidth() {
+        let duration = max(0.001, viewport.pendingFitDuration ?? edit.duration)
+        viewport.pendingFitDuration = nil
+        viewport.zoom = log2(min(960, max(60 * pow(2, -12), contentWidth / duration)) / 60)
+        scale = 60 * pow(2, viewport.zoom)
+        offset = 0; retainedExtent = 0
     }
     private func navigate(start: Double, duration: Double) {
         guard start.isFinite, duration.isFinite, duration > 0 else { return }
