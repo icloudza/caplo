@@ -68,3 +68,37 @@ import EditingCore
     changed.clips.removeLast()
     #expect(throws: ProjectError.self) { try ProjectMedia.updatePresentation(item: item, previous: edit, edit: changed) }
 }
+
+/// 时间指针拖到最末尾要看到最后一帧而不是背景：离线静帧在素材末尾一点点之外取最后一帧；播放 / 导出的合成把最后一帧拉长补到片段末尾。
+@Test @MainActor func theVeryEndShowsTheLastFrameNotTheBackground() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let url = try ProjectStorage.create(in: root, name: "末帧")
+    let writer = SegmentedCaptureWriter(project: url, width: 320, height: 180, systemAudio: false, microphone: false, onStarted: {}, onFailure: { _ in })
+    try await onQueue(writer) { writer.ingest(try makeFrame(at: CMTime(seconds: 10, preferredTimescale: 600)), role: .screen) }
+    try await writer.finish(at: CMTime(seconds: 13, preferredTimescale: 600))
+    var document = try ProjectStorage.load(url)
+    // 写入器会把最后一帧补到停止时刻，这里把工程记的时长再拉长半秒，复现"素材比工程记的时长短"的情况。
+    document.segments[0].duration += 0.5
+    let mediaPath = try #require(document.segments.first?.files[.screen])
+    let mediaTrack = try #require(try await AVURLAsset(url: ProjectStorage.mediaURL(mediaPath, in: url)).loadTracks(withMediaType: .video).first)
+    let mediaRange = try await mediaTrack.load(.timeRange)
+    #expect(mediaRange.end.seconds < document.duration, "素材 \(mediaRange.end.seconds) 应短于工程 \(document.duration)")
+    var edit = VideoEdit(duration: document.duration)
+    edit.layout.padding = 0; edit.layout.cornerRadius = 0; edit.layout.shadow = false
+    let renderer = EditorPreviewRenderer()
+    let middle = try await renderer.render(url: url, document: document, edit: edit, time: 1)
+    let end = try await renderer.render(url: url, document: document, edit: edit, time: document.duration)
+    let context = CIContext(), bounds = CGRect(x: 0, y: 0, width: middle.width, height: middle.height)
+    func bytes(_ image: CGImage) -> [UInt8] {
+        var buffer = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        context.render(CIImage(cgImage: image), toBitmap: &buffer, rowBytes: image.width * 4, bounds: bounds, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        return buffer
+    }
+    #expect(bytes(end) == bytes(middle), "末尾与中段是同一帧画面，不是背景")
+    await renderer.close()
+    let item = try await ProjectMedia.playerItem(url: url, document: document, levels: edit.audio, edit: edit)
+    let track = try #require(try await item.asset.loadTracks(withMediaType: .video).first)
+    let range = try await track.load(.timeRange)
+    #expect(abs(range.end.seconds - document.duration) < 0.002, "合成的画面轨道补到工程末尾：\(range.end.seconds) vs \(document.duration)")
+}

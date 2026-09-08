@@ -101,6 +101,14 @@ public enum ProjectMedia {
                         try destination.insertTimeRange(range, of: source, at: position)
                         if let heldDuration {
                             destination.scaleTimeRange(CMTimeRange(start: position, duration: range.duration), toDuration: CMTime(seconds: heldDuration, preferredTimescale: 48_000))
+                        } else if role.isVideo, CMTimeCompare(localRequest.end, range.end) > 0 {
+                            // 素材比工程记的时长短一点（写入器按停止时刻记时长，最后一帧的显示时长够不到末尾）：
+                            // 把最后一帧拉长补到片段末尾，最多补 1 秒；再长就是素材真的提前结束，那段不画。
+                            let shortfall = CMTimeMinimum(CMTimeSubtract(localRequest.end, range.end), CMTime(seconds: 1, preferredTimescale: 48_000))
+                            let hold = CMTimeMinimum(range.duration, CMTime(seconds: 1 / max(24, document.frameRate), preferredTimescale: 48_000))
+                            if shortfall > .zero, hold > .zero {
+                                destination.scaleTimeRange(CMTimeRange(start: position + range.duration - hold, duration: hold), toDuration: hold + shortfall)
+                            }
                         }
                     }
                 }

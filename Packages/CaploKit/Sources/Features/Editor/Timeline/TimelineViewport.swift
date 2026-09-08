@@ -16,8 +16,12 @@ final class TimelineViewport {
     /// 画布 / 时间线分界正在拖动；持久化等昂贵操作延后，可见色块仍按当前几何重绘。
     var liveResizing = false
     @ObservationIgnored var width = 700.0
+    /// 缩放下限就是“缩放到适合窗口”的那一档：整条时间线正好铺满视口宽度，不能再缩得更小。
+    func minimumZoom(for duration: Double) -> Double {
+        min(4, max(-12, log2(width / max(1, duration) / 60)))
+    }
     func fit(duration: Double) {
-        zoom = min(4, max(-12, log2(width / max(1, duration) / 60)))
+        zoom = minimumZoom(for: duration)
         fitRequest &+= 1
     }
 }
@@ -168,7 +172,8 @@ final class TimelineViewportView: NSView {
             switch block.role { case .screen: kind = .screen; case .camera: kind = .camera; case .system, .microphone: kind = .audio; case nil: kind = .focus }
             return TimelineNavigatorItem(id: block.id, start: block.start, duration: block.duration, kind: kind)
         }
-        navigator.update(items: items, duration: timelineExtent, visibleStart: offset, visibleDuration: contentWidth / scale, playhead: playbackPosition)
+        navigator.update(items: items, duration: timelineExtent, visibleStart: offset, visibleDuration: contentWidth / scale, playhead: playbackPosition,
+                         selected: Set(blocks.filter { isSelected($0) }.map(\.id)))
     }
     private var trackArea: CGRect { CGRect(x: 0, y: 28, width: bounds.width, height: max(1, bounds.height - 28 - TimelineNavigatorView.preferredHeight)) }
     private(set) var trackDrawCount = 0
@@ -425,7 +430,7 @@ final class TimelineViewportView: NSView {
         if event.modifierFlags.contains(.option), drag == nil {
             let anchorX = convert(event.locationInWindow, from: nil).x
             let anchor = time(anchorX)
-            let next = min(4, max(-12, viewport.zoom - event.scrollingDeltaY * 0.02))
+            let next = min(4, max(viewport.minimumZoom(for: edit.duration), viewport.zoom - event.scrollingDeltaY * 0.02))
             viewport.zoom = next; scale = 60 * pow(2, next)
             offset = anchor - (anchorX - timeOrigin) / scale
         } else {

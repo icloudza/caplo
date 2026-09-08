@@ -142,6 +142,14 @@ public struct CanvasLayout: Equatable, Codable, Sendable {
     public var shadowOffset: Double = Self.defaultShadowOffset
     /// 为空表示不裁切。
     public var crop: CropRect?
+    /// 固定聚焦区域：开则镜头推近只放大录屏框里的内容，留白 / 背景 / 圆角框不动；关（新工程默认）则整个画面一起推近。
+    /// 旧工程没有这个字段时按开读，保持它们原来的效果。
+    public var fixedFocusFrame = false
+    /// 自定义布局：录屏在留白之内再缩小的比例（0.3…1）与在剩余空间里的位置（−1…1，0 居中，Y 向下为正）。
+    /// 只对叠放的人像布局生效，卡片布局的录屏位置由布局决定。
+    public var screenScale = 1.0
+    public var screenOffsetX = 0.0
+    public var screenOffsetY = 0.0
 
     public static let defaultShadowOpacity = 0.3
     public static let defaultShadowBlur = 12.0
@@ -155,7 +163,7 @@ public struct CanvasLayout: Equatable, Codable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case ratio, background, backgroundImage, padding, cornerRadius, shadow, shadowOpacity, shadowBlur, shadowOffset, crop
+        case ratio, background, backgroundImage, padding, cornerRadius, shadow, shadowOpacity, shadowBlur, shadowOffset, crop, fixedFocusFrame, screenScale, screenOffsetX, screenOffsetY
     }
 
     /// 旧工程没有阴影参数，按默认值解码，像素与之前完全一致。
@@ -171,6 +179,10 @@ public struct CanvasLayout: Equatable, Codable, Sendable {
         shadowBlur = try container.decodeIfPresent(Double.self, forKey: .shadowBlur) ?? Self.defaultShadowBlur
         shadowOffset = try container.decodeIfPresent(Double.self, forKey: .shadowOffset) ?? Self.defaultShadowOffset
         crop = try container.decodeIfPresent(CropRect.self, forKey: .crop)
+        fixedFocusFrame = try container.decodeIfPresent(Bool.self, forKey: .fixedFocusFrame) ?? true
+        screenScale = try container.decodeIfPresent(Double.self, forKey: .screenScale) ?? 1
+        screenOffsetX = try container.decodeIfPresent(Double.self, forKey: .screenOffsetX) ?? 0
+        screenOffsetY = try container.decodeIfPresent(Double.self, forKey: .screenOffsetY) ?? 0
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -185,6 +197,10 @@ public struct CanvasLayout: Equatable, Codable, Sendable {
         try container.encode(shadowBlur, forKey: .shadowBlur)
         try container.encode(shadowOffset, forKey: .shadowOffset)
         try container.encodeIfPresent(crop, forKey: .crop)
+        try container.encode(fixedFocusFrame, forKey: .fixedFocusFrame)
+        try container.encode(screenScale, forKey: .screenScale)
+        try container.encode(screenOffsetX, forKey: .screenOffsetX)
+        try container.encode(screenOffsetY, forKey: .screenOffsetY)
     }
 }
 

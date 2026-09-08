@@ -290,6 +290,17 @@ final class VideoEditorModel {
         commit { edit in edit.focuses.append(zoom); edit.moveLayer(zoom.id, before: clip.id) }
         selectedMedia = nil; selectedMediaID = nil; selectedFocus = zoom.id
     }
+    /// 播放器不能正好定位到时间线末尾：合成在那一刻没有画面样本，只会画出背景。末尾一律停在最后一帧的中间。
+    nonisolated static func seekTarget(_ target: Double, duration: Double, frameRate: Double) -> Double {
+        guard duration > 0 else { return max(0, target) }
+        return min(target, max(0, duration - 0.5 / max(24, frameRate)))
+    }
+
+    /// 自定义布局对话框：当前播放头处的录屏与摄像头原帧。
+    func layoutStills() async -> (screen: CGImage?, camera: CGImage?) {
+        (try? await previewRenderer.stills(url: entry.url, document: entry.document, edit: edit, time: skimPosition ?? position)) ?? (nil, nil)
+    }
+
     func seek(_ value: Double) {
         guard value.isFinite, !closed else { return }
         player.pause(); playing = false; playAfterSeek = false
@@ -317,7 +328,7 @@ final class VideoEditorModel {
         guard !loading, player.currentItem != nil, !closed else { return }
         // 播放器定位产生的是最新画面，更早排队的离线静帧不得再盖上来。
         fallbackRevision &+= 1; pendingFallback = nil
-        pendingSeek = target ?? skimPosition ?? position
+        pendingSeek = Self.seekTarget(target ?? skimPosition ?? position, duration: edit.duration, frameRate: entry.document.frameRate)
         guard seekTask == nil else { return }
         let revision = seekRevision
         seekTask = Task { [weak self] in

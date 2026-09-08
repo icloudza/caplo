@@ -281,6 +281,15 @@ public struct FocusState: Equatable, Sendable {
     public var scale: Double = 1
     public var x: Double = 0.5
     public var y: Double = 0.5
+    /// 推近程度 0…1（缓入缓出后的包络）；人像画中画按它同步缩小。目标倍数为 1 的镜头不算推近。
+    public var envelope: Double = 0
+    /// 未按倍数钳制的目标点（整体推近时以它为中心，越界由画布级钳制处理）。
+    public var targetX: Double = 0.5
+    public var targetY: Double = 0.5
+    public init() {}
+    init(scale: Double, x: Double, y: Double, envelope: Double, targetX: Double, targetY: Double) {
+        self.scale = scale; self.x = x; self.y = y; self.envelope = envelope; self.targetX = targetX; self.targetY = targetY
+    }
 }
 
 /// 预览和导出只在此处求值镜头；剪辑后先映射回原素材，手动镜头优先于自动镜头。
@@ -318,7 +327,8 @@ public enum SceneEvaluator {
         let camera = zoom.camera(at: elapsed)
         let scale = 1 + (camera.scale - 1) * envelope
         let margin = 0.5 / scale
-        return FocusState(scale: scale, x: min(1 - margin, max(margin, camera.x)), y: min(1 - margin, max(margin, camera.y)))
+        return FocusState(scale: scale, x: min(1 - margin, max(margin, camera.x)), y: min(1 - margin, max(margin, camera.y)),
+                          envelope: camera.scale > 1.001 ? min(1, max(0, envelope)) : 0, targetX: camera.x, targetY: camera.y)
     }
 
     /// 推近 / 拉远包络：旧镜头沿用 0.4 秒平滑阶跃；带显式时长的镜头用更平滑的五次曲线。

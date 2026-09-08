@@ -101,3 +101,61 @@ import ProjectKit
     #expect(RecordingDeviceNames.systemAudio(scope: "all", selected: [], applications: []) == "系统声音")
     #expect(RecordingDeviceNames.systemAudio(scope: "applications", selected: ["a", "b"], applications: []) == "2 个应用")
 }
+
+/// 布局预设：六个缩略图各自对应模式 / 形状 / 角；当前布局能反查出预设，拖过位置就没有预设被选中。
+@Test func cameraLayoutPresetsRoundTrip() {
+    #expect(CameraPanel.Preset.all.count == 6 && Set(CameraPanel.Preset.all.map(\.id)).count == 6)
+    for preset in CameraPanel.Preset.all {
+        var layout = CameraLayout(); preset.apply(to: &layout)
+        #expect(CameraPanel.Preset.matching(layout) == preset)
+        #expect((layout.usesCard || layout.isCameraFull) == (preset.mode != .overlay))
+    }
+    var layout = CameraLayout(); layout.x = 0.5
+    #expect(CameraPanel.Preset.matching(layout) == nil && CameraPanel.Preset.matching(nil) == nil)
+    #expect(CameraPanel.Preset.matching(CameraLayout())?.name == "圆形 · 右下")
+}
+
+/// 预设套用同时归位录屏摆位：人像全屏 → 右下小窗；其余 → 铺满留白；水平翻转把自定义摆过的录屏也换到对侧。
+@Test func presetsPlaceTheScreenAndFlipMirrorsIt() {
+    var edit = VideoEdit(duration: 5); edit.camera = CameraLayout()
+    let full = CameraPanel.Preset.all.first { $0.mode == .cameraFull }!
+    full.apply(to: &edit)
+    #expect(edit.camera?.isCameraFull == true && edit.layout.screenScale == 0.32 && edit.layout.screenOffsetX == 1 && edit.layout.screenOffsetY == 1)
+    #expect(CameraPanel.Preset.matching(edit.camera) == full)
+    CameraPanel.flip(&edit)
+    #expect(edit.layout.screenOffsetX == -1 && edit.camera?.isCameraFull == true)
+    CameraPanel.Preset.all[0].apply(to: &edit)
+    #expect(edit.camera?.mode == .overlay && edit.layout.screenScale == 1 && edit.layout.screenOffsetX == 0)
+    #expect(!CameraPanel.Preset.all.contains { $0.id == "rounded-leading-top" })
+}
+
+/// 播放器定位到时间线末尾时改为停在最后一帧的中间（正好末尾那一刻合成里没有样本）；中间的位置原样。
+@Test func seekingToTheEndLandsOnTheLastFrame() {
+    #expect(abs(VideoEditorModel.seekTarget(3, duration: 3, frameRate: 30) - (3.0 - 1.0 / 60.0)) < 1e-9)
+    #expect(abs(VideoEditorModel.seekTarget(5, duration: 3, frameRate: 60) - (3.0 - 1.0 / 120.0)) < 1e-9)
+    #expect(VideoEditorModel.seekTarget(1, duration: 3, frameRate: 30) == 1)
+    #expect(VideoEditorModel.seekTarget(0.01, duration: 0.01, frameRate: 10) == 0)
+    #expect(VideoEditorModel.seekTarget(2, duration: 0, frameRate: 30) == 2)
+}
+
+/// 水平翻转后格子仍然选中：翻转的布局算作原来那一格（叠放换到对侧、卡片换方向），人像全屏翻转不变。
+@Test func flippedLayoutsStillMatchTheirTile() {
+    for preset in CameraPanel.Preset.all {
+        var edit = VideoEdit(duration: 5); edit.camera = CameraLayout()
+        preset.apply(to: &edit)
+        CameraPanel.flip(&edit)
+        #expect(CameraPanel.Preset.matching(edit.camera) == preset, "\(preset.name)")
+        #expect(preset.matchesFlipped(edit.camera!) || preset.mode == .cameraFull)
+    }
+}
+
+/// 时间线缩放下限就是“适合窗口”的那一档：视口宽 700、时长 60 秒时两者相等，并随宽度与时长变化。
+@MainActor @Test func timelineZoomCannotGoBelowFit() {
+    let viewport = TimelineViewport()
+    viewport.width = 700
+    viewport.fit(duration: 60)
+    #expect(viewport.zoom == viewport.minimumZoom(for: 60))
+    #expect(viewport.minimumZoom(for: 120) < viewport.minimumZoom(for: 60))
+    viewport.width = 1400
+    #expect(viewport.minimumZoom(for: 60) > viewport.minimumZoom(for: 120) && viewport.minimumZoom(for: 1) == 4)
+}

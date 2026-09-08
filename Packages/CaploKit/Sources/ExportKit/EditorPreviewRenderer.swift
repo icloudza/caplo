@@ -80,6 +80,19 @@ public actor EditorPreviewRenderer {
         return nil
     }
 
+    /// 自定义布局对话框用的两张原帧（录屏、摄像头），不合成；缺失的返回空。
+    public func stills(url: URL, document: ProjectDocument, edit: VideoEdit, time: Double) async throws -> (screen: CGImage?, camera: CGImage?) {
+        guard !closed, !rendering else { throw ProjectError.invalid("预览请求必须按顺序处理。") }
+        rendering = true
+        defer { rendering = false }
+        let context = self.context
+        let screen = try await mediaImage(role: .screen, sourceTime: edit.sourceTime(at: time), url: url, document: document)
+        let cameraTime = TimelineIndex(clips: edit.mediaClips(.camera)).sourceTime(at: time)
+        let camera = try await mediaImage(role: .camera, sourceTime: cameraTime, url: url, document: document)
+        func cg(_ image: CIImage?) -> CGImage? { image.flatMap { context.createCGImage($0, from: $0.extent) } }
+        return (cg(screen), cg(camera))
+    }
+
     /// 屏幕和摄像头共用两项解码器、四项原帧缓存；缺失区间返回空值，真实解码错误继续上报。
     private func image(url: URL, at time: CMTime) async throws -> CGImage? {
         if let index = frames.firstIndex(where: { $0.0 == url && $0.1 == time }) {
@@ -102,11 +115,16 @@ public actor EditorPreviewRenderer {
             generators.append((url, generator, range)); generatorCount += 1
             if generators.count > 2 { generators.removeFirst().1.cancelAllCGImageGeneration() }
         }
-        guard time >= range.start, time < range.end else { return nil }
-        let image = try await generator.image(at: time).image
+        // 素材比工程记的时长短一点时（最后一帧的显示时长够不到末尾），末尾 1 秒内都取最后一帧；再远就是真的没画面。
+        guard time >= range.start, time < range.end + CMTime(seconds: 1, preferredTimescale: 48_000) else { return nil }
+        let clamped = time < range.end ? time : range.end - CMTime(value: 1, timescale: 600)
+        if let index = frames.firstIndex(where: { $0.0 == url && $0.1 == clamped }) {
+            let cached = frames.remove(at: index); frames.append(cached); return cached.2
+        }
+        let image = try await generator.image(at: clamped).image
         try Task.checkCancellation()
         guard !closed else { throw CancellationError() }
-        decodedFrameCount += 1; frames.append((url, time, image))
+        decodedFrameCount += 1; frames.append((url, clamped, image))
         if frames.count > 4 { frames.removeFirst() }
         return image
     }

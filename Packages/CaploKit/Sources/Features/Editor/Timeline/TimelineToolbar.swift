@@ -48,10 +48,12 @@ struct TimelineToolbar: View {
                 .buttonStyle(StudioIconButtonStyle(active: viewport.snapping))
                 .hoverTip("边界吸附 · 拖动时按 ⌥ 暂时关闭").accessibilityLabel("边界吸附").accessibilityValue(viewport.snapping ? "开" : "关")
             toolbarDivider
-            Button { viewport.zoom = max(-12, viewport.zoom - 0.5) } label: { Image(systemName: "minus") }
+            // 缩放下限 = 适合窗口的那一档，不能缩到整条时间线只占一小截。
+            let minimumZoom = viewport.minimumZoom(for: model.edit.duration)
+            Button { viewport.zoom = max(minimumZoom, viewport.zoom - 0.5) } label: { Image(systemName: "minus") }
                 .buttonStyle(StudioIconButtonStyle(size: .small)).hoverTip("缩小时间线").accessibilityLabel("缩小时间线")
             CaliperSlider("时间线缩放", value: Binding(get: { viewport.zoom }, set: { viewport.zoom = $0 }),
-                          configuration: CaliperConfiguration(track: .fixed, size: .compact, range: -12...4, step: 0.5, tickStep: 1, major: 4, mid: 2,
+                          configuration: CaliperConfiguration(track: .fixed, size: .compact, range: min(minimumZoom, 4)...4, step: 0.5, tickStep: 1, major: 4, mid: 2,
                                                               detents: [0], magnet: .detents, inertia: false, fade: .off, defaultValue: 0, damping: 0.18))
                 .frame(width: 96, height: 26)
             Button { viewport.zoom = min(4, viewport.zoom + 0.5) } label: { Image(systemName: "plus") }

@@ -35,6 +35,10 @@ struct CanvasPanel: View {
             ChipGroup(CanvasRatio.common, selection: Binding(get: { model.edit.layout.ratio }, set: { ratio in model.commit { $0.layout.ratio = ratio } })) { $0.rawValue }
             SelectField(value: currentPlatform?.title, placeholder: "按平台选择…", accessibilityName: "平台比例", sections: platformSections)
             Text(outputCaption).font(CaploFont.caption).monospacedDigit().foregroundStyle(CaploColor.textTertiary)
+            // 开：镜头推近只放大录屏框里的内容，留白与背景不动；关：整个画面一起推近（像 FocuSee）。
+            Toggle(isOn: Binding(get: { model.edit.layout.fixedFocusFrame }, set: { value in model.commit { $0.layout.fixedFocusFrame = value } })) {
+                SettingLabel("固定聚焦区域", systemImage: "rectangle.dashed")
+            }.toggleStyle(StudioToggleStyle())
         }
         PanelSection("背景") {
             ChipGroup(BackgroundKind.allCases, selection: $kind) { $0.rawValue }

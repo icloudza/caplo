@@ -342,7 +342,9 @@ private func cameraFrame(at seconds: Double, red: Bool, width: Int = 160, split:
     var focused = edit
     focused.focuses = [FocusSegment(start: 0, duration: 1, x: 0.5, y: 0.5, scale: 2)]
     let zoomed = try await renderer.render(url: url, document: document, edit: focused, time: 1.6)
-    #expect(pixel(zoomed, at: point, size: size)[2] > 220)
+    // 推近时人像围绕停靠点缩到 70 % 并淡到 85 %：这个点仍在人像内，蓝色仍明显但不再是满值。
+    let zoomedColor = pixel(zoomed, at: point, size: size)
+    #expect(zoomedColor[2] > 150 && Int(zoomedColor[2]) > Int(zoomedColor[0]) + 60)
     #expect(await renderer.decodedFrameCount == decodedCount)
     try ProjectMedia.updatePresentation(item: item, previous: edit, edit: unmirrored)
     #expect((item.videoComposition?.instructions.first as? SceneInstruction)?.edit.camera?.mirrored == false)
