@@ -39,7 +39,8 @@ struct TimelineViewportBridge: NSViewRepresentable {
         view.materialOpaqueOverride = materialOpaquePreview
         view.liveResizing = viewport.liveResizing
         view.update(edit: model.edit, analysis: model.analysis, selection: model.selectedClipIDs,
-                    primary: model.selectedClip, focus: model.selectedFocus, zoom: viewport.zoom, fit: viewport.fitRequest, heights: viewport.trackHeights, reveal: model.revealRequest)
+                    primary: model.selectedClip, focus: model.selectedFocus, mask: model.selectedMask, text: model.selectedText, caption: model.selectedCaption,
+                    zoom: viewport.zoom, fit: viewport.fitRequest, heights: viewport.trackHeights, reveal: model.revealRequest)
     }
     static func dismantleNSView(_ view: TimelineViewportView, coordinator: ()) { view.detach() }
 }
@@ -56,6 +57,9 @@ final class TimelineViewportView: NSView {
     private var index: TimelineIndex
     private var selection: Set<UUID> = []
     private var focus: UUID?
+    private var maskSelection: UUID?
+    private var textSelection: UUID?
+    private var captionSelection: UUID?
     private var primary: UUID?
     private var scale = 60.0
     private var offset = 0.0
@@ -128,6 +132,12 @@ final class TimelineViewportView: NSView {
         let start: Double
         let duration: Double
         let span: FocusSpan?
+        /// 全屏卡段的定格片段：它是画面轨上的块，但不是用户录的画面。
+        var hold = false
+        /// 遮罩块。`role == nil` 原本只表示聚焦，遮罩与文字也走这条分支，靠这两个标志区分。
+        var mask = false
+        var text = false
+        var caption = false
     }
     private var blocks: [Block] = []
     private var rows: [[Block]] = []
@@ -142,17 +152,23 @@ final class TimelineViewportView: NSView {
     private func rowY(_ number: Int) -> Double { 28 + Double(number) * rowHeight - verticalOffset }
     private func rebuildBlocks() {
         var values: [UUID: Block] = [:]
-        let screenNumbers = Dictionary(uniqueKeysWithValues: edit.clips.enumerated().map { ($0.element.id, $0.offset) })
+        // 定格卡段不参与"录制画面 0N"的编号：它不是用户录下来的画面，占一个号只会把后面的都推后。
+        let holdClips = Set(edit.holdCards.compactMap(\.holdClipID))
+        let screenNumbers = Dictionary(uniqueKeysWithValues: edit.clips.filter { !holdClips.contains($0.id) }
+            .enumerated().map { ($0.element.id, $0.offset) })
         for role in [TimelineMedia.screen, .camera, .system, .microphone] {
             if role == .camera, !model.entry.document.segments.contains(where: { $0.files[.camera] != nil }) { continue }
             if role == .system, !model.audioTracks.contains(.system) { continue }
             if role == .microphone, !model.audioTracks.contains(.microphone) { continue }
             let clips = edit.mediaClips(role), timing = TimelineIndex(clips: clips)
             for (number, clip) in clips.enumerated() {
+                let hold = holdClips.contains(clip.id) || clip.holdSource != nil
                 let title = role == .screen ? "录制画面" : role == .camera ? "摄像头" : role == .system ? "系统声音" : "麦克风"
                 let labelNumber = role == .screen ? (screenNumbers[clip.id] ?? number) : number
-                let defaultTitle = title + String(format: " %02d", labelNumber + 1)
-                values[clip.id] = Block(id: clip.id, role: role, title: clip.title ?? defaultTitle, defaultTitle: defaultTitle, start: timing.boundaries[number], duration: clip.duration, span: nil)
+                // 卡段块清掉自定义名之后也要回到"定格卡段"，不能变成一句"录制画面 0N"。
+                let defaultTitle = hold ? "定格卡段" : title + String(format: " %02d", labelNumber + 1)
+                values[clip.id] = Block(id: clip.id, role: role, title: clip.title ?? defaultTitle, defaultTitle: defaultTitle,
+                                        start: timing.boundaries[number], duration: clip.duration, span: nil, hold: hold)
             }
         }
         let focuses = Dictionary(uniqueKeysWithValues: edit.focuses.map { ($0.id, $0) })
@@ -162,10 +178,39 @@ final class TimelineViewportView: NSView {
             let defaultTitle = edit.focusDefaultTitle(focus, numbers: numbers)
             values[span.focusID] = Block(id: span.focusID, role: nil, title: focus.title ?? defaultTitle, defaultTitle: defaultTitle, start: span.start, duration: span.duration, span: span)
         }
+        let maskNumbers = edit.maskNumbers()
+        for span in edit.maskSpans() {
+            guard let mask = edit.mask(id: span.maskID) else { continue }
+            let defaultTitle = mask.defaultTitle(number: maskNumbers[mask.id])
+            // 一条遮罩被剪成多段时每段都画，和聚焦一样；块 ID 相同，选中会一起高亮。
+            let existing = values[span.maskID]
+            let start = min(existing?.start ?? span.start, span.start)
+            let end = max((existing?.start ?? span.start) + (existing?.duration ?? span.duration), span.end)
+            values[span.maskID] = Block(id: span.maskID, role: nil, title: mask.title ?? defaultTitle, defaultTitle: defaultTitle,
+                                        start: start, duration: end - start, span: nil, mask: true)
+        }
+        let textNumbers = edit.textNumbers()
+        for span in edit.textSpans() {
+            guard let value = edit.text(id: span.textID) else { continue }
+            let defaultTitle = value.defaultTitle(number: textNumbers[value.id])
+            let existing = values[span.textID]
+            let start = min(existing?.start ?? span.start, span.start)
+            let end = max((existing?.start ?? span.start) + (existing?.duration ?? span.duration), span.end)
+            values[span.textID] = Block(id: span.textID, role: nil, title: value.title ?? defaultTitle, defaultTitle: defaultTitle,
+                                        start: start, duration: end - start, span: nil, mask: false, text: true)
+        }
         blocks = edit.orderedLayerIDs.compactMap { values.removeValue(forKey: $0) }
         blocks += values.values.sorted { $0.start < $1.start }
         let lookup = Dictionary(uniqueKeysWithValues: blocks.map { ($0.id, $0) })
         rows = edit.timelineRows.map { $0.compactMap { lookup[$0] }.sorted { $0.start < $1.start } }.filter { !$0.isEmpty }
+        // 字幕独占一条轨，不进 layerOrder：一条 25 分钟的录音有几百句，一句一行毫无意义。
+        // 位置固定在效果行之下、媒体行之上。
+        let captionBlocks = self.captionBlocks()
+        if !captionBlocks.isEmpty {
+            let insertion = rows.firstIndex { $0.contains { $0.role != nil } } ?? rows.count
+            rows.insert(captionBlocks, at: insertion)
+            blocks += captionBlocks
+        }
         rowByBlock.removeAll(); audioRows.removeAll()
         for (number, row) in rows.enumerated() {
             for block in row {
@@ -176,11 +221,30 @@ final class TimelineViewportView: NSView {
         }
         let items = blocks.map { block in
             let kind: TimelineNavigatorItem.Kind
+            // 导航条只分四类；遮罩沿用聚焦那一类，不为它新增一档。
             switch block.role { case .screen: kind = .screen; case .camera: kind = .camera; case .system, .microphone: kind = .audio; case nil: kind = .focus }
             return TimelineNavigatorItem(id: block.id, start: block.start, duration: block.duration, kind: kind)
         }
         navigator.update(items: items, duration: timelineExtent, visibleStart: offset, visibleDuration: contentWidth / scale, playhead: playbackPosition)
     }
+    /// 字幕轨上的块：一句一块，被剪辑切成多段时取包络。
+    private func captionBlocks() -> [Block] {
+        guard !edit.captionList.isEmpty else { return [] }
+        let numbers = edit.captionNumbers()
+        var byCue: [UUID: Block] = [:]
+        for span in edit.captionSpans() {
+            guard let cue = edit.caption(id: span.cueID) else { continue }
+            let defaultTitle = "字幕 \(numbers[cue.id] ?? 1)"
+            let existing = byCue[span.cueID]
+            let start = min(existing?.start ?? span.start, span.start)
+            let end = max((existing?.start ?? span.start) + (existing?.duration ?? span.duration), span.end)
+            byCue[span.cueID] = Block(id: cue.id, role: nil, title: cue.text.isEmpty ? defaultTitle : cue.text,
+                                      defaultTitle: defaultTitle, start: start, duration: end - start,
+                                      span: nil, mask: false, text: false, caption: true)
+        }
+        return byCue.values.sorted { $0.start < $1.start }
+    }
+
     private var trackArea: CGRect { CGRect(x: 0, y: 28, width: bounds.width, height: max(1, bounds.height - 28 - TimelineNavigatorView.preferredHeight)) }
     private(set) var trackDrawCount = 0
     private(set) var visibleClipDrawCount = 0
@@ -258,17 +322,17 @@ final class TimelineViewportView: NSView {
 
     /// SwiftUI 每次刷新都会调用；只有内容或几何变化才重绘，与每帧播放位置分离。
     private var lastReveal = 0
-    func update(edit: VideoEdit, analysis: TimelineAnalysis, selection: Set<UUID>, primary: UUID?, focus: UUID?, zoom: Double, fit: Int, heights: [Double]? = nil, reveal: (id: UUID, serial: Int)? = nil) {
+    func update(edit: VideoEdit, analysis: TimelineAnalysis, selection: Set<UUID>, primary: UUID?, focus: UUID?, mask: UUID? = nil, text: UUID? = nil, caption: UUID? = nil, zoom: Double, fit: Int, heights: [Double]? = nil, reveal: (id: UUID, serial: Int)? = nil) {
         var changed = false
         if let heights, heights.count == 4 {
             let clamped = heights.enumerated().map { min(200, max($0.offset == 0 ? 40 : 26, $0.element.isFinite ? $0.element : 40)) }
             if clamped != trackHeights { trackHeights = clamped; changed = true }
         }
         if self.edit.clips != edit.clips { index = TimelineIndex(clips: edit.clips) }
-        if self.edit != edit || self.selection != selection || self.primary != primary || self.focus != focus { changed = true }
+        if self.edit != edit || self.selection != selection || self.primary != primary || self.focus != focus || self.maskSelection != mask || self.textSelection != text || self.captionSelection != caption { changed = true }
         if analysis.system.count != self.analysis.system.count || analysis.microphone.count != self.analysis.microphone.count { changed = true }
         let contentChanged = self.edit != edit
-        self.edit = edit; if contentChanged { rebuildBlocks() }; self.analysis = analysis; self.selection = selection; self.primary = primary; self.focus = focus
+        self.edit = edit; if contentChanged { rebuildBlocks() }; self.analysis = analysis; self.selection = selection; self.primary = primary; self.focus = focus; self.maskSelection = mask; self.textSelection = text; self.captionSelection = caption
         let nextScale = drag == nil ? 60 * pow(2, zoom) : scale
         if nextScale != scale {
             let center = offset + contentWidth / scale / 2
@@ -523,11 +587,19 @@ final class TimelineViewportView: NSView {
             header: timeOrigin, y: rowY(row) + 6, height: rowHeight - 12)
     }
     private func color(for block: Block) -> NSColor {
-        switch block.role { case .system, .microphone: CaploNSColor.audio; case .camera: CaploNSColor.warning; case .screen: accent; case nil: CaploNSColor.zoom }
+        if block.caption { return CaploNSColor.caption }
+        // 卡段是文字层插进画面轨的一段，按文字层的颜色画，一眼看得出它不是录下来的画面。
+        if block.text || block.hold { return CaploNSColor.textLayer }
+        if block.mask { return CaploNSColor.mask }
+        switch block.role { case .system, .microphone: return CaploNSColor.audio; case .camera: return CaploNSColor.warning; case .screen: return accent; case nil: return CaploNSColor.zoom }
     }
     /// 轨道类别图标：实心、圆润的符号，轨头里再垫一块类别色的圆角小徽章，与块的颜色对应。
     private func symbol(for block: Block) -> String {
-        switch block.role { case .system: "speaker.wave.2.fill"; case .microphone: "mic.fill"; case .camera: "video.fill"; case .screen: "play.rectangle.fill"; case nil: "scope" }
+        if block.caption { return "captions.bubble.fill" }
+        if block.hold { return "pause.rectangle.fill" }
+        if block.text { return "text.alignleft" }
+        if block.mask { return "rectangle.dashed" }
+        switch block.role { case .system: return "speaker.wave.2.fill"; case .microphone: return "mic.fill"; case .camera: return "video.fill"; case .screen: return "play.rectangle.fill"; case nil: return "scope" }
     }
     private func drawRoleIcon(_ block: Block, at rect: CGRect, badge: Bool = false) {
         let category = color(for: block)
@@ -759,7 +831,7 @@ final class TimelineViewportView: NSView {
                         outline.setLineDash([4, 4], count: 2, phase: 0); outline.stroke()
                     } else { drawBlock(block, row: number) }
                     if block.role == .screen { visibleClipDrawCount += 1 }
-                    if block.role == nil { visibleFocusDrawCount += 1 }
+                    if block.role == nil, !block.mask, !block.text, !block.caption { visibleFocusDrawCount += 1 }
                     let element = TimelineClipAccessibilityElement { [weak self] in self?.select(block) }
                     element.setAccessibilityRole(.button)
                     element.setAccessibilityLabel("\(block.title)，起点 \(TimelineTime.code(block.start))，时长 \(TimelineTime.code(block.duration))")
@@ -803,15 +875,25 @@ final class TimelineViewportView: NSView {
         }
     }
     private func isSelected(_ block: Block) -> Bool {
+        if block.caption { return model.selectedCaption == block.id }
+        if block.text { return model.selectedText == block.id }
+        if block.mask { return model.selectedMask == block.id }
         if block.role == nil { return model.selectedFocus == block.id }
         if block.role == .screen { return model.selectedMediaID == nil && model.selectedFocus == nil && (selection.contains(block.id) || primary == block.id) }
         return model.selectedMediaID == block.id
     }
+    /// 选中一个块：先整体清空，再只设一项。
+    /// 每个分支各清各的写法漏过一次——选完字幕再选遮罩，`selectedCaption` 还留着，
+    /// 按删除键删掉的是那句字幕而不是遮罩。
     private func select(_ block: Block) {
-        if block.role == .screen { model.selectClip(block.id) }
-        else if let role = block.role { model.selectedFocus = nil; model.selectedMedia = role; model.selectedMediaID = block.id }
-        else { model.selectedMedia = nil; model.selectedMediaID = nil; model.selectedFocus = block.id }
-        needsDisplay = true
+        defer { needsDisplay = true }
+        if block.role == .screen { model.selectClip(block.id); return }
+        model.clearSelection()
+        if block.caption { model.selectedCaption = block.id }
+        else if block.text { model.selectedText = block.id }
+        else if block.mask { model.selectedMask = block.id }
+        else if let role = block.role { model.selectedMedia = role; model.selectedMediaID = block.id }
+        else { model.selectedFocus = block.id }
     }
     private func drawBlock(_ block: Block, row: Int) {
         let rect = blockRect(block, row: row)
@@ -919,6 +1001,9 @@ final class TimelineViewportView: NSView {
         guard trackArea.contains(point), rows.indices.contains(number) else { return nil }
         let siblings = rows[number].sorted { $0.start < $1.start }
         let menu = NSMenu()
+        // 不关掉自动启用的话，AppKit 会把下面手写的 isEnabled 全部覆盖成可点，
+        // "两侧留不下最小时长就禁用" 这类判断等于没写。
+        menu.autoenablesItems = false
         if let (block, _) = hitBlock(at: point, row: number) {
             if !isSelected(block) { select(block) }
             let header = NSMenuItem(title: block.title + " · " + TimelineTime.code(block.start), action: nil, keyEquivalent: "")
@@ -937,11 +1022,20 @@ final class TimelineViewportView: NSView {
                 let focus = NSMenuItem(title: "在此处添加聚焦 · " + TimelineTime.code(clicked), action: #selector(addFocusHere(_:)), keyEquivalent: "")
                 focus.target = self; focus.representedObject = clicked
                 menu.addItem(focus)
+                let mask = NSMenuItem(title: "在此处添加遮罩 · " + TimelineTime.code(clicked), action: #selector(addMaskHere(_:)), keyEquivalent: "")
+                mask.target = self; mask.representedObject = clicked
+                menu.addItem(mask)
+                let text = NSMenuItem(title: "在此处添加文字 · " + TimelineTime.code(clicked), action: #selector(addTextHere(_:)), keyEquivalent: "")
+                text.target = self; text.representedObject = clicked
+                menu.addItem(text)
             }
             menu.addItem(.separator())
-            let rename = NSMenuItem(title: "重命名…", action: #selector(renameBlock(_:)), keyEquivalent: "")
-            rename.target = self; rename.representedObject = block.id
-            menu.addItem(rename)
+            // 字幕块的名字就是它的台词，改名没有意义；文本在字幕面板里编辑。
+            if !block.caption {
+                let rename = NSMenuItem(title: "重命名…", action: #selector(renameBlock(_:)), keyEquivalent: "")
+                rename.target = self; rename.representedObject = block.id
+                menu.addItem(rename)
+            }
             if block.role == .screen {
                 let duplicate = NSMenuItem(title: "复制片段", action: #selector(duplicateBlock(_:)), keyEquivalent: "d")
                 duplicate.target = self; menu.addItem(duplicate)
@@ -980,6 +1074,8 @@ final class TimelineViewportView: NSView {
     }
     @objc private func splitBlockHere(_ sender: NSMenuItem) { if let time = sender.representedObject as? Double { model.split(at: time) } }
     @objc private func addFocusHere(_ sender: NSMenuItem) { if let time = sender.representedObject as? Double { model.requestAddFocus(start: time, duration: 2) } }
+    @objc private func addMaskHere(_ sender: NSMenuItem) { if let time = sender.representedObject as? Double { model.addMask(start: time, duration: 2) } }
+    @objc private func addTextHere(_ sender: NSMenuItem) { if let time = sender.representedObject as? Double { model.addText(start: time, duration: 3) } }
     /// 在块下方弹出改名框；确定或回车写入模型，留空恢复默认名称。
     @objc private func renameBlock(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? UUID, let block = blocks.first(where: { $0.id == id }), let row = rowByBlock[id] else { return }
@@ -1058,7 +1154,10 @@ final class TimelineViewportView: NSView {
             snappedTime = snap
             var adjustment = (snap ?? TimelineTime.quantized(desired)) - anchor
             adjustment = drag.snapshot.rowDragDelta(for: block.id, edge: edge, proposed: adjustment, leavingRow: edge == .body && !remainsInOriginalRow(drag, at: point))
-            if let role = block.role { next.dragMedia(role, id: block.id, edge: edge, delta: adjustment, sourceDuration: model.entry.document.duration) }
+            if block.caption { next.dragCaption(id: block.id, edge: edge, delta: adjustment, sourceDuration: model.entry.document.duration) }
+            else if block.text { next.dragText(id: block.id, edge: edge, delta: adjustment, sourceDuration: model.entry.document.duration) }
+            else if block.mask { next.dragMask(id: block.id, edge: edge, delta: adjustment, sourceDuration: model.entry.document.duration) }
+            else if let role = block.role { next.dragMedia(role, id: block.id, edge: edge, delta: adjustment, sourceDuration: model.entry.document.duration) }
             else if let span = block.span { next.materializeFocus(span); next.dragFocus(id: block.id, edge: edge, delta: adjustment) }
             next.constrainTimelineFocuses()
             if edge == .body {

@@ -93,7 +93,8 @@ public final class VideoCompositor: NSObject, AVVideoCompositing, @unchecked Sen
                     .flatMap { request.sourceFrame(byTrackID: $0) }.map { CIImage(cvPixelBuffer: $0) }
                 let sourceImage = instruction.screenSource(at: request.compositionTime).flatMap { request.sourceFrame(byTrackID: $0) }.map { CIImage(cvPixelBuffer: $0) }
                 let backdrop = backdrops.backdrop(edit: instruction.edit, sourceSize: SceneRenderer.croppedSourceSize(sourceImage?.extent.size ?? size, layout: instruction.edit.layout),
-                                                  size: size, backgroundImage: instruction.backgroundImage, context: context)
+                                                  size: size, backgroundImage: instruction.backgroundImage,
+                                                  hasCamera: camera != nil, context: context)
                 let image = SceneRenderer.frame(source: sourceImage, edit: instruction.edit, time: request.compositionTime.seconds, size: size, camera: camera, pointer: instruction.pointerFrame(at: request.compositionTime.seconds), backgroundImage: instruction.backgroundImage, backdrop: backdrop, timeline: instruction.timeline)
                 context.render(image, to: output, bounds: CGRect(origin: .zero, size: size), colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
                 request.finish(withComposedVideoFrame: output)
@@ -116,6 +117,7 @@ public final class SceneBackdropCache: @unchecked Sendable {
         let sourceSize: CGSize
         let size: CGSize
         /// 人像在后时缓存的是只有阴影的透明图层，逐帧再把人像垫进去。
+        /// 这一帧有没有摄像头画面也算在里面：没有画面时 behind 分支不成立，缓存的必须是完整背景。
         let behind: Bool
     }
     private var key: Key?
@@ -123,8 +125,12 @@ public final class SceneBackdropCache: @unchecked Sendable {
 
     public init() {}
 
-    public func backdrop(edit: VideoEdit, sourceSize: CGSize, size: CGSize, backgroundImage: CIImage?, context: CIContext) -> CIImage {
-        let behind = SceneRenderer.cameraIsBehind(edit)
+    /// `hasCamera` 必须与这一帧真的有没有摄像头画面一致：`SceneRenderer.frame` 的 behind 分支
+    /// 也带着这个条件。两边不一致时（布局是"人像在后"，可这一帧摄像头轨是空的）
+    /// frame 会走普通分支拿这张图当底图，而缓存给的却是只有阴影的透明层——整幅背景就没了。
+    public func backdrop(edit: VideoEdit, sourceSize: CGSize, size: CGSize, backgroundImage: CIImage?,
+                         hasCamera: Bool = true, context: CIContext) -> CIImage {
+        let behind = SceneRenderer.cameraIsBehind(edit) && hasCamera
         let key = Key(layout: edit.layout, camera: edit.camera, sourceSize: sourceSize, size: size, behind: behind)
         if key == self.key, let image { return image }
         let composed = behind
@@ -181,8 +187,9 @@ public enum SceneRenderer {
     }
 
     /// 成片中人像所占矩形（输出像素坐标）：叠放按归一化位置、侧边按卡片，都随聚焦包络 `focus` 缩小；分屏的卡片随录屏比例 `sourceSize` 排。
-    public static func cameraRect(edit: VideoEdit, layout: CameraLayout, size: CGSize, sourceSize: CGSize = .zero, focus: Double = 0) -> CGRect {
-        layout.portraitRect(canvas: size, padding: edit.layout.padding * size.width / 960, screen: sourceSize, progress: focus)
+    public static func cameraRect(edit: VideoEdit, layout: CameraLayout, size: CGSize, sourceSize: CGSize = .zero,
+                                  focus: Double = 0, region: CGRect? = nil) -> CGRect {
+        layout.portraitRect(canvas: size, padding: edit.layout.padding * size.width / 960, screen: sourceSize, progress: focus, region: region)
     }
 
     /// 裁切后的源画面像素尺寸。
@@ -235,38 +242,62 @@ public enum SceneRenderer {
     public static func frame(source full: CIImage?, edit: VideoEdit, time: Double, size: CGSize, camera: CIImage? = nil, pointer: PointerFrame = PointerFrame(), backgroundImage: CIImage? = nil, backdrop: CIImage? = nil, timeline: TimelineIndex? = nil) -> CIImage {
         let bounds = CGRect(origin: .zero, size: size)
         let behind = cameraIsBehind(edit) && camera != nil
+        // 文字投影与画面层的摆放各算一次：字幕、文字、版式变换共用同一份结果。
+        let textSpans = edit.textList.isEmpty ? [] : edit.textSpans(in: max(0, time - 0.001)..<max(0.002, time + 0.001), using: timeline)
+        let stage = edit.stage(at: time, spans: textSpans)
+        let staged = !stage.isIdentity
+        // 分屏时把浮在录屏之上的画中画摘出来单独摆：它不跟着画面缩到一栏里去。
+        // 必须连着 `staged` 一起判断——版式刚起步的那一两帧变换还约等于恒等（staged 仍是 false），
+        // 只看 split 的话画中画既没跟着画面画、也没被单独画，会整帧消失。
+        let lifted = staged && stage.split && edit.camera?.isFloatingPortrait == true
+        // 卡段正中画面层已经完全淡出。整条画面管线（解码、遮罩、圆角、光标、人像、两次重采样）
+        // 再走一遍也只是乘上 0：直接画背景加文字。3 秒卡段里有 2.3 秒落在这一档。
+        if stage.alpha < 0.002 {
+            return withText(background(edit.layout, image: backgroundImage, size: size),
+                            edit: edit, time: time, size: size, spans: textSpans)
+        }
         // 没有录制块的区间只显示画布背景，独立摄像头仍可显示。
         guard let full else {
-            let base = background(edit.layout, image: backgroundImage, size: size)
+            let background = background(edit.layout, image: backgroundImage, size: size)
             // 没有录屏时分屏的卡片按画布比例当作录屏来排，位置不跳。
-            if let camera, let layout = edit.camera, layout.enabled { return cameraOverlay(camera, edit: edit, layout: layout, over: base, size: size, sourceSize: size) }
-            return base
+            guard let camera, let layout = edit.camera, layout.enabled else {
+                return withText(background, edit: edit, time: time, size: size, spans: textSpans)
+            }
+            // 分屏时浮在上面的画中画同样摘出来单独摆，与有录屏时一致。
+            if lifted {
+                let picture = cameraOverlay(camera, edit: edit, layout: layout, over: background, size: size,
+                                            sourceSize: size, region: stage.region(canvas: size))
+                return withText(picture, edit: edit, time: time, size: size, spans: textSpans)
+            }
+            let base = staged ? CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0)).cropped(to: bounds) : background
+            var picture = cameraOverlay(camera, edit: edit, layout: layout, over: base, size: size, sourceSize: size)
+            if staged { picture = applyStage(stage, to: picture, size: size).composited(over: background).cropped(to: bounds) }
+            return withText(picture, edit: edit, time: time, size: size, spans: textSpans)
         }
+        // 遮罩贴在内容上，所以在裁切与聚焦变换之前就盖掉：推近时它跟着内容一起放大，
+        // 裁切也只是从已经打过码的画面里取一块，不会因为换了取景就露出原文。
+        let covered = masked(full, edit: edit, time: time, timeline: timeline)
         // 裁切保留原像素坐标系：指针仍按完整画面归一化坐标映射，聚焦则换算到裁切区域。
-        var source = full
+        var source = covered
         var edit = edit
         if let crop = edit.layout.effectiveCrop {
-            let extent = full.extent
+            let extent = covered.extent
             let cropRect = CGRect(x: extent.minX + extent.width * crop.x, y: extent.minY + extent.height * (1 - crop.y - crop.height),
                                   width: extent.width * crop.width, height: extent.height * crop.height)
-            source = full.cropped(to: cropRect)
-            edit.focuses = edit.focuses.map { focus in
-                var mapped = focus
-                let point = crop.remap(CGPoint(x: focus.x, y: focus.y))
-                mapped.x = min(1, max(0, point.x)); mapped.y = min(1, max(0, point.y))
-                mapped.path = focus.path?.map { frame in
-                    var moved = frame
-                    let point = crop.remap(CGPoint(x: frame.x, y: frame.y))
-                    moved.x = min(1, max(0, point.x)); moved.y = min(1, max(0, point.y))
-                    return moved
-                }
-                return mapped
-            }
+            source = covered.cropped(to: cropRect)
+            // 聚焦坐标换到裁切区域。画布上的编辑框用同一个函数，两边的相机才是同一个点。
+            edit.focuses = edit.cropResolved().focuses
         }
         let geometry = geometry(edit: edit, sourceSize: source.extent.size, size: size)
         let rect = geometry.rect
         // 人像在后时 backdrop 是只有阴影的透明层，不能当底图，那条分支自己拼底图。
-        let base = behind ? CIImage.empty() : backdrop ?? self.backdrop(edit: edit, sourceSize: source.extent.size, size: size, backgroundImage: backgroundImage)
+        // 版式变换生效时同理：画面层要单独画在透明底上，缩放淡出之后再叠到恒满幅的背景上。
+        // 透明底图必须带尺寸：`CIImage.empty()` 的 extent 是空的，拿它做 alpha 混合结果不可预期。
+        let transparent = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0)).cropped(to: bounds)
+        let base: CIImage
+        if behind { base = CIImage.empty() }
+        else if staged { base = shadowLayer(edit: edit, sourceSize: source.extent.size, size: size) ?? transparent }
+        else { base = backdrop ?? self.backdrop(edit: edit, sourceSize: source.extent.size, size: size, backgroundImage: backgroundImage) }
         // 摄像头画中画始终叠在录制画面之上；时间线行序只描述布局（摄像头行默认在声音轨上方），不再决定叠放次序。
         guard rect.width > 0, rect.height > 0 else { return base }
         let focus = SceneEvaluator.focus(edit: edit, time: time, timeline: timeline)
@@ -292,18 +323,101 @@ public enum SceneRenderer {
         if behind, let camera, let layout = edit.camera, layout.isValid {
             // 人像在后：背景（随整体推近）→ 卡片（固定，不带任何聚焦效果）→ 录屏阴影 + 录屏（随整体推近）。
             let background = background(edit.layout, image: backgroundImage, size: size)
-            let card = cameraOverlay(camera, edit: edit, layout: layout, over: follow ? background.transformed(by: zoom).cropped(to: bounds) : background, size: size, sourceSize: source.extent.size)
+            let under = staged ? CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0)).cropped(to: bounds)
+                                : (follow ? background.transformed(by: zoom).cropped(to: bounds) : background)
+            let card = cameraOverlay(camera, edit: edit, layout: layout, over: under, size: size, sourceSize: source.extent.size)
             let clear = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0)).cropped(to: bounds)
             var upper = screen.applyingFilter("CIBlendWithAlphaMask", parameters: [kCIInputBackgroundImageKey: clear, kCIInputMaskImageKey: shape]).cropped(to: bounds)
             // 缓存层在这种布局下就是只有阴影的透明层。
             if let shadow = backdrop ?? shadowLayer(edit: edit, sourceSize: source.extent.size, size: size) { upper = upper.composited(over: shadow) }
             if follow { upper = upper.transformed(by: zoom).cropped(to: bounds) }
-            return upper.composited(over: card).cropped(to: bounds)
+            var picture = upper.composited(over: card).cropped(to: bounds)
+            if staged { picture = applyStage(stage, to: picture, size: size).composited(over: background).cropped(to: bounds) }
+            return withText(picture, edit: edit, time: time, size: size, spans: textSpans)
         }
         var composed = screen.applyingFilter("CIBlendWithAlphaMask", parameters: [kCIInputBackgroundImageKey: base, kCIInputMaskImageKey: shape]).cropped(to: bounds)
         if follow { composed = composed.transformed(by: zoom).cropped(to: bounds) }
-        guard let camera, let layout = edit.camera, layout.enabled, layout.isValid else { return composed }
-        return cameraOverlay(camera, edit: edit, layout: layout, over: composed, size: size, sourceSize: source.extent.size, focus: focus.envelope)
+        // 侧边 / 在后 / 分屏 / 人像全屏的人像是画面构图的一部分，照旧跟着画面一起变换（见上面的 lifted）。
+        var picture = composed
+        if let camera, let layout = edit.camera, layout.enabled, layout.isValid, !lifted {
+            picture = cameraOverlay(camera, edit: edit, layout: layout, over: composed, size: size, sourceSize: source.extent.size, focus: focus.envelope)
+        }
+        if staged {
+            picture = applyStage(stage, to: picture, size: size)
+                .composited(over: background(edit.layout, image: backgroundImage, size: size)).cropped(to: bounds)
+            if lifted, let camera, let layout = edit.camera, layout.enabled, layout.isValid {
+                picture = cameraOverlay(camera, edit: edit, layout: layout, over: picture, size: size,
+                                        sourceSize: source.extent.size, focus: focus.envelope, region: stage.region(canvas: size))
+            }
+        }
+        return withText(picture, edit: edit, time: time, size: size, spans: textSpans)
+    }
+
+    /// 把画面层整体缩放挪位并淡出。背景不参与，所以这一步只作用在透明底上的画面层。
+    static func applyStage(_ stage: StageTransform, to image: CIImage, size: CGSize) -> CIImage {
+        var result = image.transformed(by: stage.affine(canvas: size)).cropped(to: CGRect(origin: .zero, size: size))
+        let alpha = min(1, max(0, stage.alpha))
+        if alpha < 0.999 {
+            result = result.applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: alpha, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: alpha, z: 0, w: 0),
+                "inputBVector": CIVector(x: 0, y: 0, z: alpha, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: alpha),
+            ])
+        }
+        return result
+    }
+
+    /// 字幕与文字层画在最上面，而且在输出画面坐标里：它们不跟着镜头推近一起放大，
+    /// 否则标题会被推出画外。字幕在下、文字层在上。都没有时原样返回，一次滤镜都不建。
+    static func withText(_ image: CIImage, edit: VideoEdit, time: Double, size: CGSize, spans: [TextSpan]) -> CIImage {
+        guard time.isFinite, !edit.textList.isEmpty || !edit.captionList.isEmpty else { return image }
+        let light = isLightBackground(edit.layout)
+        var result = image
+        let style = edit.captionStyleOrDefault
+        // 只投影播放头附近这一段：一条 25 分钟的录音可能有四百句，逐帧全量投影会把播放拖垮。
+        // 往前留够一句最长的显示时长，往后留一点好让"接上下一句"的规则算得出来。
+        let window = max(0, time - 30)..<max(0.002, time + style.lead + style.bridge + 2)
+        if !edit.captionList.isEmpty, style.burnIn,
+           let caption = edit.activeCaption(at: time, spans: edit.captionSpans(in: window)) {
+            // 药丸模式下药丸是高亮色，字要按药丸亮度取反色，不然就是同色压同色、一个字都读不出来。
+            let pill = style.highlight == .pill
+            let glyph = pill ? TextRenderer.Highlight.readableGlyphColor(on: style.highlightColor) : style.highlightColor
+            let highlight = caption.highlightRange().map {
+                TextRenderer.Highlight(location: $0.location, length: $0.length, color: glyph,
+                                       pillColor: style.highlightColor, progress: caption.wordProgress, pill: pill)
+            }
+            if let layer = TextRenderer.shared.image(for: caption.renderState(style: style), canvas: size,
+                                                     lightBackground: light, highlight: style.highlight == .none ? nil : highlight) {
+                result = layer.composited(over: result)
+            }
+        }
+        if !edit.textList.isEmpty {
+            for state in edit.activeTexts(at: time, spans: spans) {
+                guard let layer = TextRenderer.shared.image(for: state, canvas: size, lightBackground: light) else { continue }
+                result = layer.composited(over: result)
+            }
+        }
+        return result.cropped(to: CGRect(origin: .zero, size: size))
+    }
+
+    /// 画布背景是不是浅色；"自动"文字色据此在墨黑与白之间选。
+    public static func isLightBackground(_ layout: CanvasLayout) -> Bool {
+        // 自定义背景图的亮度未知，按深色处理（白字加阴影在任何图上都读得出来）。
+        guard layout.backgroundImage == nil else { return false }
+        let colors = layout.background.colors
+        func luma(_ color: (red: Double, green: Double, blue: Double)) -> Double {
+            0.2126 * color.red + 0.7152 * color.green + 0.0722 * color.blue
+        }
+        return (luma((colors.start.red, colors.start.green, colors.start.blue))
+                + luma((colors.end.red, colors.end.green, colors.end.blue))) / 2 > 0.62
+    }
+
+    /// 当前帧生效的区域遮罩已经盖上的录制画面。没有遮罩时原样返回，一次滤镜都不建。
+    /// 只查询播放头附近这一小段区间的投影，长工程也不必每帧扫描全部剪辑。
+    static func masked(_ image: CIImage, edit: VideoEdit, time: Double, timeline: TimelineIndex?) -> CIImage {
+        guard !edit.maskList.isEmpty, time.isFinite else { return image }
+        let pad = MaskSegment.safetyPad + 0.001
+        let spans = edit.maskSpans(in: max(0, time - pad)..<max(0.001, time + pad), using: timeline)
+        return MaskRenderer.apply(edit.activeMasks(at: time, spans: spans), to: image)
     }
 
     /// `focus`：当前帧的推近包络 0…1，叠放的人像随它缩小并淡到 85 %（与画面推近同一条曲线）。
@@ -316,8 +430,9 @@ public enum SceneRenderer {
         return CGAffineTransform(scaleX: s, y: s).concatenating(CGAffineTransform(translationX: tx, y: ty))
     }
 
-    private static func cameraOverlay(_ source: CIImage, edit: VideoEdit, layout: CameraLayout, over background: CIImage, size: CGSize, sourceSize: CGSize, focus: Double = 0) -> CIImage {
-        let rect = cameraRect(edit: edit, layout: layout, size: size, sourceSize: sourceSize, focus: focus), bounds = CGRect(origin: .zero, size: size)
+    private static func cameraOverlay(_ source: CIImage, edit: VideoEdit, layout: CameraLayout, over background: CIImage, size: CGSize,
+                                      sourceSize: CGSize, focus: Double = 0, region: CGRect? = nil) -> CIImage {
+        let rect = cameraRect(edit: edit, layout: layout, size: size, sourceSize: sourceSize, focus: focus, region: region), bounds = CGRect(origin: .zero, size: size)
         let opacity = layout.focusedOpacity(progress: focus)
         guard source.extent.width > 0, source.extent.height > 0 else { return background }
         let scale = max(rect.width / source.extent.width, rect.height / source.extent.height)

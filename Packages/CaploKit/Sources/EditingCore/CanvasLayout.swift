@@ -127,6 +127,10 @@ public struct CropRect: Codable, Equatable, Sendable {
     public func remap(_ point: CGPoint) -> CGPoint {
         CGPoint(x: (point.x - x) / max(0.0001, width), y: (point.y - y) / max(0.0001, height))
     }
+    /// `remap` 的逆：裁切区归一化坐标换回整幅画面归一化坐标。
+    public func restore(_ point: CGPoint) -> CGPoint {
+        CGPoint(x: x + point.x * width, y: y + point.y * height)
+    }
 }
 
 public struct CanvasLayout: Equatable, Codable, Sendable {
@@ -218,5 +222,30 @@ public enum LayoutGeometry {
         let height = max(0, bounds.height - inset * 2)
         let scale = min(width / content.width, height / content.height)
         return CGSize(width: content.width * scale, height: content.height * scale)
+    }
+}
+
+extension VideoEdit {
+    /// 把聚焦坐标换算到裁切区域，得到与渲染端完全一致的一份副本。
+    ///
+    /// 裁切之后录屏画面只剩中间一块，聚焦的归一化坐标必须跟着改口径，
+    /// 否则相机会对着一个不存在的位置推近。渲染端一直这么做（见 `SceneRenderer.frame`）；
+    /// 画布上的编辑框也必须用同一份，不然两边的相机不是同一个点，框就和画面分家。
+    public func cropResolved() -> VideoEdit {
+        guard let crop = layout.effectiveCrop, !crop.isFull else { return self }
+        var result = self
+        result.focuses = focuses.map { focus in
+            var mapped = focus
+            let point = crop.remap(CGPoint(x: focus.x, y: focus.y))
+            mapped.x = min(1, max(0, point.x)); mapped.y = min(1, max(0, point.y))
+            mapped.path = focus.path?.map { frame in
+                var moved = frame
+                let point = crop.remap(CGPoint(x: frame.x, y: frame.y))
+                moved.x = min(1, max(0, point.x)); moved.y = min(1, max(0, point.y))
+                return moved
+            }
+            return mapped
+        }
+        return result
     }
 }

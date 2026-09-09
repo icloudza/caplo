@@ -60,6 +60,9 @@ public struct CameraLayout: Codable, Equatable, Sendable {
     public var usesCard: Bool { isSide || isBehind || isSplit }
     /// 在后、分屏、人像全屏以及垫在录屏下面的叠放，人像不带任何聚焦效果（不缩不淡，整体推近时也不动）。
     public var ignoresFocus: Bool { isBehind || isSplit || isCameraFull || (mode == .overlay && belowScreen) }
+    /// 浮在录屏之上的那种画中画。只有它在文字分屏时会被从画面层里摘出来单独摆——
+    /// 侧边 / 在后 / 分屏 / 人像全屏的人像是画面构图的一部分，摘出来布局就散了。
+    public var isFloatingPortrait: Bool { mode == .overlay && !belowScreen }
     /// 人像垫在录屏下面（在后、人像全屏、垫底的叠放）：层级是背景 → 人像 → 录屏阴影 → 录屏。
     public var underScreen: Bool { isBehind || isCameraFull || (mode == .overlay && belowScreen) }
     /// 叠放圆角矩形的宽高比，钳在合法范围。
@@ -92,6 +95,27 @@ public struct CameraLayout: Codable, Equatable, Sendable {
         let width = edge * size, height = shape == .circle ? width : width / effectiveAspect
         return CGRect(x: margin + (canvas.width - 2 * margin - width) * x,
                       y: canvas.height - margin - height - (canvas.height - 2 * margin - height) * y,
+                      width: width, height: height)
+    }
+
+    /// 把画中画摆进画布上的某一块子区域。文字左右分屏时画面只占一栏，画中画要待在画面那一栏里，
+    /// 而**不是**跟着画面一起被缩小——缩到半栏的人像小得看不清，也失去了画中画的意义。
+    ///
+    /// 尺寸仍按整幅画布的短边算（所以分屏前后人像基本一样大），只是可用区换成了 `region`。
+    /// 只有一种情况会收：人像大到要盖住画面栏六成以上——栏被拉得很窄时不收的话，
+    /// 人像会把那一栏的画面整个吞掉。默认的圆形人像在等分分屏下几乎不受影响（收不到 5 %）。
+    /// 边距按这一栏的短边算，不按整幅画布，否则窄栏里光边距就吃掉一大半。
+    /// 整幅画布走 `rect(in:)`，那条路完全不设上限——用户把人像拉到多大就是多大。
+    public func rect(in canvas: CGSize, region: CGRect) -> CGRect {
+        let edge = min(canvas.width, canvas.height)
+        let margin = min(region.width, region.height) * 0.035
+        var width = edge * size, height = shape == .circle ? width : width / effectiveAspect
+        let room = CGSize(width: max(1, region.width - 2 * margin), height: max(1, region.height - 2 * margin))
+        let ceiling = 0.6
+        let shrink = min(1, min(room.width * ceiling / max(1, width), room.height * ceiling / max(1, height)))
+        width *= shrink; height *= shrink
+        return CGRect(x: region.minX + margin + (room.width - width) * x,
+                      y: region.maxY - margin - height - (room.height - height) * y,
                       width: width, height: height)
     }
 
@@ -148,11 +172,20 @@ public struct CameraLayout: Codable, Equatable, Sendable {
 
     /// 当前帧的人像矩形：叠放以停靠点为锚随聚焦缩小；侧边卡片以自身中心为锚缩小；在后与分屏的卡片不缩。
     /// `screen` 只有分屏需要（整行尺寸取决于录屏比例）。
-    public func portraitRect(canvas: CGSize, padding: Double, screen: CGSize = .zero, progress: Double) -> CGRect {
+    /// `region` 非空表示把叠放的画中画摆进画布上的那一块（文字分屏时的画面栏）；其余布局不受影响。
+    public func portraitRect(canvas: CGSize, padding: Double, screen: CGSize = .zero, progress: Double, region: CGRect? = nil) -> CGRect {
         if isCameraFull { return CGRect(origin: .zero, size: canvas) }
         if isBehind { return behindFrames(canvas: canvas, padding: padding, screen: .zero).camera }
         if isSplit { return splitFrames(canvas: canvas, padding: padding, screen: screen).camera }
-        guard isSide else { return focusedRect(in: canvas, progress: progress) }
+        guard isSide else {
+            guard let region else { return focusedRect(in: canvas, progress: progress) }
+            let base = rect(in: canvas, region: region)
+            guard shrinkOnFocus, progress > 0 else { return base }
+            let factor = 1 - (1 - focusedScale) * min(1, max(0, progress))
+            let anchor = CGPoint(x: base.minX + base.width * x, y: base.minY + base.height * (1 - y))
+            let width = base.width * factor, height = base.height * factor
+            return CGRect(x: anchor.x - width * x, y: anchor.y - height * (1 - y), width: width, height: height)
+        }
         let base = sideFrames(canvas: canvas, padding: padding, screen: .zero).camera
         guard shrinkOnFocus, progress > 0 else { return base }
         let factor = 1 - (1 - focusedScale) * min(1, max(0, progress))

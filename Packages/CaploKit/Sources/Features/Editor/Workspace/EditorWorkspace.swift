@@ -45,6 +45,9 @@ final class EditorWorkspaceView: NSSplitView, NSSplitViewDelegate {
     let canvasPane = NSView(frame: .zero)
     let canvas = CanvasSurfaceView(frame: .zero)
     private let overlay: NSHostingView<AnyView>
+    /// 遮罩与文字的编辑层夹在成片显示面和空态提示之间；不在对应面板时它们的 hitTest 一律放行。
+    private let maskEditor: MaskCanvasView
+    private let textEditor: TextCanvasView
     private let overlayContent: AnyView
     private var materialOpaquePreview: Bool?
     private var materialContrast: ColorSchemeContrast = .standard
@@ -57,7 +60,12 @@ final class EditorWorkspaceView: NSSplitView, NSSplitViewDelegate {
     init(model: VideoEditorModel, viewport: TimelineViewport, addFocus: @escaping () -> Void) {
         self.model = model; self.viewport = viewport
         overlayContent = AnyView(CanvasOverlay(model: model))
-        overlay = TransparentEditorHostingView(rootView: overlayContent)
+        let overlayHost = TransparentEditorHostingView(rootView: overlayContent)
+        // 空态与载入提示是纯装饰，必须放行点击，否则它下面的遮罩 / 文字编辑层收不到任何鼠标。
+        overlayHost.passesThroughClicks = true
+        overlay = overlayHost
+        maskEditor = MaskCanvasView(model: model, canvas: canvas)
+        textEditor = TextCanvasView(model: model, canvas: canvas)
         timelinePane = TimelinePaneView(model: model, viewport: viewport, addFocus: addFocus)
         super.init(frame: .zero)
         isVertical = false
@@ -80,6 +88,10 @@ final class EditorWorkspaceView: NSSplitView, NSSplitViewDelegate {
         overlay.sizingOptions = []
         overlay.autoresizingMask = [.width, .height]
         canvasPane.addSubview(canvas)
+        maskEditor.autoresizingMask = [.width, .height]
+        canvasPane.addSubview(maskEditor)
+        textEditor.autoresizingMask = [.width, .height]
+        canvasPane.addSubview(textEditor)
         canvasPane.addSubview(overlay)
         addArrangedSubview(canvasPane)
         addArrangedSubview(timelinePane)
@@ -122,10 +134,15 @@ final class EditorWorkspaceView: NSSplitView, NSSplitViewDelegate {
         guard !detached else { return }
         withObservationTracking {
             timelinePane.timeline.update(edit: model.edit, analysis: model.analysis, selection: model.selectedClipIDs,
-                                         primary: model.selectedClip, focus: model.selectedFocus,
+                                         primary: model.selectedClip, focus: model.selectedFocus, mask: model.selectedMask, text: model.selectedText, caption: model.selectedCaption,
                                          zoom: viewport.zoom, fit: viewport.fitRequest, heights: viewport.trackHeights)
             canvas.aspectRatio = model.edit.layout.ratio.value
             canvas.isHiddenContent = (model.edit.duration <= 0)
+            // 遮罩框跟着编辑内容、播放头与选中项走；播放中整层不画，所以顺带读一下 playing。
+            maskEditor.refreshFor(edit: model.edit, time: model.skimPosition ?? model.position,
+                                  selection: model.selectedMask, editing: model.maskEditing, playing: model.playing)
+            textEditor.refreshFor(edit: model.edit, time: model.skimPosition ?? model.position,
+                                  selection: model.selectedText, editing: model.textEditing, playing: model.playing)
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in self?.observeModel() }
         }
@@ -274,6 +291,10 @@ final class TimelinePaneView: NSView {
 /// 独立工具栏与空态宿主不提供额外窗口底色；玻璃由主窗口和显式表面共同合成。
 private final class TransparentEditorHostingView<Content: View>: NSHostingView<Content> {
     override var isOpaque: Bool { false }
+    /// 纯装饰的浮层设成 true：`NSHostingView` 即使根视图整棵 `allowsHitTesting(false)`，
+    /// 命中测试仍会把自己交出去，压在它下面的画布编辑层就一次点击都收不到。
+    var passesThroughClicks = false
+    override func hitTest(_ point: NSPoint) -> NSView? { passesThroughClicks ? nil : super.hitTest(point) }
     required init(rootView: Content) {
         super.init(rootView: rootView)
         wantsLayer = true

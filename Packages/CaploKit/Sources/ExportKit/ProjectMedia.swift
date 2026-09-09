@@ -172,7 +172,7 @@ public enum ProjectMedia {
         guard previous.hasSameMedia(as: edit), let composition = item.asset as? AVMutableComposition else {
             throw ProjectError.invalid("片段已变化，需要重新构建播放时间线。")
         }
-        if previous.layout != edit.layout || previous.focuses != edit.focuses || previous.focusStyle != edit.focusStyle || previous.automaticFocus != edit.automaticFocus || previous.camera != edit.camera || previous.pointer != edit.pointer {
+        if edit.differsVisually(from: previous) {
             let existing = item.videoComposition?.instructions.first as? SceneInstruction
             let background = previous.layout.backgroundImage == edit.layout.backgroundImage ? existing?.backgroundImage : url.flatMap { backgroundImage(for: edit.layout, in: $0) }
             let rate = item.videoComposition.map { 1 / $0.frameDuration.seconds } ?? 30
@@ -198,12 +198,23 @@ public enum ProjectMedia {
         }
     }
 
+    /// 项目列表的封面：取第一段素材的首帧，并盖上那一刻生效的遮罩。
+    /// 读不出遮罩就抛错而不是给一张没打码的图——封面上印着密钥比没有封面糟糕得多。
     public static func thumbnail(url: URL, document: ProjectDocument) async throws -> CGImage {
         guard let path = document.segments.first?.files[.screen] else { throw ProjectError.invalid("暂无缩略图。") }
+        let masks = try EditStorage.maskList(in: url)
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: try ProjectStorage.mediaURL(path, in: url)))
         generator.maximumSize = CGSize(width: 640, height: 400)
         generator.appliesPreferredTrackTransform = true
-        return try await generator.image(at: .zero).image
+        let frame = try await generator.image(at: .zero).image
+        var edit = VideoEdit(duration: max(0.001, document.duration)); edit.maskList = masks
+        let states = edit.sourceMasks(atSource: 0)
+        guard !states.isEmpty else { return frame }
+        let source = CIImage(cgImage: frame)
+        guard let masked = CIContext().createCGImage(MaskRenderer.apply(states, to: source), from: source.extent) else {
+            throw ProjectError.invalid("无法生成已打码的缩略图。")
+        }
+        return masked
     }
 
     /// 暂停和拖动时输出清晰静帧，使用同一个场景渲染器；不依赖原生视频图层的离屏可见性。

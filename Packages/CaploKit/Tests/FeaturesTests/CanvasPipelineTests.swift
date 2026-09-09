@@ -3,6 +3,7 @@ import AppKit
 import CoreImage
 import Testing
 import ProjectKit
+import RenderKit
 import EditingCore
 import ExportKit
 @testable import Features
@@ -193,6 +194,86 @@ extension WindowLifecycleTests {
         #expect(model.canvas.snapshot().map { isRedFrame($0) && !isRedCorner($0) } == true, "留白 120 后角落应是背景、中心仍是视频")
         #expect(abs(model.player.currentTime().seconds - paused) < 0.05, "原地重画不能换到别的时间")
         #expect(!model.playing && model.error == nil)
+    }
+
+    /// 加一条遮罩之后，暂停中的画布必须立刻换成打过码的画面。
+    /// 这条链路很容易漏：合成只有在 `updatePresentation` 认为"有东西变了"时才重建，
+    /// 少比一个字段，遮罩就只在导出时生效，编辑器里看着完全没打码。
+    @Test func pausedEditorCanvasPicksUpANewMask() async throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = try await makeEditorFixture(root: root)
+        let model = VideoEditorModel(entry: LibraryEntry(url: url, document: try ProjectStorage.load(url)))
+        defer { model.close() }
+        await model.open()
+        func wait(_ condition: () -> Bool) async throws {
+            for _ in 0..<300 { if condition() { return }; try await Task.sleep(for: .milliseconds(20)) }
+            Issue.record("等待超时")
+        }
+        try await wait { !model.loading && model.player.currentItem?.status == .readyToPlay && model.canvas.frame != nil }
+        model.commit { $0.layout.padding = 0; $0.layout.cornerRadius = 0; $0.layout.shadow = false }
+        model.seek(0.5)
+        try await wait { model.canvas.snapshot().map { isRedFrame($0) && isRedCorner($0) } == true }
+        // 盖住整幅画面的高亮：区域外压到两成亮度，角落必须明显变暗。
+        model.commit { edit in
+            var spotlight = MaskSegment(start: 0, duration: 4, x: 0.5, y: 0.5, width: 0.06, height: 0.06, kind: .highlight)
+            spotlight.darkness = 0.8; spotlight.fadeIn = 0; spotlight.fadeOut = 0
+            edit.addMask(spotlight)
+        }
+        try await wait { model.canvas.snapshot().map { !isRedCorner($0) } == true }
+        #expect(model.canvas.snapshot().map { isRedCorner($0) } == false, "加了遮罩画布却没变，编辑器里看不到打码效果")
+        #expect(model.error == nil)
+    }
+
+    /// 加字幕之后，暂停中的画布必须立刻画出字幕。链路与遮罩同理，少比一个字段就只在导出时生效。
+    @Test func pausedEditorCanvasPicksUpANewCaption() async throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = try await makeEditorFixture(root: root)
+        let model = VideoEditorModel(entry: LibraryEntry(url: url, document: try ProjectStorage.load(url)))
+        defer { model.close() }
+        await model.open()
+        func wait(_ condition: () -> Bool) async throws {
+            for _ in 0..<300 { if condition() { return }; try await Task.sleep(for: .milliseconds(20)) }
+            Issue.record("等待超时")
+        }
+        try await wait { !model.loading && model.player.currentItem?.status == .readyToPlay && model.canvas.frame != nil }
+        model.commit { $0.layout.padding = 0; $0.layout.cornerRadius = 0; $0.layout.shadow = false }
+        model.seek(1)
+        // 必须等播放器真的走到 1 秒：字幕在 0 秒正处于淡入起点，强度本来就是 0，
+        // 停在 0 秒上去断言"看得到字幕"是在测一件不成立的事。
+        try await wait { abs(model.player.currentTime().seconds - 1) < 0.12 }
+        try await wait { model.canvas.snapshot().map { isRedFrame($0) } == true }
+        model.commit { edit in
+            var style = CaptionStyle()
+            style.lead = 0; style.tail = 0; style.minHold = 0; style.fadeIn = 0.01; style.fadeOut = 0.01
+            style.plate = false; style.color = .white; style.size = 90
+            edit.captionStyle = style
+            edit.captionList = [CaptionCue(sourceStart: 0, sourceEnd: 3, text: "字幕来了")]
+        }
+        try await wait { model.canvas.snapshot().map { hasWhitePixels($0) } == true }
+        #expect(model.canvas.snapshot().map { hasWhitePixels($0) } == true, "画布上看不到字幕")
+        #expect(model.error == nil)
+    }
+
+    /// 画面下方三分之一里有没有接近纯白的像素（字幕的笔画）。
+    func hasWhitePixels(_ image: CGImage) -> Bool {
+        let width = image.width, height = image.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(data: &bytes, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        var count = 0
+        for y in (height * 2 / 3)..<height {
+            for x in 0..<width {
+                let offset = (y * width + x) * 4
+                if bytes[offset] > 220, bytes[offset + 1] > 220, bytes[offset + 2] > 220 { count += 1 }
+            }
+        }
+        return count > 40
     }
 
     /// 左下角 6×6 处是否仍是红色视频（留白后应是背景）。

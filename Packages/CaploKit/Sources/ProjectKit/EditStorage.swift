@@ -46,11 +46,16 @@ public enum EditStorage {
     public static func save(_ edit: VideoEdit, in url: URL, document: ProjectDocument) throws {
         try edit.validate(sourceDuration: document.duration)
         let path = url.appendingPathComponent("edits.json")
+        // 每次升版本号之前留一份旧文件：升上去之后旧版 Caplo 就打不开了，
+        // 用户要退回去只能靠这份备份。每个版本只留第一份，不会越攒越多。
         if let data = try? Data(contentsOf: path),
-           let old = try JSONSerialization.jsonObject(with: data) as? [String: Any], old["schemaVersion"] == nil || [2, 3, 4].contains(old["schemaVersion"] as? Int ?? 0) || (edit.schemaVersion == 6 && old["schemaVersion"] as? Int == 5) {
+           let old = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
             let version = old["schemaVersion"] as? Int ?? 1
-            let backup = url.appendingPathComponent("Recovery/edits-v\(version).json")
-            if !FileManager.default.fileExists(atPath: backup.path) { try data.write(to: backup, options: .atomic) }
+            if version < edit.schemaVersion {
+                let backup = url.appendingPathComponent("Recovery/edits-v\(version).json")
+                try FileManager.default.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
+                if !FileManager.default.fileExists(atPath: backup.path) { try data.write(to: backup, options: .atomic) }
+            }
         }
         if let data = try? Data(contentsOf: path),
            let old = try JSONSerialization.jsonObject(with: data) as? [String: Any], (old["focusEngineVersion"] as? Int ?? 1) < 2, edit.focusEngineVersion == 2 {
@@ -60,6 +65,18 @@ public enum EditStorage {
         }
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(edit).write(to: path, options: .atomic)
+    }
+
+    /// 只把遮罩读出来，不做迁移也不做校验。缩略图这类"不载入整个工程也要打码"的路径用它。
+    /// 读不出来就抛错，让调用方选择不显示画面——这里绝不能 fail-open 成"没有遮罩"。
+    public static func maskList(in url: URL) throws -> [MaskSegment] {
+        let path = url.appendingPathComponent("edits.json")
+        guard FileManager.default.fileExists(atPath: path.path) else { return [] }
+        let data = try Data(contentsOf: path)
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw EditError.invalid }
+        guard object["masks"] != nil else { return [] }
+        struct MasksOnly: Decodable { var masks: [MaskSegment]? }
+        return try JSONDecoder().decode(MasksOnly.self, from: data).masks ?? []
     }
 
     public static func events(in url: URL, document: ProjectDocument) throws -> [PointerSample] {

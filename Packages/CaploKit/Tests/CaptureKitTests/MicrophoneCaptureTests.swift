@@ -78,7 +78,13 @@ import ProjectKit
     var device = kAudioObjectUnknown
     guard AudioHardwareCreateAggregateDevice(description as CFDictionary, &device) == noErr, device != kAudioObjectUnknown else { return }
     defer { AudioHardwareDestroyAggregateDevice(device) }
-    #expect(MicrophoneCapture.audioDeviceID(forUID: uid) == device)
+    // 新建的设备要过一会儿才会出现在系统的设备列表里；等它登记好再断言，否则这条测试会偶发红。
+    var found = MicrophoneCapture.audioDeviceID(forUID: uid)
+    for _ in 0..<40 where found != device {
+        usleep(25_000)
+        found = MicrophoneCapture.audioDeviceID(forUID: uid)
+    }
+    #expect(found == device)
     #expect(!MicrophoneCapture.isSelectableMicrophone(uid: uid))
     #expect(MicrophoneCapture.isSelectableMicrophone(uid: "caplo-no-such-device"))
 }

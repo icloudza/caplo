@@ -47,6 +47,20 @@ extension VideoEdit {
             let start = focus.editingStart, end = start + focus.duration
             if start.isFinite, end.isFinite, start >= 0, end > start { result[focus.id] = start..<end }
         }
+        // 遮罩按它在成片上的实际占用范围；被剪成多段的取包络，保守地拒绝同行冲突。
+        for span in maskSpans() {
+            let previous = result[span.maskID]
+            result[span.maskID] = min(previous?.lowerBound ?? span.start, span.start)..<max(previous?.upperBound ?? span.end, span.end)
+        }
+        // 字幕不进 layerOrder（它独占一条固定的轨），但范围表要收它，否则拖动时算不出边界。
+        for span in captionSpans() {
+            let previous = result[span.cueID]
+            result[span.cueID] = min(previous?.lowerBound ?? span.start, span.start)..<max(previous?.upperBound ?? span.end, span.end)
+        }
+        for span in textSpans() {
+            let previous = result[span.textID]
+            result[span.textID] = min(previous?.lowerBound ?? span.start, span.start)..<max(previous?.upperBound ?? span.end, span.end)
+        }
         if focuses.contains(where: { $0.timelineStart == nil }) {
             // 同一个旧源镜头可能在多次剪辑出现，尚未展开时使用包络范围保守拒绝冲突。
             var legacyRanges: [UUID: Range<Double>] = [:]
@@ -196,6 +210,6 @@ extension VideoEdit {
         if let cameraClips { self.cameraClips = positioned(cameraClips) }
         if let systemClips { self.systemClips = positioned(systemClips) }
         if let microphoneClips { self.microphoneClips = positioned(microphoneClips) }
-        schemaVersion = 6
+        normalizeSchemaVersion(layered: true)
     }
 }

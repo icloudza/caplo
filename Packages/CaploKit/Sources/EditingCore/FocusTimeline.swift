@@ -9,6 +9,9 @@ struct FocusCoverage {
 
     init(clips: [VideoClip]) {
         var cursor = 0.0
+        // 定格卡段算在它冻结自的那条片段名下：镜头被拉长盖住卡段之后仍然"没跨出原片段"，
+        // 否则 normalizeTimelineScope 会把它改成智能跟随、顺手清掉烘焙好的运镜路径。
+        var holds: [(UUID, ClosedRange<Double>)] = []
         for clip in clips {
             let start = clip.timelineStart ?? cursor, end = start + clip.duration
             cursor = end
@@ -17,8 +20,13 @@ struct FocusCoverage {
                   clip.sourceStart.isFinite, sourceEnd.isFinite, clip.sourceStart >= 0, sourceEnd > clip.sourceStart else { continue }
             timelineByClip[clip.id] = start...end
             sourceByClip[clip.id] = clip.sourceStart...sourceEnd
+            if let source = clip.holdSource { holds.append((source, start...end)) }
             timelineEnvelope = min(timelineEnvelope?.lowerBound ?? start, start)...max(timelineEnvelope?.upperBound ?? end, end)
             sourceEnvelope = min(sourceEnvelope?.lowerBound ?? clip.sourceStart, clip.sourceStart)...max(sourceEnvelope?.upperBound ?? sourceEnd, sourceEnd)
+        }
+        for (source, range) in holds {
+            guard let existing = timelineByClip[source] else { continue }
+            timelineByClip[source] = min(existing.lowerBound, range.lowerBound)...max(existing.upperBound, range.upperBound)
         }
     }
 

@@ -28,6 +28,9 @@ public enum CaploColor {
     public static let live = Color(nsColor: CaploNSColor.live)
     public static let recordFill = Color(nsColor: CaploNSColor.recordFill)
     public static let audio = Color(nsColor: CaploNSColor.audio)
+    public static let mask = Color(nsColor: CaploNSColor.mask)
+    public static let textLayer = Color(nsColor: CaploNSColor.textLayer)
+    public static let caption = Color(nsColor: CaploNSColor.caption)
     public static let warning = Color(nsColor: CaploNSColor.warning)
     public static let glassDensity = Color(nsColor: CaploNSColor.glassDensity)
     public static let glassEdge = Color(nsColor: CaploNSColor.glassEdge)
@@ -69,6 +72,12 @@ public enum CaploNSColor {
     public static let live = token("live", 0x5CE07A)
     public static let recordFill = token("recordFill", 0xC93649)
     public static let audio = token("audio", 0x98ECD0)
+    /// 遮罩轨道的识别色（兰花紫）：与画面蓝、声音薄荷、摄像头琥珀都拉得开。
+    public static let mask = token("mask", 0xE0A6F0)
+    /// 文字轨道的识别色（淡薰衣草）：与遮罩的兰花紫同色系但更冷更淡，并排也分得清。
+    public static let textLayer = token("textLayer", 0xC9B8FF)
+    /// 字幕轨道的识别色（冰蓝）。
+    public static let caption = token("caption", 0x9BE7FF)
     public static let warning = token("warning", 0xFFD08A)
     /// 背景只保留模糊环境色，避免编辑文字与桌面内容重叠；中性黑，绝不染成蓝灰。
     /// 密度要足够压住桌面内容的轮廓（参照系统侧栏材质），只让环境色透过来。

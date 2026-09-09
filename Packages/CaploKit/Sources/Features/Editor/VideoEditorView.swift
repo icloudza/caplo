@@ -16,6 +16,9 @@ struct VideoEditorView: View {
         RailItem(id: "音频", title: "音频", symbol: "waveform", shortcut: "5"),
         RailItem(id: "裁剪", title: "裁剪", symbol: "crop", shortcut: "6"),
         RailItem(id: "片段", title: "片段", symbol: "rectangle.split.3x1", shortcut: "7"),
+        RailItem(id: "遮罩", title: "遮罩", symbol: "rectangle.dashed", shortcut: "8"),
+        RailItem(id: "文字", title: "文字", symbol: "text.alignleft", shortcut: "9"),
+        RailItem(id: "字幕", title: "字幕", symbol: "captions.bubble", shortcut: "0"),
     ]
 
     @State private var model: VideoEditorModel
@@ -79,6 +82,9 @@ struct VideoEditorView: View {
         .onChange(of: model.edit) { model.previewChanged() }
         .onChange(of: model.selectedMedia) { if let role = model.selectedMedia { tab = role == .camera ? "人像" : "片段" } }
         .onChange(of: model.selectedFocus) { if model.selectedFocus != nil { tab = "聚焦" } }
+        .onChange(of: model.selectedMask) { if model.selectedMask != nil { tab = "遮罩" } }
+        .onChange(of: model.selectedText) { if model.selectedText != nil { tab = "文字" } }
+        .onChange(of: model.selectedCaption) { if model.selectedCaption != nil { tab = "字幕" } }
         // 要添加的时间段已经有镜头：问一下，可以勾"不再提示"。
         .sheet(item: Binding(get: { model.pendingFocus }, set: { if $0 == nil { model.cancelPendingFocus() } })) { pending in
             StudioConfirmSheet(title: "这段时间已有镜头",
@@ -96,6 +102,7 @@ struct VideoEditorView: View {
         var result: Set<String> = []
         if model.selectedClip == nil { result.insert("片段") }
         if !model.hasCameraMedia { result.insert("人像") }
+        if model.edit.clips.isEmpty { result.insert("遮罩"); result.insert("文字"); result.insert("字幕") }
         return result
     }
 
@@ -108,6 +115,9 @@ struct VideoEditorView: View {
         case "音频": "声音混合"
         case "裁剪": "裁剪画面"
         case "片段": "片段设置"
+        case "遮罩": "画面遮罩"
+        case "文字": "文字层"
+        case "字幕": "字幕"
         default: tab
         }
     }
@@ -120,6 +130,9 @@ struct VideoEditorView: View {
         case "人像": CameraPanel(model: model)
         case "裁剪": CropPanel(model: model)
         case "片段": ClipPanel(model: model)
+        case "遮罩": MaskPanel(model: model)
+        case "文字": TextPanel(model: model)
+        case "字幕": CaptionPanel(model: model)
         default: AudioPanel(model: model)
         }
     }

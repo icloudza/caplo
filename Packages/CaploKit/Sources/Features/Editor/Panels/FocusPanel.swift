@@ -78,7 +78,10 @@ struct FocusPanel: View {
                 let numbers = model.edit.focusNumbers()
                 VStack(spacing: CaploMetrics.Spacing.xs) {
                     ForEach(model.edit.focuses) { focus in
-                        FocusDisclosure(focus: focus, title: model.edit.focusDisplayTitle(focus, numbers: numbers), expanded: expanded == focus.id, toggle: { toggle(focus.id) }) {
+                        PanelDisclosure(symbol: focus.automatic ? "sparkles" : "viewfinder",
+                                        title: model.edit.focusDisplayTitle(focus, numbers: numbers),
+                                        trailing: timecode(focus.editingStart),
+                                        expanded: expanded == focus.id, toggle: { toggle(focus.id) }) {
                             controls(for: focus.id, focus: focus)
                         }
                     }
@@ -141,48 +144,3 @@ struct FocusPanel: View {
         })
     }
 }
-
-/// 可展开的镜头条目：一行表头（图标、起点、倍率、箭头），展开后表头高亮、下面是参数；高度变化带动画，整体裁成圆角卡片。
-private struct FocusDisclosure<Content: View>: View {
-    let focus: FocusSegment
-    /// 与时间线块相同的显示名（自定义名优先，多个镜头时带编号）。
-    let title: String
-    let expanded: Bool
-    let toggle: () -> Void
-    @ViewBuilder let content: () -> Content
-    @State private var hovered = false
-    private var radius: CGFloat { CaploMetrics.Radius.control + 2 }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Button(action: toggle) {
-                // 表头显示与时间线块相同的名字（自定义名优先），右侧是起点时间码。
-                HStack(spacing: CaploMetrics.Spacing.s) {
-                    Image(systemName: focus.automatic ? "sparkles" : "viewfinder").frame(width: CaploMetrics.Icon.control)
-                    Text(title).font(CaploFont.bodyMedium).lineLimit(1).truncationMode(.tail)
-                    Spacer(minLength: CaploMetrics.Spacing.s)
-                    Text(timecode(focus.editingStart)).font(CaploFont.value).foregroundStyle(expanded ? CaploColor.textPrimary : CaploColor.textSecondary)
-                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(CaploColor.textTertiary)
-                        .rotationEffect(.degrees(expanded ? 90 : 0))
-                }
-                .padding(.horizontal, 10).frame(height: CaploMetrics.ControlHeight.large)
-                .foregroundStyle(CaploColor.textPrimary)
-                .background(expanded ? CaploColor.accentSoft : CaploColor.surfaceRaised.opacity(hovered ? 1 : 0.8))
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .onHover { hovered = $0 }
-            .accessibilityAddTraits(expanded ? .isSelected : [])
-            .accessibilityValue(expanded ? "已展开" : "已收起")
-            if expanded {
-                VStack(alignment: .leading, spacing: CaploMetrics.Spacing.s) { content() }
-                    .padding(.horizontal, 10).padding(.top, CaploMetrics.Spacing.s).padding(.bottom, CaploMetrics.Spacing.m)
-                    .background(CaploColor.surfaceRaised.opacity(0.5))
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(expanded ? CaploColor.accent : CaploColor.separator, lineWidth: expanded ? 1.5 : 1))
-    }
-}
-

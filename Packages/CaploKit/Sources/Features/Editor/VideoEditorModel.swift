@@ -36,6 +36,52 @@ final class VideoEditorModel {
     var selectedMedia: TimelineMedia?
     var selectedMediaID: UUID?
     var selectedFocus: UUID?
+    var selectedMask: UUID?
+    var selectedText: UUID?
+    var selectedCaption: UUID?
+    // MARK: 渲染副本
+
+    /// 预编译跟随镜头的缓存键：只有这几项变了才需要重新规划运镜路径。
+    /// 拿整份 `VideoEdit` 当键的话，拖一次遮罩就会重新规划一遍，白白卡住。
+    private struct FocusPlanKey: Equatable {
+        let clips: [VideoClip]
+        let layerOrder: [UUID]?
+        let focuses: [FocusSegment]
+        let style: AutoFocusStyle?
+        let automatic: Bool
+    }
+    @ObservationIgnored private var focusPlanKey: FocusPlanKey?
+    @ObservationIgnored private var focusPlan: [FocusSegment]?
+    @ObservationIgnored private var pointerSamples: [PointerSample]?
+
+    /// 和画面同一份数据：跟随镜头已经预编译成运镜路径。
+    ///
+    /// `SceneInstruction` 在构建播放项时做的就是 `edit.resolvingTimelineFocus(events:)`，
+    /// 所以画面用的相机来自这份副本。画布上的遮罩 / 文字编辑框如果拿 `edit` 去求相机，
+    /// 跟随镜头一推近，框和画面就分家——手动加的跟随镜头在 `edit` 里只有静态 x/y/scale，
+    /// 真正的运镜路径要到这一步才编译出来，两者能差 0.05 以上的归一化坐标。
+    var renderEdit: VideoEdit {
+        let key = FocusPlanKey(clips: edit.clips, layerOrder: edit.layerOrder, focuses: edit.focuses,
+                               style: edit.focusStyle, automatic: edit.automaticFocus)
+        if key != focusPlanKey {
+            if pointerSamples == nil {
+                pointerSamples = (try? EditStorage.events(in: entry.url, document: entry.document)) ?? []
+            }
+            focusPlan = edit.resolvingTimelineFocus(events: pointerSamples ?? []).focuses
+            focusPlanKey = key
+        }
+        guard let focusPlan else { return edit }
+        var result = edit
+        result.focuses = focusPlan
+        return result
+    }
+
+    /// 打字防抖的定时器。
+    @ObservationIgnored private var textCommitTask: Task<Void, Never>?
+    /// 遮罩面板打开时为真；画布上的遮罩编辑层只在这段时间接收鼠标，其余时候完全放行。
+    var maskEditing = false
+    /// 文字面板打开时为真，含义同上。
+    var textEditing = false
     var position = 0.0
     /// 鼠标掠览只改变画布定位，不改播放头、选区或工程；移出后恢复播放头画面。
     private(set) var skimPosition: Double?
@@ -193,7 +239,12 @@ final class VideoEditorModel {
     private func finishChange(previous: VideoEdit) {
         guard edit != previous else { restorePlayheadFrame(); return }
         edit.constrainTimelineFocuses()
+        // 卡段文字紧跟它的定格片段：片段被拖边或删掉之后不能留下一段悬空的文字。
+        edit.syncHoldCards()
         edit.normalizeTimelineRows()
+        // 兜底：任何一条编辑路径把版本号写歪，都会在这里被按内容重新算对，
+        // 而不是在校验时变成一句"版本不支持"甩给用户。
+        edit.normalizeSchemaVersion()
         do { try edit.validate(sourceDuration: entry.document.duration) }
         catch { edit = previous; self.error = error.localizedDescription; restorePlayheadFrame(); return }
         history.record(previous)
@@ -227,6 +278,9 @@ final class VideoEditorModel {
         selectedClipIDs.formIntersection(Set(edit.clips.map(\.id)))
         if !edit.clips.contains(where: { $0.id == selectedClip }) { selectedClip = edit.clips.first?.id }
         if !edit.focuses.contains(where: { $0.id == selectedFocus }) { selectedFocus = nil }
+        if !edit.maskList.contains(where: { $0.id == selectedMask }) { selectedMask = nil }
+        if !edit.textList.contains(where: { $0.id == selectedText }) { selectedText = nil }
+        if !edit.captionList.contains(where: { $0.id == selectedCaption }) { selectedCaption = nil }
         position = min(position, edit.duration)
         if let skimPosition { self.skimPosition = min(skimPosition, edit.duration) }
     }
@@ -234,12 +288,21 @@ final class VideoEditorModel {
     var canSplit: Bool { canSplit(at: position) }
     /// 某个时间线时刻能否分割当前选中的块（两侧都要留下最小时长）；右键菜单用它判断"在此处分割"。
     func canSplit(at time: Double) -> Bool {
-        guard ready, selectedFocus == nil, time.isFinite else { return false }
+        guard ready, selectedFocus == nil, selectedMask == nil, time.isFinite else { return false }
+        // 选中一句字幕时，「分割」指的是把这句切成两句，而不是切录制画面。
+        if let selectedCaption, let cue = edit.caption(id: selectedCaption) {
+            guard let source = edit.sourceTime(at: time) else { return false }
+            return source > cue.sourceStart + 0.05 && source < cue.sourceEnd - 0.05
+        }
+        // 选中文字层时没有可分割的东西，别去切用户的录像。
+        guard selectedText == nil else { return false }
         if let role = selectedMedia, let id = selectedMediaID, let clip = edit.mediaClips(role).first(where: { $0.id == id }) {
             let offset = time - (clip.timelineStart ?? 0)
             return offset >= VideoEdit.minimumClipDuration && clip.duration - offset >= VideoEdit.minimumClipDuration
         }
         if let id = selectedClip, let clip = edit.clips.first(where: { $0.id == id }) {
+            // 定格卡段切不得：切完两半各自还是定格，可文字只认得其中一半。
+            guard !edit.holdCards.contains(where: { $0.holdClipID == id }) else { return false }
             let offset = time - (clip.timelineStart ?? 0)
             return offset >= VideoEdit.minimumClipDuration && clip.duration - offset >= VideoEdit.minimumClipDuration
         }
@@ -248,6 +311,14 @@ final class VideoEditorModel {
     func split() { split(at: position) }
     func split(at time: Double) {
         guard canSplit(at: time) else { NSSound.beep(); return }
+        // 再守一道：分割只作用于媒体片段与字幕，绝不能借着常驻的 selectedClip 去切用户的录像。
+        guard selectedMask == nil, selectedText == nil, selectedFocus == nil else { NSSound.beep(); return }
+        if let selectedCaption, let source = edit.sourceTime(at: time) {
+            var tail: UUID?
+            commit { tail = $0.splitCaption(id: selectedCaption, atSource: source) }
+            if let tail, edit.caption(id: tail) != nil { self.selectedCaption = tail }
+            return
+        }
         let role = selectedMedia ?? .screen
         guard let id = selectedMediaID ?? selectedClip else { return }
         var tailID: UUID?
@@ -261,7 +332,25 @@ final class VideoEditorModel {
     func renameBlock(_ id: UUID, to title: String) {
         commit { $0.renameBlock(id, title: title) }
     }
+    /// 清掉所有类别的选中项；换选一个别的东西时先调它，免得两处同时高亮。
+    func clearSelection() {
+        selectedMedia = nil; selectedMediaID = nil
+        selectedFocus = nil; selectedMask = nil; selectedText = nil; selectedCaption = nil
+    }
     func deleteSelection() {
+        // 删卡段文字要连它插入的那段时长一起撤掉，否则成片里留下一段空白的定格。
+        if let selectedText, edit.text(id: selectedText)?.holdClipID != nil {
+            commit { $0.removeHoldCard(textID: selectedText) }; self.selectedText = nil; return
+        }
+        if let selectedCaption {
+            commit { $0.captionList.removeAll { $0.id == selectedCaption } }; self.selectedCaption = nil; return
+        }
+        if let selectedText {
+            commit { $0.removeText(id: selectedText) }; self.selectedText = nil; return
+        }
+        if let selectedMask {
+            commit { $0.removeMask(id: selectedMask) }; self.selectedMask = nil; return
+        }
         if let role = selectedMedia, let id = selectedMediaID {
             commit { edit in edit.setMediaClips(role, edit.mediaClips(role).filter { $0.id != id }) }
             selectedMedia = nil; selectedMediaID = nil; return
@@ -269,11 +358,17 @@ final class VideoEditorModel {
         if let selectedFocus { commit { $0.focuses.removeAll { $0.id == selectedFocus } } }
         else {
             let ids = selectedClipIDs.isEmpty ? Set([selectedClip].compactMap { $0 }) : selectedClipIDs
-            commit { $0.clips.removeAll { ids.contains($0.id) } }
+            commit { edit in
+                // 定格片段走卡段那条路：连同文字一起撤掉，后面的内容前移，而不是在成片里留一段空洞。
+                for card in edit.holdCards where card.holdClipID.map(ids.contains) == true {
+                    edit.removeHoldCard(textID: card.id)
+                }
+                edit.clips.removeAll { ids.contains($0.id) }
+            }
         }
     }
     func selectClip(_ id: UUID, extending: Bool = false, range: Bool = false) {
-        selectedMedia = nil; selectedMediaID = nil
+        selectedMedia = nil; selectedMediaID = nil; selectedMask = nil; selectedText = nil; selectedCaption = nil
         if range, let selectedClip, let start = edit.clips.firstIndex(where: { $0.id == selectedClip }), let end = edit.clips.firstIndex(where: { $0.id == id }) {
             selectedClipIDs.formUnion(edit.clips[min(start, end)...max(start, end)].map(\.id))
         } else if extending {
@@ -282,7 +377,41 @@ final class VideoEditorModel {
         } else { selectedClip = id; selectedClipIDs = [id] }
         selectedFocus = nil
     }
+    /// 副本接在原件后面；接不下就贴着素材末尾放。不夹的话片尾附近复制会越界，
+    /// 校验拒绝、整笔回滚，用户只看到一句「版本不支持或内容无效」。
+    private func duplicatedStart(_ start: Double, duration: Double, pinned: Bool) -> Double {
+        let limit = pinned ? max(edit.duration, duration) : entry.document.duration
+        return max(0, min(start + duration, limit - duration))
+    }
     func duplicateSelection() {
+        if let id = selectedCaption, var copy = edit.caption(id: id) {
+            copy.id = UUID()
+            let length = copy.sourceDuration
+            let next = duplicatedStart(copy.sourceStart, duration: length, pinned: copy.timelineStart != nil)
+            let shift = next - copy.sourceStart
+            copy.sourceStart = next; copy.sourceEnd = next + length
+            copy.words = copy.words?.map { CaptionWord(start: $0.start + shift, end: $0.end + shift, text: $0.text) }
+            if copy.timelineStart != nil { copy.timelineStart = (copy.timelineStart ?? 0) + length }
+            commit { $0.captionList = ($0.captionList + [copy]).sorted { $0.sourceStart < $1.sourceStart } }
+            selectedCaption = copy.id; return
+        }
+        if let id = selectedText, var copy = edit.text(id: id) {
+            copy.id = UUID()
+            // 副本不再是卡段：再插一段真实时长得由用户明说，不能一次 ⌘D 就把成片又拉长一截。
+            copy.holdClipID = nil
+            let next = duplicatedStart(copy.timelineStart ?? copy.start, duration: copy.duration, pinned: copy.timelineStart != nil)
+            if copy.timelineStart != nil { copy.timelineStart = next } else { copy.start = next }
+            commit { edit in edit.addText(copy); edit.moveLayer(copy.id, before: id) }
+            selectedText = copy.id; return
+        }
+        if let id = selectedMask, var copy = edit.mask(id: id) {
+            copy.id = UUID()
+            let next = duplicatedStart(copy.timelineStart ?? copy.start, duration: copy.duration, pinned: copy.timelineStart != nil)
+            // 关键帧的时间相对遮罩自身起点，副本整体挪走时它们跟着走，不需要额外平移。
+            if copy.timelineStart != nil { copy.timelineStart = next } else { copy.start = next }
+            commit { edit in edit.addMask(copy); edit.moveLayer(copy.id, before: id) }
+            selectedMask = copy.id; return
+        }
         if let id = selectedFocus, var copy = edit.focuses.first(where: { $0.id == id }) {
             copy.id = UUID(); copy.timelineStart = copy.editingStart + copy.duration
             commit { edit in edit.focuses.append(copy); edit.moveLayer(copy.id, before: id) }; selectedFocus = copy.id; return
@@ -360,9 +489,193 @@ final class VideoEditorModel {
         zoom.timelineStart = start; zoom.targetClipID = within ? clip.id : nil; zoom.followsTimeline = true
         zoom.easeIn = edit.focusStyle?.easeIn; zoom.easeOut = edit.focusStyle?.easeOut
         commit { edit in edit.focuses.append(zoom); edit.moveLayer(zoom.id, before: clip.id) }
-        selectedMedia = nil; selectedMediaID = nil; selectedFocus = zoom.id
+        clearSelection(); selectedFocus = zoom.id
         return zoom.id
     }
+    /// 在播放头处加一条遮罩，默认 2 秒且不超出所在片段。
+    @discardableResult func addMask(kind: MaskSegment.Kind = .sensitive) -> UUID? {
+        addMask(start: skimPosition ?? position, duration: 2, kind: kind)
+    }
+    /// 在指定时刻加遮罩。时间存回源素材域，之后剪辑素材它自己会跟着裂开与合拢。
+    @discardableResult func addMask(start: Double, duration: Double, kind: MaskSegment.Kind = .sensitive) -> UUID? {
+        guard ready else { return nil }
+        let anchor = max(0, min(edit.duration, start))
+        var length = duration
+        if let clip = edit.clip(atTimeline: anchor) {
+            length = min(length, (clip.timelineStart ?? 0) + clip.duration - anchor)
+        }
+        var created: UUID?
+        commit { edit in
+            created = edit.insertMask(at: anchor, duration: max(1.0 / 30, length), kind: kind, sourceDuration: entry.document.duration)
+            if let created { edit.moveLayer(created, before: edit.orderedLayerIDs.first) }
+        }
+        guard let created, edit.mask(id: created) != nil else {
+            if edit.clip(atTimeline: anchor) == nil { error = "播放头不在任何录制画面上，请先把它移到画面块里再添加遮罩。" }
+            return nil
+        }
+        clearSelection(); selectedMask = created
+        return created
+    }
+
+    /// 在播放头处插入一段全屏卡段：画面冻结在这一刻、声音静音，文字浮在上面，成片因此变长。
+    @discardableResult func addHoldCard(duration: Double = 3, preset: TextPreset = .title, text: String = "") -> UUID? {
+        guard ready else { return nil }
+        let anchor = max(0, min(edit.duration, skimPosition ?? position))
+        var created: UUID?
+        commit { edit in
+            created = edit.insertHoldCard(at: anchor, duration: duration, sourceDuration: entry.document.duration,
+                                          preset: preset, text: text, frameRate: entry.document.frameRate)
+        }
+        guard let created, edit.text(id: created) != nil else {
+            if edit.clip(atTimeline: anchor) == nil { error = "播放头不在任何录制画面上，请先把它移到画面块里再插入卡段。" }
+            return nil
+        }
+        clearSelection(); selectedText = created
+        return created
+    }
+
+    /// 打开 / 关掉某段全屏文字的「插入时长」。
+    func setHoldCard(_ id: UUID, enabled: Bool) {
+        guard ready else { return }
+        var ok = false
+        commit { ok = $0.setHoldCard(textID: id, enabled: enabled, sourceDuration: entry.document.duration, frameRate: entry.document.frameRate) }
+        if !ok, enabled { error = "这段文字所在的位置插不进卡段，请把它移到某个录制画面块上再试。" }
+    }
+
+    /// 改卡段时长；后面的一切跟着挪。
+    func setHoldCardDuration(_ id: UUID, duration: Double) {
+        commit { $0.setHoldCardDuration(textID: id, duration: duration) }
+    }
+
+    /// 在播放头处加一段文字。
+    @discardableResult func addText(preset: TextPreset = .title) -> UUID? {
+        addText(start: skimPosition ?? position, duration: 3, preset: preset)
+    }
+    /// 在指定时刻加文字。时间存回源素材域，之后剪辑素材它自己会跟着裂开与合拢。
+    @discardableResult func addText(start: Double, duration: Double, preset: TextPreset = .title, text: String = "") -> UUID? {
+        guard ready else { return nil }
+        let anchor = max(0, min(edit.duration, start))
+        var length = duration
+        if let clip = edit.clip(atTimeline: anchor) {
+            length = min(length, (clip.timelineStart ?? 0) + clip.duration - anchor)
+        }
+        var created: UUID?
+        commit { edit in
+            created = edit.insertText(at: anchor, duration: max(0.2, length), sourceDuration: entry.document.duration, preset: preset, text: text)
+            if let created { edit.moveLayer(created, before: edit.orderedLayerIDs.first) }
+        }
+        guard let created, edit.text(id: created) != nil else {
+            if edit.clip(atTimeline: anchor) == nil { error = "播放头不在任何录制画面上，请先把它移到画面块里再添加文字。" }
+            return nil
+        }
+        clearSelection(); selectedText = created
+        return created
+    }
+
+    /// 打字期间只改预览；停手 0.6 秒后把这一整段输入合成一个撤销步骤。
+    /// 逐字提交会让撤销栈里全是单字，撤三十次才回到上一句。
+    func scheduleTextCommit() {
+        beginInteraction()
+        textCommitTask?.cancel()
+        textCommitTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled, let self else { return }
+            self.textCommitTask = nil
+            self.endInteraction()
+        }
+    }
+
+    // MARK: 字幕
+
+    /// 转写进度；非空表示正在转写。
+    private(set) var transcription: (progress: Double, message: String)?
+    @ObservationIgnored private var transcriptionTask: Task<Void, Never>?
+    /// 转写用的语言；默认跟随系统。
+    var captionLocale = Locale(identifier: Locale.preferredLanguages.first ?? "zh-CN")
+    /// 转写用哪条声音；默认有麦克风就用麦克风。
+    var captionSource: TranscriptionSource = .microphone
+    /// 字幕面板打开时为真。
+    var captionEditing = false
+
+    var hasTranscribableAudio: Bool {
+        TranscriptionSource.allCases.contains { ProjectTranscription.hasAudio(entry.document, source: $0) }
+    }
+
+    /// 转写整段录音。已有的、用户改过的句子会被保护住。
+    func transcribe() {
+        guard ready, transcriptionTask == nil else { return }
+        var source = captionSource
+        if !ProjectTranscription.hasAudio(entry.document, source: source) {
+            source = TranscriptionSource.allCases.first { ProjectTranscription.hasAudio(entry.document, source: $0) } ?? source
+            captionSource = source
+        }
+        guard ProjectTranscription.hasAudio(entry.document, source: source) else {
+            error = TranscriptionError.noAudio.localizedDescription; return
+        }
+        let engine = SpeechTranscriber()
+        let locale = captionLocale, url = entry.url, document = entry.document
+        transcription = (0, "正在准备…")
+        transcriptionTask = Task { @MainActor [weak self] in
+            defer { self?.transcriptionTask = nil; self?.transcription = nil }
+            switch await engine.availability(locale: locale) {
+            case .ready: break
+            case .needsPermission:
+                guard await SpeechTranscriber.requestPermission() else {
+                    self?.error = TranscriptionError.denied.localizedDescription; return
+                }
+            case .unavailable(let reason):
+                self?.error = reason; return
+            }
+            guard let self, !Task.isCancelled else { return }
+            self.transcription = (0, "正在转写…")
+            do {
+                let cues = try await ProjectTranscription.run(url: url, document: document, source: source,
+                                                              locale: locale, engine: engine) { value in
+                    Task { @MainActor [weak self] in
+                        guard self?.transcriptionTask != nil else { return }
+                        self?.transcription = (value, "正在转写…")
+                    }
+                }
+                guard !Task.isCancelled else { return }
+                self.commit { $0.mergeTranscription(cues) }
+                if cues.isEmpty { self.error = "这段声音里没有识别出可用的语音。" }
+            } catch is CancellationError {
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+    func cancelTranscription() {
+        transcriptionTask?.cancel(); transcriptionTask = nil; transcription = nil
+    }
+
+    /// 导入 SRT / VTT。时间按成片时间换算回源时间，导入的句子一律锁住。
+    func importCaptions(from url: URL) {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            error = "读不出这个字幕文件，请确认它是 UTF-8 编码的 SRT 或 VTT。"; return
+        }
+        let cues = CaptionFile.parse(text, into: edit)
+        guard !cues.isEmpty else { error = "这个字幕文件里没有可用的句子，或者它们都落在已经剪掉的画面上。"; return }
+        // 导入的内容说了算：与它重叠的旧句子让位，不重叠的保留。
+        // 反过来做会让同一段话变成两条，导出时每句输出两遍。
+        commit { $0.mergeImportedCaptions(cues) }
+    }
+
+    /// 导出 SRT / VTT 的文本；调用方负责写文件。
+    func captionFileText(vtt: Bool) -> String { vtt ? CaptionFile.vtt(edit) : CaptionFile.srt(edit) }
+
+    /// 文字时间参数的上界，规则同遮罩。
+    func textBounds(for id: UUID) -> Double {
+        guard let value = edit.text(id: id) else { return 0 }
+        return value.timelineStart == nil ? entry.document.duration : max(edit.duration, value.duration)
+    }
+
+    /// 遮罩时间参数的上界：未固定的按原素材总长，固定到成片时间的按成片长度。
+    func maskBounds(for id: UUID) -> Double {
+        guard let mask = edit.mask(id: id) else { return 0 }
+        return mask.timelineStart == nil ? entry.document.duration : max(edit.duration, mask.duration)
+    }
+
     /// 请时间线把某个块滚进视口（面板里点了镜头列表 / 轨头图标时）；序号递增让同一块可以重复触发。
     private(set) var revealRequest: (id: UUID, serial: Int)?
     func reveal(_ id: UUID) { revealRequest = (id, (revealRequest?.serial ?? 0) &+ 1) }
@@ -671,7 +984,7 @@ final class VideoEditorModel {
     /// 松手时才重建一次。结束后只保存一次编辑命令。
     func previewChanged(edgeSource: Double? = nil, edgeClip: UUID? = nil) {
         guard let previous = interactionStart else { return }
-        if previous.clips != edit.clips || previous.layout != edit.layout || previous.focuses != edit.focuses || previous.focusStyle != edit.focusStyle || previous.automaticFocus != edit.automaticFocus || previous.camera != edit.camera || previous.pointer != edit.pointer {
+        if edit.differsVisually(from: previous) {
             interactionChangesVisual = true
         }
         if !previous.hasSameMedia(as: edit) {

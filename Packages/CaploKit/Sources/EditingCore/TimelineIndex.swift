@@ -52,6 +52,21 @@ public struct TimelineIndex: Sendable {
         if time.isFinite, duration > 0, abs(time - duration) < 0.0001 { return sourceTime(at: duration - 0.00001) }
         return nil
     }
+    /// 与给定时间范围相交的**可见段**。`spans` 已经把图层遮挡解析过：
+    /// 被上层片段盖住的部分不在里面。二分定位，长工程不逐段扫描。
+    ///
+    /// 与 `visibleClips(in:)` 的区别很关键：后者只是个粗筛（图层化时直接返回全部下标），
+    /// 拿它做投影会让被盖住的素材上的遮罩 / 文字 / 字幕照样画到画面上。
+    public func visibleSpans(in range: Range<Double>) -> ArraySlice<Span> {
+        guard !spans.isEmpty, range.upperBound > range.lowerBound else { return spans[0..<0] }
+        var lo = 0, hi = spans.count
+        while lo < hi { let mid = (lo + hi) / 2; if spans[mid].end <= range.lowerBound { lo = mid + 1 } else { hi = mid } }
+        let first = lo
+        hi = spans.count
+        while lo < hi { let mid = (lo + hi) / 2; if spans[mid].start < range.upperBound { lo = mid + 1 } else { hi = mid } }
+        return spans[first..<max(first, lo)]
+    }
+
     public func visibleClips(in range: Range<Double>) -> Range<Int> {
         guard !clips.isEmpty, range.upperBound > 0, range.lowerBound < duration else { return 0..<0 }
         if layered { return clips.indices }

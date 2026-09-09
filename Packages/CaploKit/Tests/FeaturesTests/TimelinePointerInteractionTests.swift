@@ -269,7 +269,7 @@ private final class TimelinePointerHarness {
 
     func sync() {
         view.update(edit: model.edit, analysis: model.analysis, selection: model.selectedClipIDs,
-                    primary: model.selectedClip, focus: model.selectedFocus, zoom: viewport.zoom, fit: 1)
+                    primary: model.selectedClip, focus: model.selectedFocus, mask: model.selectedMask, text: model.selectedText, caption: model.selectedCaption, zoom: viewport.zoom, fit: 1)
     }
 
     func mouse(_ type: NSEvent.EventType, x: Double, y: Double) throws {
@@ -518,5 +518,310 @@ extension WindowLifecycleTests {
         #expect(model.edit.focuses.count == 2)
         let added = try #require(model.edit.focuses.last)
         #expect(abs((added.timelineStart ?? -1) - 2.5) < 0.000001 && abs(added.duration - 1.5) < 0.000001)
+    }
+}
+
+extension WindowLifecycleTests {
+    /// 拖遮罩块的右边缘应当只缩短它，而且改的是源素材时间（不能被"固定到成片时间"），
+    /// 一次拖动只记一个撤销步骤，落盘后再读回来一致。
+    @Test func draggingAMaskBlockTrailingEdgeShrinksItInSourceTime() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await makeTimelinePointerModel(root: root)
+        defer { model.close() }
+        model.seek(1)
+        let id = try #require(model.addMask())
+        let original = try #require(model.edit.mask(id: id))
+        #expect(original.timelineStart == nil && abs(original.start - 1) < 0.001)
+        let harness = TimelinePointerHarness(model: model, zoom: 1)
+        defer { harness.close() }
+        // 遮罩行在最上面：第一行的 y 落在 48。
+        let right = TimelineViewportView.timeOrigin + (original.start + original.duration) * 120
+        try harness.mouse(.leftMouseDown, x: right + 2, y: 48)
+        try harness.mouse(.leftMouseDragged, x: right - 60, y: 48)
+        try harness.mouse(.leftMouseUp, x: right - 60, y: 48)
+        let changed = try #require(model.edit.mask(id: id))
+        #expect(changed.start == original.start)
+        #expect(changed.timelineStart == nil, "遮罩被固定到了成片时间，后续剪辑就不跟着内容走了")
+        #expect(abs(changed.duration - (original.duration - 0.5)) < 0.000001, "拖后时长是 \(changed.duration)")
+        #expect(model.error == nil)
+        let saved = try EditStorage.load(in: model.entry.url, document: model.entry.document)
+        #expect(saved.mask(id: id)?.duration == changed.duration && saved.schemaVersion <= VideoEdit.writtenSchemaVersion)
+        model.undo(); harness.sync()
+        #expect(model.edit.mask(id: id) == original)
+    }
+
+    /// 点遮罩块要选中它（而不是选中聚焦或片段），删除只删这一条。
+    @Test func clickingAMaskBlockSelectsItAndDeleteRemovesOnlyThatMask() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await makeTimelinePointerModel(root: root)
+        defer { model.close() }
+        model.seek(0.5); let first = try #require(model.addMask())
+        model.seek(2.5); let second = try #require(model.addMask())
+        model.selectedMask = nil
+        let harness = TimelinePointerHarness(model: model, zoom: 1)
+        defer { harness.close() }
+        // 新加的遮罩排在最上面，所以先加的那条在第二行（y 落在 90）。
+        let center = TimelineViewportView.timeOrigin + 1.0 * 120
+        try harness.mouse(.leftMouseDown, x: center, y: 90)
+        try harness.mouse(.leftMouseUp, x: center, y: 90)
+        #expect(model.selectedMask == first && model.selectedFocus == nil && model.selectedMediaID == nil)
+        model.deleteSelection()
+        #expect(model.edit.maskList.map(\.id) == [second] && model.selectedMask == nil)
+        #expect(model.error == nil)
+    }
+}
+
+extension WindowLifecycleTests {
+    /// 拖文字块的右边缘只缩短它、只改源时间，一次拖动一个撤销步骤，落盘后读回来一致。
+    @Test func draggingATextBlockTrailingEdgeShrinksItInSourceTime() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await makeTimelinePointerModel(root: root)
+        defer { model.close() }
+        model.seek(0.5)
+        let id = try #require(model.addText(start: 0.5, duration: 3, preset: .title, text: "标题"))
+        let original = try #require(model.edit.text(id: id))
+        #expect(original.timelineStart == nil)
+        let harness = TimelinePointerHarness(model: model, zoom: 1)
+        defer { harness.close() }
+        let right = TimelineViewportView.timeOrigin + (original.start + original.duration) * 120
+        try harness.mouse(.leftMouseDown, x: right + 2, y: 48)
+        try harness.mouse(.leftMouseDragged, x: right - 60, y: 48)
+        try harness.mouse(.leftMouseUp, x: right - 60, y: 48)
+        let changed = try #require(model.edit.text(id: id))
+        #expect(changed.start == original.start && changed.timelineStart == nil)
+        #expect(abs(changed.duration - (original.duration - 0.5)) < 0.000001, "拖后时长是 \(changed.duration)")
+        #expect(model.error == nil)
+        let saved = try EditStorage.load(in: model.entry.url, document: model.entry.document)
+        #expect(saved.text(id: id)?.duration == changed.duration && saved.schemaVersion <= VideoEdit.writtenSchemaVersion)
+        model.undo(); harness.sync()
+        #expect(model.edit.text(id: id) == original)
+    }
+
+    /// 文字与遮罩各自选中、各自删除，互不干扰。
+    @Test func textAndMaskSelectionsDoNotCollide() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await makeTimelinePointerModel(root: root)
+        defer { model.close() }
+        model.seek(0.5)
+        let mask = try #require(model.addMask())
+        #expect(model.selectedMask == mask && model.selectedText == nil)
+        let text = try #require(model.addText(start: 0.5, duration: 2, preset: .subtitle, text: "副标题"))
+        #expect(model.selectedText == text && model.selectedMask == nil)
+        // 选中文字时删除只删文字，遮罩留着。
+        model.deleteSelection()
+        #expect(model.edit.textList.isEmpty && model.edit.maskList.map(\.id) == [mask])
+        #expect(model.error == nil)
+    }
+}
+
+extension WindowLifecycleTests {
+    /// 字幕轨不进 layerOrder，是时间线自己插的一条固定轨；点它要能选中、拖右边缘只改这一句的源时间。
+    @Test func captionTrackSelectsAndTrimsInSourceTime() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await makeTimelinePointerModel(root: root)
+        defer { model.close() }
+        model.commit { edit in
+            edit.captionList = [CaptionCue(sourceStart: 0.5, sourceEnd: 2.5, text: "把留白调到四十")]
+        }
+        let id = try #require(model.edit.captionList.first?.id)
+        let harness = TimelinePointerHarness(model: model, zoom: 1)
+        defer { harness.close() }
+
+        // 字幕轨插在所有媒体行之上，所以是第一行（y 落在 48）。
+        let center = TimelineViewportView.timeOrigin + 1.5 * 120
+        try harness.mouse(.leftMouseDown, x: center, y: 48)
+        try harness.mouse(.leftMouseUp, x: center, y: 48)
+        #expect(model.selectedCaption == id, "点字幕块没有选中它")
+        #expect(model.selectedFocus == nil && model.selectedMediaID == nil)
+
+        let right = TimelineViewportView.timeOrigin + 2.5 * 120
+        try harness.mouse(.leftMouseDown, x: right + 2, y: 48)
+        try harness.mouse(.leftMouseDragged, x: right - 60, y: 48)
+        try harness.mouse(.leftMouseUp, x: right - 60, y: 48)
+        let changed = try #require(model.edit.caption(id: id))
+        #expect(changed.sourceStart == 0.5 && changed.timelineStart == nil)
+        #expect(abs(changed.sourceEnd - 2.0) < 0.000001, "拖后结束在源 \(changed.sourceEnd) 秒")
+        #expect(model.error == nil)
+        model.undo(); harness.sync()
+        #expect(model.edit.caption(id: id)?.sourceEnd == 2.5)
+    }
+}
+
+extension WindowLifecycleTests {
+    /// 工程里带着原素材域的自动镜头时，同一次 commit 里既要展开图层又要加叠加层，两边不能互相踩。
+    /// （真正让用户撞上"版本不支持"的是关掉自动聚焦后重开的那条路径，
+    /// 见 `addingAMaskAfterReopeningWithAutomaticFocusOffDoesNotFailValidation`。）
+    @Test func addingOverlaysToARecordingWithAutomaticFocusesSucceeds() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await makeTimelinePointerModel(root: root)
+        defer { model.close() }
+        // 自动镜头：源素材域，timelineStart 为空。
+        model.commit { $0.focuses = [FocusSegment(start: 0.5, duration: 1.5, x: 0.5, y: 0.5, automatic: true)] }
+        #expect(model.error == nil)
+
+        model.seek(1)
+        let mask = model.addMask()
+        #expect(mask != nil, "加遮罩失败：\(model.error ?? "无错误")")
+        #expect(model.error == nil, "加遮罩报了错：\(model.error ?? "")")
+        #expect(model.edit.maskList.count == 1 && model.edit.schemaVersion <= VideoEdit.writtenSchemaVersion)
+
+        let text = model.addText(start: 1, duration: 2, preset: .title, text: "标题")
+        #expect(text != nil && model.error == nil, "加文字失败：\(model.error ?? "")")
+        #expect(model.edit.schemaVersion <= VideoEdit.writtenSchemaVersion)
+
+        model.commit { $0.captionList = [CaptionCue(sourceStart: 0, sourceEnd: 2, text: "一句话")] }
+        #expect(model.error == nil, "加字幕失败：\(model.error ?? "")")
+        #expect(model.edit.schemaVersion <= VideoEdit.writtenSchemaVersion)
+
+        // 落盘再读回来，三层都还在。
+        let saved = try EditStorage.load(in: model.entry.url, document: model.entry.document)
+        #expect(saved.maskList.count == 1 && saved.textList.count == 1 && saved.captionList.count == 1)
+    }
+}
+
+extension WindowLifecycleTests {
+    /// 片尾附近复制叠加层：副本要被夹在素材范围内，而不是越界之后整笔回滚弹「版本不支持」。
+    @Test func duplicatingOverlaysNearTheEndOfTheMaterialStaysInRange() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await makeTimelinePointerModel(root: root)
+        defer { model.close() }
+        let total = model.entry.document.duration
+
+        let mask = try #require(model.addMask(start: total - 0.1, duration: 2))
+        model.duplicateSelection()
+        #expect(model.error == nil, "复制遮罩报了错：\(model.error ?? "")")
+        #expect(model.edit.maskList.count == 2)
+        #expect(model.edit.maskList.allSatisfy { $0.start + $0.duration <= total + 0.001 })
+        #expect(model.selectedMask != mask, "选中项没有跟到副本上")
+
+        let text = try #require(model.addText(start: total - 0.2, duration: 3, preset: .title, text: "片尾"))
+        model.duplicateSelection()
+        #expect(model.error == nil, "复制文字报了错：\(model.error ?? "")")
+        #expect(model.edit.textList.count == 2)
+        #expect(model.edit.textList.allSatisfy { $0.start + $0.duration <= total + 0.001 })
+        #expect(model.selectedText != text)
+    }
+
+    /// 选中一句字幕按 ⌘D，复制的必须是这句字幕，绝不能去复制录制画面。
+    @Test func duplicatingASelectedCaptionDoesNotTouchTheVideoClips() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await makeTimelinePointerModel(root: root)
+        defer { model.close() }
+        model.commit { $0.captionList = [CaptionCue(sourceStart: 0.5, sourceEnd: 1.5, text: "一句话",
+                                                    words: [CaptionWord(start: 0.5, end: 1.5, text: "一句话")])] }
+        let clipsBefore = model.edit.clips
+        model.selectedCaption = model.edit.captionList.first?.id
+        model.selectedMask = nil; model.selectedText = nil; model.selectedFocus = nil
+        model.duplicateSelection()
+        #expect(model.error == nil)
+        #expect(model.edit.captionList.count == 2, "字幕没有被复制")
+        #expect(model.edit.clips == clipsBefore, "录制画面被动了：从 \(clipsBefore.count) 块变成 \(model.edit.clips.count) 块")
+        // 词表跟着副本一起挪，否则高亮会和句子错开。
+        let copy = try #require(model.edit.captionList.last)
+        #expect(copy.words?.first?.start == copy.sourceStart)
+    }
+
+    /// 选中遮罩 / 文字时按 ⌘B，不能去切用户的录像；选中字幕时切的是那一句。
+    @Test func splittingRespectsWhichKindOfBlockIsSelected() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await makeTimelinePointerModel(root: root)
+        defer { model.close() }
+        model.seek(2)
+        let clipsBefore = model.edit.clips
+
+        _ = model.addMask(start: 1, duration: 2)
+        #expect(!model.canSplit(at: 2), "选中遮罩时「分割」应当不可用")
+        model.split(at: 2)
+        #expect(model.edit.clips == clipsBefore, "选中遮罩时分割切开了录制画面")
+
+        model.selectedMask = nil
+        _ = model.addText(start: 1, duration: 2, preset: .title, text: "标题")
+        #expect(!model.canSplit(at: 2), "选中文字时「分割」应当不可用")
+        model.split(at: 2)
+        #expect(model.edit.clips == clipsBefore, "选中文字时分割切开了录制画面")
+
+        model.clearSelection()
+        model.commit { $0.captionList = [CaptionCue(sourceStart: 0.5, sourceEnd: 3.5, text: "把留白调到四十")] }
+        model.selectedCaption = model.edit.captionList.first?.id
+        #expect(model.canSplit(at: 2), "选中字幕时应当可以分割这一句")
+        model.split(at: 2)
+        #expect(model.error == nil)
+        #expect(model.edit.captionList.count == 2, "字幕没有被切成两句")
+        #expect(model.edit.clips == clipsBefore, "切字幕时把录制画面也切了")
+    }
+
+    /// 时间线空白处不给加叠加层，而且要给一句看得懂的提示，不是静默建一个看不见的遮罩。
+    @Test func addingOverlaysInATimelineGapExplainsWhyItRefuses() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await makeTimelinePointerModel(root: root)
+        defer { model.close() }
+        // 把画面块往右挪，前面留出一段空白。
+        model.commit { edit in
+            edit.materializeLayers()
+            edit.clips[0].timelineStart = 2
+        }
+        #expect(model.error == nil)
+        #expect(model.edit.clip(atTimeline: 0.5) == nil, "没造出空白，这条测试就测不到东西")
+        #expect(model.addMask(start: 0.5, duration: 2) == nil)
+        #expect(model.error?.contains("播放头不在任何录制画面上") == true, "提示是：\(model.error ?? "无")")
+        #expect(model.edit.maskList.isEmpty)
+    }
+}
+
+extension WindowLifecycleTests {
+    /// 选中态必须是"只有一项"。每个分支各清各的写法漏过一次：
+    /// 先点字幕块再点遮罩块，`selectedCaption` 还留着，按删除键删掉的是那句字幕而不是遮罩。
+    @Test func selectingOneKindOfBlockClearsEveryOtherKind() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await makeTimelinePointerModel(root: root)
+        defer { model.close() }
+        model.commit { $0.captionList = [CaptionCue(sourceStart: 0.2, sourceEnd: 1.2, text: "一句话")] }
+        _ = model.addMask(start: 0.2, duration: 1)
+        _ = model.addText(start: 0.2, duration: 1, preset: .title, text: "标题")
+        let harness = TimelinePointerHarness(model: model, zoom: 1)
+        defer { harness.close() }
+
+        /// 点某一行的块，返回当时的四个选中项。
+        func click(row: Int) throws {
+            let x = TimelineViewportView.timeOrigin + 0.7 * 120
+            let y = 48.0 + Double(row) * 42
+            try harness.mouse(.leftMouseDown, x: x, y: y)
+            try harness.mouse(.leftMouseUp, x: x, y: y)
+        }
+        func selectedCount() -> Int {
+            [model.selectedMask != nil, model.selectedText != nil, model.selectedCaption != nil,
+             model.selectedFocus != nil, model.selectedMediaID != nil].filter { $0 }.count
+        }
+        // 逐行点过去，每一次都只能有一项被选中。
+        for row in 0..<4 {
+            try click(row: row)
+            #expect(selectedCount() <= 1, "点第 \(row) 行之后同时选中了 \(selectedCount()) 项")
+        }
+        // 具体走一遍那条漏过的顺序：先点字幕块、再点遮罩块、然后删除，删掉的必须是遮罩。
+        let captionRow = try #require((0..<4).first { row in
+            model.clearSelection(); try? click(row: row); return model.selectedCaption != nil
+        })
+        let maskRow = try #require((0..<4).first { row in
+            model.clearSelection(); try? click(row: row); return model.selectedMask != nil
+        })
+        model.clearSelection()
+        try click(row: captionRow)
+        #expect(model.selectedCaption != nil)
+        try click(row: maskRow)
+        #expect(model.selectedMask != nil && model.selectedCaption == nil, "选了遮罩之后字幕的选中态还留着")
+        model.deleteSelection()
+        #expect(model.edit.maskList.isEmpty, "删除没有删掉遮罩")
+        #expect(model.edit.captionList.count == 1, "删除把字幕也删了")
     }
 }

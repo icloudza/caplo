@@ -41,6 +41,8 @@
 	<string>用于录制讲解人像，摄像头视频会作为独立素材保存在本地工程中。</string>
 	<key>NSCameraUseContinuityCameraDeviceType</key>
 	<true/>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>用于把录制的讲解声音转写成字幕。转写全部在本机完成，音频不会离开这台电脑。</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>

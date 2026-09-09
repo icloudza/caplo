@@ -27,7 +27,7 @@ public enum TimelineInteractionReview {
         defer { view.detach(); window.contentView = nil; window.close() }
         func sync() {
             view.update(edit: model.edit, analysis: model.analysis, selection: model.selectedClipIDs, primary: model.selectedClip,
-                        focus: model.selectedFocus, zoom: viewport.zoom, fit: viewport.fitRequest)
+                        focus: model.selectedFocus, mask: model.selectedMask, text: model.selectedText, caption: model.selectedCaption, zoom: viewport.zoom, fit: viewport.fitRequest)
             view.layoutSubtreeIfNeeded(); view.displayIfNeeded()
         }
         func mouse(_ type: NSEvent.EventType, _ point: CGPoint) throws {

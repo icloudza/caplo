@@ -14,6 +14,10 @@ public struct VideoClip: Codable, Equatable, Sendable, Identifiable {
     /// 片段级增益，乘在全局音量之上；1 为不变。
     public var systemGain: Float = 1
     public var microphoneGain: Float = 1
+    /// 这是一段"定格卡段"，冻结自哪条片段。
+    /// 镜头是绑在片段 ID 上的（`FocusSegment.targetClipID`），定格片段的 ID 是新的，
+    /// 不认这门亲就会在卡段里把镜头整个丢掉——1.8× 的推近在卡段两端各硬跳一次。
+    public var holdSource: UUID?
     /// 本片段不绘制光标与点击效果。
     public var cursorHidden = false
     /// 用户自定义的块名称；为空时时间线按"录制画面 01"这类默认规则命名。
@@ -179,7 +183,15 @@ public struct AudioLevels: Codable, Equatable, Sendable {
 public struct VideoEdit: Codable, Equatable, Sendable {
     /// 分割、裁剪、拖边都不允许把片段做得比这更短：太短的片段在时间线上只剩几个像素，既抓不住也没有意义。
     public static let minimumClipDuration = 0.25
+    /// 工程文件版本。**不要直接写数字**，请调用 `normalizeSchemaVersion(layered:)`。
+    /// 直接赋值曾经把另一处刚算好的版本冲掉，结果是"添加遮罩"直接报版本不支持。
     public var schemaVersion = 5
+    /// 写出去的工程用这个版本号。5 是最初的连续拼接，6 是每个块都有显式起点的图层模型。
+    /// 遮罩 / 文字层 / 字幕**不再各自升一档**：旧版本打开只会少画几层叠加内容，
+    /// 不会显示错的画面，为此把工程标成"打不开"得不偿失。
+    public static let writtenSchemaVersion = 6
+    /// 还能打开的最高版本。开发期间存成 7 / 8 / 9 的工程照常打开，下次保存自动落回 6。
+    public static let maximumSchemaVersion = 9
     public var clips: [VideoClip]
     public var layerOrder: [UUID]?
     /// 仅保存同行的成员关系；时间范围与合成优先级仍由片段数据、layerOrder 决定。
@@ -195,6 +207,13 @@ public struct VideoEdit: Codable, Equatable, Sendable {
     public var focusEngineVersion: Int?
     public var camera: CameraLayout?
     public var pointer: PointerEffects?
+    /// 区域遮罩。旧工程没有这个键，所以是可选的；日常读写请用 `maskList`，它把空数组和缺省当成一回事。
+    public var masks: [MaskSegment]?
+    /// 文字层。同样是可选的，日常读写用 `textList`。
+    public var texts: [TextSegment]?
+    /// 字幕。可选，日常读写用 `captionList`。
+    public var captions: [CaptionCue]?
+    public var captionStyle: CaptionStyle?
     public init(duration: Double) { clips = duration > 0 ? [VideoClip(sourceStart: 0, duration: duration)] : [] }
     public var duration: Double {
         let mediaEnd = [clips, cameraClips ?? [], systemClips ?? [], microphoneClips ?? []].map { values in
@@ -261,7 +280,21 @@ public struct VideoEdit: Codable, Equatable, Sendable {
             var isolated = VideoEdit(duration: 0); isolated.clips = media
             try isolated.validate(sourceDuration: sourceDuration)
         }
-        guard (schemaVersion == 5 || schemaVersion == 6), layerOrder.map({ Set($0).count == $0.count }) != false, focusStyle?.isValid != false, camera?.isValid != false, pointer?.isValid != false, clips.count <= 100_000, Set(clips.map(\.id)).count == clips.count,
+        guard (5...Self.maximumSchemaVersion).contains(schemaVersion),
+              captionList.count <= 5000, Set(captionList.map(\.id)).count == captionList.count,
+              captionStyle?.isValid != false,
+              captionList.allSatisfy({ cue in cue.isValid && cue.sourceEnd <= sourceDuration + 0.001
+                                       && (cue.timelineStart.map { $0 + cue.sourceDuration <= editedDuration + 0.001 } ?? true) }),
+              textList.count <= 500, Set(textList.map(\.id)).count == textList.count,
+              // 钉在成片时间上的叠加层只查成片域：它的 start 是源域的残留，没有任何一处读它。
+              // 全屏卡段就靠这一条——在片尾附近插一段 3 秒卡段，源域上必然越界，
+              // 按源域查等于整笔编辑回滚，用户只看到一句"内容无效"。
+              textList.allSatisfy({ value in value.isValid && (value.timelineStart.map { $0 + value.duration <= editedDuration + 0.001 }
+                                                               ?? (value.start + value.duration <= sourceDuration + 0.001)) }),
+              maskList.count <= 500, Set(maskList.map(\.id)).count == maskList.count,
+              maskList.allSatisfy({ mask in mask.isValid && (mask.timelineStart.map { $0 + mask.duration <= editedDuration + 0.001 }
+                                                             ?? (mask.start + mask.duration <= sourceDuration + 0.001)) }),
+              layerOrder.map({ Set($0).count == $0.count }) != false, focusStyle?.isValid != false, camera?.isValid != false, pointer?.isValid != false, clips.count <= 100_000, Set(clips.map(\.id)).count == clips.count,
               clips.allSatisfy({ $0.sourceStart.isFinite && $0.duration.isFinite && $0.sourceStart >= 0 && $0.duration >= 1.0 / 60 && $0.sourceStart + $0.playableDuration <= sourceDuration + 0.001
                                  && ($0.timelineStart.map { $0.isFinite && $0 >= 0 } ?? true) && ($0.mediaDuration.map { $0.isFinite && $0 > 0 } ?? true)
                                  && $0.systemGain.isFinite && (0...2).contains($0.systemGain) && $0.microphoneGain.isFinite && (0...2).contains($0.microphoneGain) }),
@@ -368,7 +401,8 @@ public enum SceneEvaluator {
         let links = suppliedLinks ?? links(edit: edit)
         struct Layer { let zoom: FocusSegment; let elapsed: Double; let envelope: Double; let order: Int? }
         var layers: [Layer] = []
-        let visibleClip = timeline.clipIndex(at: time).map { timeline.clips[$0].id }
+        // 定格片段认它冻结自的那条片段，镜头才不会在卡段里掉档。
+        let visibleClip = timeline.clipIndex(at: time).map { timeline.clips[$0].holdSource ?? timeline.clips[$0].id }
         for zoom in edit.focuses where !zoom.automatic || edit.automaticFocus {
             if let target = zoom.targetClipID, target != visibleClip { continue }
             let visibleElapsed = (zoom.timelineStart == nil ? source : time) - zoom.editingStart
@@ -500,5 +534,19 @@ public struct EditHistory: Sendable {
     }
     public mutating func redo(current: VideoEdit) -> VideoEdit? {
         guard let value = redoStack.popLast() else { return nil }; undoStack.append(current); return value
+    }
+}
+
+extension VideoEdit {
+    /// 归一化工程版本号，**这是唯一该写 `schemaVersion` 的地方**。
+    ///
+    /// 只有两个合法取值：5（最初的连续拼接）和 6（每个块有显式起点的图层模型）。
+    /// 叠加层不再各自升一档——那样做的代价是旧版本直接报"版本不支持"，
+    /// 收益只是"旧版本少画一层"这件本来就无害的事，不划算。
+    /// 开发期间存成 7 / 8 / 9 的工程仍然读得进来，在这里落回 6。
+    ///
+    /// `layered` 为真表示这次操作把工程升到了图层模型。
+    public mutating func normalizeSchemaVersion(layered: Bool = false) {
+        schemaVersion = layered ? Self.writtenSchemaVersion : min(max(schemaVersion, 5), Self.writtenSchemaVersion)
     }
 }

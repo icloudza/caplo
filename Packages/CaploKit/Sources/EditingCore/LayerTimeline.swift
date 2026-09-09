@@ -16,6 +16,8 @@ extension VideoEdit {
         let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
         let value = trimmed.flatMap { $0.isEmpty ? nil : $0 }
         if let index = focuses.firstIndex(where: { $0.id == id }) { focuses[index].title = value; return }
+        if maskList.contains(where: { $0.id == id }) { updateMask(id: id) { $0.title = value }; return }
+        if textList.contains(where: { $0.id == id }) { updateText(id: id) { $0.title = value }; return }
         for role in [TimelineMedia.screen, .camera, .system, .microphone] {
             var values = role == .screen ? clips : mediaClips(role)
             guard let index = values.firstIndex(where: { $0.id == id }) else { continue }
@@ -32,6 +34,14 @@ extension VideoEdit {
             if absent { setMediaClips(role, clips.map { var copy = $0; copy.id = UUID(); return copy }) }
         }
     }
+    /// 画面会不会不一样。**除了音量之外的任何差别都算**——这条判定必须是"反过来"写的：
+    /// 逐个列举"哪些字段影响画面"的写法每加一个新图层就漏一次，而且漏了完全没有报错，
+    /// 只表现为编辑器里改了没反应、导出却是对的（遮罩和字幕都各踩过一次）。
+    public func differsVisually(from other: VideoEdit) -> Bool {
+        var candidate = other
+        candidate.audio = audio
+        return candidate != self
+    }
     public func hasSameMedia(as other: VideoEdit) -> Bool {
         // 语音处理开关换的是麦克风素材文件本身，也算素材变化（要重建播放项）。
         layerOrder == other.layerOrder && clips == other.clips && cameraClips == other.cameraClips && systemClips == other.systemClips && microphoneClips == other.microphoneClips && duration == other.duration && audio.voiceProcessing == other.audio.voiceProcessing
@@ -44,6 +54,16 @@ extension VideoEdit {
         guard let number = values.firstIndex(where: { $0.id == id }) else { return }
         var clip = values[number]
         let start = clip.timelineStart ?? 0, minimum = Self.minimumClipDuration
+        // 定格卡段不是普通片段：它只有一帧可用素材，下面两个分支会按"源里还剩多少"重算 mediaDuration，
+        // 一重算定格就没了，那一段变成正常播放的录屏（而声音早被挪空），成了一段有画面没声音的鬼片。
+        // 拖右缘等于改卡段时长，走专用那条路：文字一起变、后面的内容一起挪；左缘没有对应语义，不动。
+        if role == .screen, let card = holdCards.first(where: { $0.holdClipID == id }) {
+            switch edge {
+            case .body: break
+            case .leading: return
+            case .trailing: setHoldCardDuration(textID: card.id, duration: clip.duration + delta); return
+            }
+        }
         switch edge {
         case .body: clip.timelineStart = max(0, start + delta)
         case .leading:
@@ -69,6 +89,8 @@ extension VideoEdit {
         guard time.isFinite, let number = values.firstIndex(where: { $0.id == id }) else { return nil }
         let clip = values[number], offset = time - index.boundaries[number]
         guard offset >= Self.minimumClipDuration, clip.duration - offset >= Self.minimumClipDuration else { return nil }
+        // 定格卡段切不得：切完两半各自还是定格，可文字只认得其中一半，另一半就成了没人管的空定格。
+        guard role != .screen || !holdCards.contains(where: { $0.holdClipID == id }) else { return nil }
         let previousOrder = orderedLayerIDs
         let previousGroups = rowGroups == nil ? [] : timelineRows.filter { $0.count > 1 }
         let splitSharesRow = previousGroups.contains { $0.contains(id) }
@@ -164,7 +186,7 @@ extension VideoEdit {
 /// 统一行顺序使用稳定 ID，排序不改变块的时间或效果所关联的素材。
 extension VideoEdit {
     public mutating func prepareLayerEditing(camera availableCamera: Bool, system: Bool, microphone: Bool) {
-        schemaVersion = 6
+        normalizeSchemaVersion(layered: true)
         materializeLayers()
         if !availableCamera { cameraClips = [] }; if !system { systemClips = [] }; if !microphone { microphoneClips = [] }
         let appearances = focusSpans()
@@ -172,7 +194,8 @@ extension VideoEdit {
         if layerOrder == nil {
             // 默认行序：镜头与录制画面在上，摄像头行紧贴在声音轨上方（不放最顶端），最后是系统声音、麦克风。
             // 行序只描述编辑器布局；摄像头画中画始终叠在画面之上，不随行序改变。
-            var order: [UUID] = []
+            // 文字与遮罩行放在最顶端：它们盖在所有画面之上，行序也照这个直觉排。
+            var order: [UUID] = textList.map(\.id) + maskList.map(\.id)
             let effectsByTarget = Dictionary(grouping: focuses.filter { $0.targetClipID != nil }, by: { $0.targetClipID! })
             for clip in clips.reversed() {
                 order += (effectsByTarget[clip.id] ?? []).map(\.id)
@@ -197,6 +220,13 @@ extension VideoEdit {
             // 不能依赖 orderedLayerIDs 的兜底追加而落到声音轨之后。保留旧行的手动排序。
             let existing = Set(layerOrder ?? [])
             var order = orderedLayerIDs
+            // 新加的遮罩与文字要顶到最上面，不能靠 orderedLayerIDs 的兜底追加落到声音轨下面。
+            for mask in maskList.reversed() where !existing.contains(mask.id) {
+                order.removeAll { $0 == mask.id }; order.insert(mask.id, at: 0)
+            }
+            for value in textList.reversed() where !existing.contains(value.id) {
+                order.removeAll { $0 == value.id }; order.insert(value.id, at: 0)
+            }
             let rowHeads = rowGroups == nil ? [:] : Dictionary(uniqueKeysWithValues: timelineRows.flatMap { row in row.map { ($0, row[0]) } })
             for focus in focuses where !existing.contains(focus.id) {
                 guard let target = focus.targetClipID, order.contains(target) else { continue }
@@ -221,7 +251,7 @@ extension VideoEdit {
         normalizeTimelineRows()
     }
     public var orderedLayerIDs: [UUID] {
-        let all = clips.map(\.id) + focuses.map(\.id) + (cameraClips ?? []).map(\.id) + (systemClips ?? []).map(\.id) + (microphoneClips ?? []).map(\.id)
+        let all = textList.map(\.id) + maskList.map(\.id) + clips.map(\.id) + focuses.map(\.id) + (cameraClips ?? []).map(\.id) + (systemClips ?? []).map(\.id) + (microphoneClips ?? []).map(\.id)
         let valid = Set(all), saved = (layerOrder ?? []).filter { valid.contains($0) }, existing = Set(saved)
         return saved + all.filter { !existing.contains($0) }
     }
