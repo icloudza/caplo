@@ -124,7 +124,8 @@ private func text(_ layout: TextSegment.Layout, ratio: Double = 0.5, gap: Double
     let value = try JSONDecoder().decode(TextSegment.self, from: legacy)
     #expect(value.text == "产品演示" && value.start == 2 && value.duration == 4)
     // 缺的键落到默认值上，而不是让整份工程作废。
-    #expect(value.layout == .overlay && value.splitRatio == 0.5 && value.splitGap == 48)
+    #expect(value.layout == .overlay && value.splitRatio == TextSegment.defaultSplitRatio
+            && value.splitGap == TextSegment.defaultSplitGap)
     #expect(abs(value.layoutTransition - 0.35) < 0.0001 && value.holdClipID == nil)
     #expect(value.isValid)
 

@@ -25,7 +25,7 @@ struct FocusPanel: View {
         }
     }
 
-    /// 单个镜头的参数：跟随、缓动、推近 / 拉远、倍率、位置、起点与时长，最后是删除。
+    /// 单个镜头的参数：跟随、缓动、推近 / 拉远、倍率、位置，最后是删除。起止时间只在时间线上拖。
     @ViewBuilder private func controls(for id: UUID, focus: FocusSegment) -> some View {
                 Toggle("跟随鼠标", isOn: Binding(get: { focus.followsTimeline == true || focus.path != nil }, set: { enabled in
                     Task { await model.setFocusFollowing(id, enabled: enabled) }
@@ -44,11 +44,6 @@ struct FocusPanel: View {
                 EditorSlider(model: model, title: "倍率", value: binding(id, \.scale), range: 1...3, suffix: "×", detents: [1.5, 2, 2.5])
                 EditorSlider(model: model, title: "水平位置", value: binding(id, \.x), range: 0...1, detents: [0.5])
                 EditorSlider(model: model, title: "垂直位置", value: binding(id, \.y), range: 0...1, detents: [0.5])
-                if let bounds = model.edit.focusBounds(for: id) {
-                    EditorSlider(model: model, title: focus.timelineStart == nil ? "起点（原素材秒）" : "起点（时间线秒）", value: binding(id, \.editingStart), range: bounds.lowerBound...max(bounds.lowerBound, bounds.upperBound - focus.duration))
-                    let minimum = min(1.0 / 30, focus.duration, max(0.000001, bounds.upperBound - focus.editingStart))
-                    EditorSlider(model: model, title: "持续秒数", value: binding(id, \.duration), range: minimum...max(minimum, bounds.upperBound - focus.editingStart))
-                }
         Button("删除此镜头") { model.selectedFocus = id; model.deleteSelection() }.buttonStyle(StudioButtonStyle(.destructive, size: .small))
     }
 

@@ -64,6 +64,23 @@ private func state(_ segment: TextSegment, alpha: Double = 1, scale: Double = 1,
     }
 }
 
+/// 左右分屏的文字盒一样大、只是左右对调。位图缓存的键要是只记盒子的大小不记位置，
+/// 第二次渲染就会拿回第一次的位图，文字留在原来那一栏、压在画面上。
+@Test func flippingTheSplitSideMovesTheTextEvenThoughTheBoxKeepsItsSize() throws {
+    let size = CGSize(width: 1920, height: 1080)
+    // 必须是同一个渲染器：这条契约管的就是它自己的缓存。
+    let renderer = TextRenderer()
+    var segment = TextSegment(start: 0, duration: 3, text: "分屏文字")
+    segment.size = 60; segment.shadow = false
+    segment.layout = .splitLeft
+    let left = try #require(renderer.textFrame(for: state(segment), canvas: size, lightBackground: false))
+    segment.layout = .splitRight
+    let right = try #require(renderer.textFrame(for: state(segment), canvas: size, lightBackground: false))
+    #expect(left.midX < size.width / 2, "左分屏时文字应当在左栏，实际 \(left)")
+    #expect(right.midX > size.width / 2, "右分屏时文字应当在右栏，实际 \(right)")
+    #expect(abs(left.width - right.width) < 1 && abs(left.midY - right.midY) < 1)
+}
+
 @Test func anchorAndAlignmentPlaceTheTextWhereTheyPromise() throws {
     let size = CGSize(width: 1920, height: 1080)
     let renderer = TextRenderer()
@@ -324,12 +341,15 @@ private extension Double { var intValue: Int { Int(self) } }
     var text = TextSegment(start: 0, duration: 6, text: "左分屏")
     text.layout = .splitLeft; text.timelineStart = 0; text.layoutTransition = 0.001; text.color = .white
     split.addText(text)
+    // 画面占多宽由「画面占比」决定，这里按当前版式算出来的目标去核对，不写死半区。
+    let column = text.stageTarget
     let right = try #require(redPixels(SceneRenderer.frame(source: source, edit: split, time: 3, size: size)).box)
-    #expect(right.minX > size.width * 0.45, "画面没有挪到右半区，左缘在 \(right.minX)")
-    #expect(right.width < size.width * 0.55, "画面宽 \(right.width)，没有缩到半区")
+    #expect(abs(right.width / size.width - column.scale) < 0.02, "画面宽 \(right.width)，应当是 \(column.scale * size.width)")
+    #expect(abs(right.midX / size.width - column.centerX) < 0.02, "画面中线在 \(right.midX / size.width)，应当是 \(column.centerX)")
+    #expect(right.midX > size.width / 2, "左分屏时画面应当在右半边，中线在 \(right.midX)")
     split.updateText(id: text.id) { $0.layout = .splitRight }
     let left = try #require(redPixels(SceneRenderer.frame(source: source, edit: split, time: 3, size: size)).box)
-    #expect(left.maxX < size.width * 0.55, "右分屏时画面右缘在 \(left.maxX)，应当留在左半区")
+    #expect(left.midX < size.width / 2, "右分屏时画面应当在左半边，中线在 \(left.midX)")
     #expect(abs(left.width - right.width) < 3)
 }
 

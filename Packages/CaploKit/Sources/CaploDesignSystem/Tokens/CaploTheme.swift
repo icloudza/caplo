@@ -149,6 +149,8 @@ public enum CaploMetrics {
     public static let railWidth: CGFloat = 48
     /// 属性面板宽度。
     public static let panelWidth: CGFloat = 300
+    /// 属性面板内容列宽度：面板宽减去两侧留白。写死它，滚动条的出现与否、某个控件的最小宽度都不能再改动整列。
+    public static var panelContentWidth: CGFloat { panelWidth - Spacing.l * 2 }
     /// 顶栏与时间线工具栏高度。
     public static let toolbarHeight: CGFloat = 44
     /// 编辑器顶栏高度：与统一标题栏等高，原生红黄绿垂直居中于其中。

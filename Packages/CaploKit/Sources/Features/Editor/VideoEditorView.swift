@@ -54,9 +54,6 @@ struct VideoEditorView: View {
                     if let warning = model.entry.document.warning {
                         Text(warning).font(CaploFont.caption).foregroundStyle(CaploColor.warning)
                     }
-                    if let url = model.exportedURL {
-                        Button("查看导出视频") { NSWorkspace.shared.activateFileViewerSelecting([url]) }.buttonStyle(StudioButtonStyle(.secondary))
-                    }
                 }
                 .disabled(!model.ready)
                 .studioCard()

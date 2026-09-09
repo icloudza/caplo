@@ -407,7 +407,8 @@ extension WindowLifecycleTests {
             caliper.layoutSubtreeIfNeeded()
             #expect(caliper.x(for: caliper.value).isFinite)
         }
-        #expect(calipers.contains { $0.configuration.range.upperBound == $0.configuration.range.lowerBound })
+        // 起点 / 持续这两支卡尺已经撤掉（时间线上拖就行），面板里不该再出现区间塌成一点的卡尺。
+        #expect(!calipers.contains { $0.configuration.range.upperBound <= $0.configuration.range.lowerBound })
         #expect(model.error == nil)
     }
 

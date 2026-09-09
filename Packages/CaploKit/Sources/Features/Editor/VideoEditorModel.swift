@@ -100,7 +100,6 @@ final class VideoEditorModel {
     var progress = 0.0
     var exporting = false
     var exportSize = 1920
-    var exportedURL: URL?
     private var lease: ProjectLease?
     private var reloadTask: Task<Void, Never>?
     private var analysisTask: Task<Void, Never>?
@@ -557,11 +556,6 @@ final class VideoEditorModel {
         if !ok, enabled { error = "这段文字所在的位置插不进卡段，请把它移到某个录制画面块上再试。" }
     }
 
-    /// 改卡段时长；后面的一切跟着挪。
-    func setHoldCardDuration(_ id: UUID, duration: Double) {
-        commit { $0.setHoldCardDuration(textID: id, duration: duration) }
-    }
-
     /// 在播放头处加一段文字。
     @discardableResult func addText(preset: TextPreset = .title) -> UUID? {
         addText(start: skimPosition ?? position, duration: 3, preset: preset)
@@ -678,18 +672,6 @@ final class VideoEditorModel {
 
     /// 导出 SRT / VTT 的文本；调用方负责写文件。
     func captionFileText(vtt: Bool) -> String { vtt ? CaptionFile.vtt(edit) : CaptionFile.srt(edit) }
-
-    /// 文字时间参数的上界，规则同遮罩。
-    func textBounds(for id: UUID) -> Double {
-        guard let value = edit.text(id: id) else { return 0 }
-        return value.timelineStart == nil ? entry.document.duration : max(edit.duration, value.duration)
-    }
-
-    /// 遮罩时间参数的上界：未固定的按原素材总长，固定到成片时间的按成片长度。
-    func maskBounds(for id: UUID) -> Double {
-        guard let mask = edit.mask(id: id) else { return 0 }
-        return mask.timelineStart == nil ? entry.document.duration : max(edit.duration, mask.duration)
-    }
 
     /// 请时间线把某个块滚进视口（面板里点了镜头列表 / 轨头图标时）；序号递增让同一块可以重复触发。
     private(set) var revealRequest: (id: UUID, serial: Int)?
@@ -1032,12 +1014,11 @@ final class VideoEditorModel {
         panel.nameFieldStringValue = entry.document.name + ".mp4"
         guard panel.runModal() == .OK, let destination = panel.url else { return }
         let snapshot = edit, size = exportSize
-        exporting = true; progress = 0; error = nil; exportedURL = nil
+        exporting = true; progress = 0; error = nil
         exportTask = Task {
             defer { exporting = false; exportTask = nil }
             do {
                 try await ProjectMedia.export(url: entry.url, document: entry.document, levels: snapshot.audio, destination: destination, edit: snapshot, longEdge: size) { self.progress = $0 }
-                exportedURL = destination
             } catch is CancellationError {} catch { if !Task.isCancelled { self.error = error.localizedDescription } }
         }
     }

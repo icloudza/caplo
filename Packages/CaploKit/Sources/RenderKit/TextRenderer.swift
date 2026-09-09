@@ -39,6 +39,10 @@ public final class TextRenderer: @unchecked Sendable {
         let shadowOffset: Double
         let boxWidth: Double
         let boxHeight: Double
+        /// 文字盒的位置也要进键：缓存里存的是画布坐标的位图与外框，左右分屏互换时盒子一样大只是左右对调，
+        /// 只按大小取缓存会把上一侧的位图原地还给你——文字留在原来那一栏，压在画面上。
+        let boxX: Double
+        let boxY: Double
         let anchorX: Double
         let anchorY: Double
         let light: Bool
@@ -153,7 +157,8 @@ public final class TextRenderer: @unchecked Sendable {
                       platePadding: segment.platePadding, plateRadius: segment.plateRadius, plateFull: segment.plateFull,
                       shadow: segment.shadow, shadowOpacity: segment.shadowOpacity, shadowBlur: segment.shadowBlur,
                       shadowOffset: segment.shadowOffset,
-                      boxWidth: box.width, boxHeight: box.height, anchorX: segment.x, anchorY: segment.y,
+                      boxWidth: box.width, boxHeight: box.height, boxX: box.minX, boxY: box.minY,
+                      anchorX: segment.x, anchorY: segment.y,
                       light: lightBackground,
                       highlightLocation: highlight?.location ?? -1, highlightLength: highlight?.length ?? 0,
                       highlightColor: (highlight?.color.rawValue ?? "") + (highlight?.pillColor.rawValue ?? ""),

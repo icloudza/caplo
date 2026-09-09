@@ -71,7 +71,7 @@ struct TextPanel: View {
         .onChange(of: appearanceExpanded) { _, value in UserDefaults.standard.set(value, forKey: Self.appearanceKey) }
     }
 
-    /// 单段文字的参数：文本框、时间、动画，然后是收起的排版与外观。
+    /// 单段文字的参数：文本框、版式、动画，然后是收起的排版与外观。起止时间只在时间线上拖。
     @ViewBuilder private func controls(for id: UUID, value: TextSegment) -> some View {
         TextEditor(text: textBinding(id))
             .font(CaploFont.body).scrollContentBackground(.hidden)
@@ -79,11 +79,15 @@ struct TextPanel: View {
             .padding(.horizontal, 6).padding(.vertical, 4)
             .background(CaploColor.surfaceRaised, in: RoundedRectangle(cornerRadius: CaploMetrics.Radius.control, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: CaploMetrics.Radius.control, style: .continuous).strokeBorder(CaploColor.separator, lineWidth: 1))
-        Picker("版式", selection: layoutBinding(id)) {
-            ForEach(TextSegment.Layout.allCases, id: \.self) { Text($0.title).tag($0) }
-        }.pickerStyle(.segmented).environment(\.colorScheme, .dark)
-            // 卡段的版式定死在全屏：那段定格是按"整幅画面都被文字盖住"插进成片的。
-            .disabled(value.holdClipID != nil)
+        // 标题单独占一行：四个中文选项的分段控件本身就要 227 点，标题挤在同一行会被压成两行竖排。
+        VStack(alignment: .leading, spacing: CaploMetrics.Spacing.xs) {
+            Text("版式").font(CaploFont.body).foregroundStyle(CaploColor.textPrimary)
+            Picker("版式", selection: layoutBinding(id)) {
+                ForEach(TextSegment.Layout.allCases, id: \.self) { Text($0.title).tag($0) }
+            }.labelsHidden().pickerStyle(.segmented).environment(\.colorScheme, .dark)
+        }
+        // 卡段的版式定死在全屏：那段定格是按"整幅画面都被文字盖住"插进成片的。
+        .disabled(value.holdClipID != nil)
         if value.layout != .overlay {
             PanelNote(value.layout == .fullscreen
                       ? "全屏：文字占满画面，底下的录制画面缩一点并淡出。要让成片在这里停住，再打开下面的「插入时长」。"
@@ -97,26 +101,17 @@ struct TextPanel: View {
                 PanelNote("人像当前不是浮在画面上的画中画，它属于画面构图的一部分，会跟着画面一起缩进这一栏。想让人像保持原大小，去「人像」面板换成圆形或圆角矩形那两种叠放预设。")
             }
             EditorSlider(model: model, title: "画面占比", value: binding(id, \.splitRatio), range: TextSegment.splitRatioRange,
-                         suffix: "%", percentage: true, defaultValue: 0.5, detents: [0.5])
-            EditorSlider(model: model, title: "分栏间距", value: binding(id, \.splitGap), range: 0...240, decimals: 0, defaultValue: 48)
+                         suffix: "%", percentage: true, defaultValue: TextSegment.defaultSplitRatio, detents: [0.5])
+            EditorSlider(model: model, title: "分栏间距", value: binding(id, \.splitGap), range: 0...240, decimals: 0,
+                         defaultValue: TextSegment.defaultSplitGap)
         }
         if value.layout == .fullscreen {
             Toggle("插入时长（时钟暂停）", isOn: holdBinding(id)).toggleStyle(StudioToggleStyle())
                 .help("打开之后成片会在这里停住：画面定格、声音静音，这一段是真实增加的时长。")
         }
         if value.holdClipID != nil {
-            // 上限跟着当前时长走：卡段可以在时间线上拖得比 20 秒长，卡尺硬顶在 20 的话，
-            // 打开面板碰一下就把它砍回 20 秒，后面的所有内容跟着前移。
-            EditorSlider(model: model, title: "卡段时长", value: holdDurationBinding(id),
-                         range: VideoEdit.minimumHoldDuration...max(20, value.duration.isFinite ? value.duration : 20),
-                         decimals: 1, defaultValue: 3)
-            PanelNote("这一段是插进成片里的定格，长度由上面的卡尺决定，后面的所有内容跟着往后挪。")
-        } else {
-            let bounds = model.textBounds(for: id)
-            EditorSlider(model: model, title: value.timelineStart == nil ? "起点（原素材秒）" : "起点（时间线秒）",
-                         value: timeBinding(id, edge: .body), range: 0...max(0.001, bounds - value.duration))
-            EditorSlider(model: model, title: "持续秒数", value: timeBinding(id, edge: .trailing),
-                         range: 0.2...max(0.2, bounds - (value.timelineStart ?? value.start)))
+            // 起止时间一律在时间线上拖，面板不再放重复的卡尺。
+            PanelNote("这一段是插进成片里的定格，长度在时间线上拖这一块的右缘来改，后面的所有内容跟着往后挪。")
         }
         Picker("进场动画", selection: animationBinding(id, \.enterKind)) { animationOptions }.environment(\.colorScheme, .dark)
         EditorSlider(model: model, title: "进场时长", value: binding(id, \.enterDuration), range: 0...3, defaultValue: 0.4)
@@ -138,11 +133,6 @@ struct TextPanel: View {
             EditorSlider(model: model, title: "字重", value: binding(id, \.weight), range: TextSegment.weightRange,
                          decimals: 0, defaultValue: 500, detents: [400, 700])
             Toggle("斜体", isOn: boolBinding(id, \.italic)).toggleStyle(StudioToggleStyle())
-            Picker("对齐", selection: alignmentBinding(id)) {
-                Text("左").tag(TextSegment.Alignment.leading)
-                Text("居中").tag(TextSegment.Alignment.center)
-                Text("右").tag(TextSegment.Alignment.trailing)
-            }.pickerStyle(.segmented).environment(\.colorScheme, .dark)
             EditorSlider(model: model, title: "行高", value: binding(id, \.lineHeight), range: 0.8...2.0, defaultValue: 1.30, detents: [1.0, 1.3])
             EditorSlider(model: model, title: "字距", value: binding(id, \.tracking), range: -2...20, decimals: 1, defaultValue: 0, detents: [0])
             EditorSlider(model: model, title: "水平位置", value: binding(id, \.x), range: 0...1, suffix: "%", percentage: true, detents: [0.5])
@@ -212,16 +202,6 @@ struct TextPanel: View {
             model.scheduleTextCommit()
         })
     }
-    private func timeBinding(_ id: UUID, edge: VideoEdit.FocusDragEdge) -> Binding<Double> {
-        Binding(get: {
-            guard let value = model.edit.text(id: id) else { return 0 }
-            return edge == .body ? (value.timelineStart ?? value.start) : value.duration
-        }, set: { next in
-            guard let value = model.edit.text(id: id) else { return }
-            let current = edge == .body ? (value.timelineStart ?? value.start) : value.duration
-            model.edit.dragText(id: id, edge: edge, delta: next - current, sourceDuration: model.entry.document.duration)
-        })
-    }
     private func animationBinding(_ id: UUID, _ key: WritableKeyPath<TextSegment, TextSegment.Animation>) -> Binding<TextSegment.Animation> {
         Binding(get: { model.edit.text(id: id)?[keyPath: key] ?? .fade }, set: { value in
             model.commit { $0.updateText(id: id) { $0[keyPath: key] = value } }
@@ -241,15 +221,6 @@ struct TextPanel: View {
     }
     private func holdBinding(_ id: UUID) -> Binding<Bool> {
         Binding(get: { model.edit.text(id: id)?.holdClipID != nil }, set: { model.setHoldCard(id, enabled: $0) })
-    }
-    private func holdDurationBinding(_ id: UUID) -> Binding<Double> {
-        Binding(get: { model.edit.text(id: id)?.duration ?? 0 },
-                set: { model.edit.setHoldCardDuration(textID: id, duration: $0) })
-    }
-    private func alignmentBinding(_ id: UUID) -> Binding<TextSegment.Alignment> {
-        Binding(get: { model.edit.text(id: id)?.alignment ?? .center }, set: { value in
-            model.commit { $0.updateText(id: id) { $0.alignment = value } }
-        })
     }
     private func paletteBinding(_ id: UUID, _ key: WritableKeyPath<TextSegment, TextSegment.Palette>) -> Binding<TextSegment.Palette> {
         Binding(get: { model.edit.text(id: id)?[keyPath: key] ?? .auto }, set: { value in

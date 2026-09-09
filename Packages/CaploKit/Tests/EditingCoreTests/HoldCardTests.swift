@@ -155,11 +155,13 @@ private func recording(_ duration: Double) -> VideoEdit {
     var text = TextSegment(start: 0, duration: 6, text: "左分屏")
     text.layout = .splitLeft; text.timelineStart = 0; text.layoutTransition = 0.001
     split.addText(text)
+    // 具体占多少由「画面占比」决定，这里只认两件事：缩了，并且去了文字对面那一栏。
     let left = split.stage(at: 3)
-    #expect(left.scale < 0.5 && left.centerX > 0.6, "左分屏时画面应当去右半区，实际 \(left)")
+    #expect(left.scale == text.stageTarget.scale && left.scale < 1, "分屏时画面应当缩小，实际 \(left)")
+    #expect(left.centerX > 0.5, "左分屏时画面应当去右半区，实际 \(left)")
     split.updateText(id: text.id) { $0.layout = .splitRight }
     let right = split.stage(at: 3)
-    #expect(right.centerX < 0.4, "右分屏时画面应当去左半区，实际 \(right)")
+    #expect(right.centerX < 0.5, "右分屏时画面应当去左半区，实际 \(right)")
     #expect(abs(left.scale - right.scale) < 0.0001)
     // 文字盒在画面的对面。
     #expect(text.textBoxFraction.minX < 0.2)
@@ -396,4 +398,22 @@ private func recording(_ duration: Double) -> VideoEdit {
         let row = try #require(rows.first { !$0.filter(ids.contains).isEmpty })
         #expect(row.filter(ids.contains).count == 2, "\(role) 裂成了 \(rows.filter { !$0.filter(ids.contains).isEmpty }.count) 行")
     }
+}
+
+/// 卡段时长的卡尺撤掉之后，时间线是唯一入口：拖文字块的右缘必须真的改卡段长度
+/// （文字与定格片段一起变、后面的内容一起挪），而不是只改 TextSegment.duration 然后被同步掰回去。
+@Test func draggingTheTrailingEdgeOfACardTextChangesTheCardItself() throws {
+    var edit = recording(10)
+    let inserted = edit.insertHoldCard(at: 4, duration: 3, sourceDuration: 10, text: "第二章")
+    let card = try #require(inserted)
+    let clipID = try #require(edit.text(id: card)?.holdClipID)
+    let tail = try #require(edit.clips.first { ($0.timelineStart ?? 0) > 4.5 })
+    let tailStart = try #require(tail.timelineStart)
+
+    edit.dragText(id: card, edge: .trailing, delta: 2, sourceDuration: 10)
+    edit.syncHoldCards()
+    let clip = try #require(edit.clips.first { $0.id == clipID })
+    #expect(abs(clip.duration - 5) < 0.0001, "定格片段没跟着变长，实际 \(clip.duration)")
+    #expect(abs((edit.text(id: card)?.duration ?? 0) - 5) < 0.0001)
+    #expect((edit.clips.first { $0.id == tail.id }?.timelineStart ?? 0) > tailStart + 1.9, "后面的内容没有跟着往后挪")
 }

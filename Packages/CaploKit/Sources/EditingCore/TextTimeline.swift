@@ -55,10 +55,14 @@ public struct TextSegment: Codable, Equatable, Sendable, Identifiable {
     public var layout: Layout = .overlay
     /// 画面层从常态变到全屏 / 分屏所用的时间，两端各一次。
     public var layoutTransition: Double = 0.35
+    /// 分栏间距（960 参考宽）的默认值：不留间距，两栏各自贴着自己的安全边。
+    public static let defaultSplitGap: Double = 0
+    /// 分屏时画面占两栏可用宽度的默认比例：画面拿四分之三，文字占一栏。
+    public static let defaultSplitRatio: Double = 0.75
     /// 分栏间距（960 参考宽），只有分屏用得上。
-    public var splitGap: Double = 48
-    /// 分屏时画面占两栏可用宽度的比例（0.25…0.75），剩下的给文字。0.5 是等分。
-    public var splitRatio: Double = 0.5
+    public var splitGap: Double = TextSegment.defaultSplitGap
+    /// 分屏时画面占两栏可用宽度的比例（0.25…0.75），剩下的给文字。0.5 是等分，默认 0.75 让画面占大头。
+    public var splitRatio: Double = TextSegment.defaultSplitRatio
     /// 全屏卡段：非空表示这段文字在成片里独占一段真实时长，画面冻结、声音静音。
     /// 指向实现它的那条"定格片段"，两者一起生灭、一起改时长。
     public var holdClipID: UUID?
@@ -140,8 +144,8 @@ public struct TextSegment: Codable, Equatable, Sendable, Identifiable {
         preset = try box.decodeIfPresent(String.self, forKey: .preset)
         layout = try value(.layout, Layout.overlay)
         layoutTransition = try value(.layoutTransition, 0.35)
-        splitGap = try value(.splitGap, 48)
-        splitRatio = try value(.splitRatio, 0.5)
+        splitGap = try value(.splitGap, Self.defaultSplitGap)
+        splitRatio = try value(.splitRatio, Self.defaultSplitRatio)
         holdClipID = try box.decodeIfPresent(UUID.self, forKey: .holdClipID)
         size = try value(.size, 96)
         weight = try value(.weight, 700)
@@ -418,6 +422,16 @@ extension VideoEdit {
         let limit = pinned ? max(duration, value.duration) : sourceDuration
         let start = value.timelineStart ?? value.start
         guard start.isFinite, value.duration.isFinite, value.duration > 0 else { return }
+        // 卡段的文字块和它底下的定格片段是一体的：拖右缘就是改卡段时长，得让文字与冻结片段一起变、
+        // 后面的内容一起挪。只改这里的 duration 的话，下一次 syncHoldCards 会照着片段把它掰回去，
+        // 表现是右缘拖完自己弹回原位。左缘没有对应语义（同 dragMedia），不动。
+        if let clipID = value.holdClipID, clips.contains(where: { $0.id == clipID }) {
+            switch edge {
+            case .body: break
+            case .leading: return
+            case .trailing: setHoldCardDuration(textID: id, duration: value.duration + delta); return
+            }
+        }
         let minimum = min(0.2, limit)
         switch edge {
         case .body:

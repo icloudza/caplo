@@ -74,6 +74,10 @@ struct PanelNote: View {
     }
 }
 
+/// 新控件的宽度预算：面板内容列 `CaploMetrics.panelContentWidth`（268 点），
+/// 装进 `PanelDisclosure` 之后再减去左右各 10 点留白，只剩 248 点。
+/// 列宽是写死的，超出的控件不会再把整列顶宽，而是**静默被裁掉**——没有可见症状提醒你，自己核对。
+///
 /// 可展开的面板条目：一行表头（图标、名字、次要文字、箭头），展开后表头高亮、下面是参数；
 /// 高度变化带动画，整体裁成圆角卡片。镜头、遮罩这类"列表 + 选中项参数"的分区都用它。
 struct PanelDisclosure<Content: View>: View {

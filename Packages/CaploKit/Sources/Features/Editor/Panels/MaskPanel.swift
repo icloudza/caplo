@@ -23,7 +23,7 @@ struct MaskPanel: View {
         }
     }
 
-    /// 单条遮罩的参数：类型、遮挡方式与强度、形状与位置、时间范围，最后是删除。
+    /// 单条遮罩的参数：类型、遮挡方式与强度、形状与位置，最后是删除。起止时间只在时间线上拖。
     @ViewBuilder private func controls(for id: UUID, mask: MaskSegment) -> some View {
         Picker("类型", selection: kindBinding(id)) {
             Text("盖住内容").tag(MaskSegment.Kind.sensitive)
@@ -59,12 +59,6 @@ struct MaskPanel: View {
         if mask.kind == .sensitive {
             EditorSlider(model: model, title: "边缘羽化", value: binding(id, \.feather), range: 0...60, decimals: 0, defaultValue: 0)
         }
-        let bounds = model.maskBounds(for: id)
-        EditorSlider(model: model, title: mask.timelineStart == nil ? "起点（原素材秒）" : "起点（时间线秒）",
-                     value: timeBinding(id, edge: .body), range: 0...max(0.001, bounds - mask.duration))
-        let minimum = min(1.0 / 30, mask.duration)
-        EditorSlider(model: model, title: "持续秒数", value: timeBinding(id, edge: .trailing),
-                     range: minimum...max(minimum, bounds - (mask.timelineStart ?? mask.start)))
         Button("删除此遮罩") { model.selectedMask = id; model.deleteSelection() }
             .buttonStyle(StudioButtonStyle(.destructive, size: .small))
     }
@@ -125,17 +119,6 @@ struct MaskPanel: View {
     private func amountBinding(_ id: UUID) -> Binding<Double> {
         Binding(get: { model.edit.mask(id: id)?.amount ?? MaskSegment.defaultAmount }, set: { value in
             model.edit.updateMask(id: id) { $0.setAmount(value) }
-        })
-    }
-    /// 时间参数与时间线拖边走同一条路径，避免面板改出范围外的值而在提交时整笔回滚。
-    private func timeBinding(_ id: UUID, edge: VideoEdit.FocusDragEdge) -> Binding<Double> {
-        Binding(get: {
-            guard let mask = model.edit.mask(id: id) else { return 0 }
-            return edge == .body ? (mask.timelineStart ?? mask.start) : mask.duration
-        }, set: { value in
-            guard let mask = model.edit.mask(id: id) else { return }
-            let current = edge == .body ? (mask.timelineStart ?? mask.start) : mask.duration
-            model.edit.dragMask(id: id, edge: edge, delta: value - current, sourceDuration: model.entry.document.duration)
         })
     }
     private func kindBinding(_ id: UUID) -> Binding<MaskSegment.Kind> {

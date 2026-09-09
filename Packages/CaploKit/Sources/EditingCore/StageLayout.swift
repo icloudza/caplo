@@ -64,7 +64,7 @@ extension TextSegment {
         let pad = Self.stagePadding
         let gap = min(0.3, max(0, splitGap.isFinite ? splitGap / 960 : 0.05))
         let usable = max(0.2, 1 - 2 * pad - gap)
-        let ratio = Self.splitRatioRange.contains(splitRatio) ? splitRatio : 0.5
+        let ratio = Self.splitRatioRange.contains(splitRatio) ? splitRatio : Self.defaultSplitRatio
         let picture = usable * ratio, text = usable - picture
         // 文字在左，画面就去右栏；反之亦然。
         if layout == .splitLeft {

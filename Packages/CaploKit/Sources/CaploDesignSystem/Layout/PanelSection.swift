@@ -50,10 +50,13 @@ public struct PanelSection<Content: View>: View {
 }
 
 /// 面板容器：300 点宽中性玻璃内层，内容可滚动；与时间线共用表面色与工作区卡片亮边。
+///
+/// 内容列的宽度写死成 `panelWidth` 减去左右留白，不用 `maxWidth: .infinity`：那样一来滚动条的出现与否
+/// （系统的"始终显示滚动条"）、或者某个子控件的最小宽度，都会把整列的宽度顶来顶去——展开一段文字就能看见
+/// 预设格子跟着变宽变窄。固定宽度之后，过宽的子控件只会自己越界被裁掉，不再牵动同列的其它行。
 public struct PanelContainer<Content: View>: View {
     private let title: String
     private let content: Content
-
     public init(_ title: String, @ViewBuilder content: () -> Content) { self.title = title; self.content = content() }
 
     public var body: some View {
@@ -62,8 +65,8 @@ public struct PanelContainer<Content: View>: View {
                 Text(title).font(CaploFont.panelTitle).foregroundStyle(CaploColor.textPrimary)
                 content
             }
+            .frame(width: CaploMetrics.panelContentWidth, alignment: .leading)
             .padding(CaploMetrics.Spacing.l)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(width: CaploMetrics.panelWidth)
         .background { CaploMaterialBackground(.panel) }
