@@ -13,6 +13,8 @@ final class ThumbnailStore {
     }
     static let grid = 0.5
     static let capacity = 512
+    /// 只按张数封顶会踩坑：512 张 4K 缩略图能占一百多兆。张数与字节双上限，谁先到先淘汰谁。
+    static let byteLimit = 24 * 1024 * 1024
     static let queueLimit = 96
 
     var onChange: (() -> Void)?
@@ -21,6 +23,8 @@ final class ThumbnailStore {
     private let generator: ThumbnailGenerator
     private var images: [Key: CGImage] = [:]
     private var order: [Key] = []
+    private var weights: [Key: Int] = [:]
+    private var bytes = 0
     private var queue: [Key] = []
     private var inflight: Key?
     private var failed: Set<Key> = []
@@ -65,10 +69,15 @@ final class ThumbnailStore {
     }
 
     private func store(_ image: CGImage, for key: Key) {
+        if let previous = weights.removeValue(forKey: key) { bytes -= previous }
         images[key] = image
+        let weight = max(1, image.bytesPerRow * image.height)
+        weights[key] = weight; bytes += weight
         touch(key)
-        while order.count > Self.capacity, let oldest = order.first {
+        while order.count > Self.capacity || (bytes > Self.byteLimit && order.count > 1) {
+            guard let oldest = order.first else { break }
             order.removeFirst(); images[oldest] = nil
+            bytes -= weights.removeValue(forKey: oldest) ?? 0
         }
     }
 
@@ -90,7 +99,7 @@ final class ThumbnailStore {
     func close() {
         closed = true
         worker?.cancel(); worker = nil
-        queue.removeAll(); images.removeAll(); order.removeAll()
+        queue.removeAll(); images.removeAll(); order.removeAll(); weights.removeAll(); bytes = 0
         let generator = self.generator
         Task { await generator.close() }
     }

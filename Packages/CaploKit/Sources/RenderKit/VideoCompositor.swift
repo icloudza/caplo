@@ -26,10 +26,35 @@ public final class SceneInstruction: NSObject, AVVideoCompositionInstructionProt
     /// 自定义背景图；随指令一起交给合成器，避免每帧读盘。
     public let backgroundImage: CIImage?
     public let timeline: TimelineIndex
-    public init(trackID: CMPersistentTrackID, edit: VideoEdit, cameraTrackID: CMPersistentTrackID? = nil, cameraRanges: [CMTimeRange] = [], screenRoutes: [VideoTrackRange] = [], cameraRoutes: [VideoTrackRange] = [], pointers: PointerTimeline = PointerTimeline(events: []), backgroundImage: CIImage? = nil) {
+    /// 运镜规划只由这几样决定。拖遮罩 / 文字 / 字幕时它们一个都不变，
+    /// 但每次鼠标移动都会换一次合成——不比一下就得把整条运镜路径重新规划一遍（大工程 6 毫秒以上）。
+    public struct FocusPlan: Equatable, Sendable {
+        /// 规划器只看这几样（见 TimelineFocusPlanner.init）：按层序排好的画面片段、镜头本身、镜头风格。
+        /// 用 orderedScreenClips 而不是 clips + layerOrder：新加一条遮罩或文字会改 layerOrder，
+        /// 但一点也不影响运镜，拿整份层序当键会白白触发重排。
+        let clips: [VideoClip]
+        let focuses: [FocusSegment]
+        let style: AutoFocusStyle?
+        let automatic: Bool
+        public init(_ edit: VideoEdit) {
+            clips = edit.orderedScreenClips; focuses = edit.focuses
+            style = edit.focusStyle; automatic = edit.automaticFocus
+        }
+    }
+    public let plan: FocusPlan
+    /// 这一份是自己重新规划的（false 表示直接沿用了上一份的运镜路径）。测试用它确认复用真的发生了。
+    public let replanned: Bool
+    public init(trackID: CMPersistentTrackID, edit: VideoEdit, cameraTrackID: CMPersistentTrackID? = nil, cameraRanges: [CMTimeRange] = [], screenRoutes: [VideoTrackRange] = [], cameraRoutes: [VideoTrackRange] = [], pointers: PointerTimeline = PointerTimeline(events: []), backgroundImage: CIImage? = nil, reusing previous: SceneInstruction? = nil) {
         self.trackID = trackID
         // 指令建立时一次规划；实时播放器与导出逐帧求值同一不可变路径。
-        self.edit = edit.resolvingTimelineFocus(events: pointers.focusSamples)
+        let plan = FocusPlan(edit)
+        self.plan = plan
+        if let previous, previous.plan == plan {
+            var copy = edit; copy.focuses = previous.edit.focuses
+            self.edit = copy; replanned = false
+        } else {
+            self.edit = edit.resolvingTimelineFocus(events: pointers.focusSamples); replanned = true
+        }
         self.backgroundImage = backgroundImage
         timeRange = CMTimeRange(start: .zero, duration: CMTime(seconds: edit.duration, preferredTimescale: 48_000))
         self.screenRoutes = (screenRoutes.isEmpty ? [VideoTrackRange(trackID: trackID, range: timeRange)] : screenRoutes).sorted { $0.range.start < $1.range.start }

@@ -176,7 +176,7 @@ public enum ProjectMedia {
             let existing = item.videoComposition?.instructions.first as? SceneInstruction
             let background = previous.layout.backgroundImage == edit.layout.backgroundImage ? existing?.backgroundImage : url.flatMap { backgroundImage(for: edit.layout, in: $0) }
             let rate = item.videoComposition.map { 1 / $0.frameDuration.seconds } ?? 30
-            item.videoComposition = try videoComposition(composition: composition, edit: edit, longEdge: 1920, pointers: existing?.pointers ?? PointerTimeline(events: []), backgroundImage: background, frameRate: rate.isFinite && rate > 0 ? rate : 30)
+            item.videoComposition = try videoComposition(composition: composition, edit: edit, longEdge: 1920, pointers: existing?.pointers ?? PointerTimeline(events: []), backgroundImage: background, frameRate: rate.isFinite && rate > 0 ? rate : 30, reusing: existing)
         }
         if previous.audio != edit.audio {
             let mix = AVMutableAudioMix()
@@ -260,7 +260,7 @@ public enum ProjectMedia {
         return CIImage(cgImage: image)
     }
 
-    private static func videoComposition(composition: AVMutableComposition, edit: VideoEdit, longEdge: Int, pointers: PointerTimeline, backgroundImage: CIImage? = nil, frameRate: Double = 30) throws -> AVVideoComposition {
+    private static func videoComposition(composition: AVMutableComposition, edit: VideoEdit, longEdge: Int, pointers: PointerTimeline, backgroundImage: CIImage? = nil, frameRate: Double = 30, reusing previous: SceneInstruction? = nil) throws -> AVVideoComposition {
         guard let track = composition.track(withTrackID: trackID(for: .screen)), edit.duration > 0 else { throw ProjectError.invalid("时间线为空，请先恢复一个片段。") }
         let video = AVMutableVideoComposition()
         video.customVideoCompositorClass = VideoCompositor.self
@@ -269,7 +269,7 @@ public enum ProjectMedia {
         }
         let screens = routes.filter { $0.trackID == 1 || ($0.trackID >= 5 && $0.trackID % 2 == 1) }
         let cameras = edit.camera?.enabled == true ? routes.filter { $0.trackID >= 4 && $0.trackID % 2 == 0 } : []
-        video.instructions = [SceneInstruction(trackID: track.trackID, edit: edit, screenRoutes: screens, cameraRoutes: cameras, pointers: pointers, backgroundImage: backgroundImage)]
+        video.instructions = [SceneInstruction(trackID: track.trackID, edit: edit, screenRoutes: screens, cameraRoutes: cameras, pointers: pointers, backgroundImage: backgroundImage, reusing: previous)]
         // 短边固定 1080 / 2160，长边按比例伸展：方形以此为边长，横竖屏保持标准 1080p / UHD 尺寸，避免预设静默缩小超大方形画布。
         let size = edit.layout.ratio.outputSize(shortEdge: longEdge == 3840 ? 2160 : 1080)
         video.renderSize = CGSize(width: size.width, height: size.height)

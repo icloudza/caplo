@@ -92,7 +92,10 @@ extension VideoEdit {
         // 定格卡段切不得：切完两半各自还是定格，可文字只认得其中一半，另一半就成了没人管的空定格。
         guard role != .screen || !holdCards.contains(where: { $0.holdClipID == id }) else { return nil }
         let previousOrder = orderedLayerIDs
-        let previousGroups = rowGroups == nil ? [] : timelineRows.filter { $0.count > 1 }
+        // 只看用户显式指定的行：自动排出来的行不该因为切一刀就被写死成显式行，
+        // 那样以后新加的同类块就再也并不进来了。头在显式行里，尾就跟着进去；
+        // 否则尾块由自动排行接管——同类、不重叠，本来就会落回同一行。
+        let previousGroups = rowGroups ?? []
         let splitSharesRow = previousGroups.contains { $0.contains(id) }
         var copiedFocusSources: [UUID: UUID] = [:]
         var tail = clip; tail.id = UUID(); tail.duration = clip.duration - offset

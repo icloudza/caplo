@@ -53,8 +53,10 @@ public actor EditorPreviewRenderer {
                 if background?.path != path { background = (path, ProjectMedia.backgroundImage(for: edit.layout, in: url)) }
             } else { background = nil }
             let clipHidesCursor = timeline.clipIndex(at: time).map { timeline.clips[$0].cursorHidden } ?? false
+            // hasCamera 必须跟着这一帧的实情走：人像在后、但这一帧摄像头轨是空的时候，
+            // 缓存里存的若是"只有阴影的透明层"，离线预览就会整幅背景消失。
             let backdrop = backdrops.backdrop(edit: edit, sourceSize: SceneRenderer.croppedSourceSize(sourceImage?.extent.size ?? size, layout: edit.layout),
-                                              size: size, backgroundImage: background?.image, context: context)
+                                              size: size, backgroundImage: background?.image, hasCamera: camera != nil, context: context)
             let result = SceneRenderer.frame(source: sourceImage, edit: renderedEdit, time: time, size: size, camera: camera,
                 pointer: clipHidesCursor ? PointerFrame() : pointers.frame(at: time, timeline: timeline, effects: edit.pointer),
                 backgroundImage: background?.image, backdrop: backdrop, timeline: timeline)

@@ -25,7 +25,7 @@ public struct VideoClip: Codable, Equatable, Sendable, Identifiable {
 
     public init(sourceStart: Double, duration: Double) { self.sourceStart = sourceStart; self.duration = duration }
 
-    private enum CodingKeys: String, CodingKey { case id, sourceStart, duration, timelineStart, mediaDuration, systemGain, microphoneGain, cursorHidden, title }
+    private enum CodingKeys: String, CodingKey { case id, sourceStart, duration, timelineStart, mediaDuration, systemGain, microphoneGain, cursorHidden, title, holdSource }
 
     /// 旧文件没有片段级字段，按默认值解码。
     public init(from decoder: Decoder) throws {
@@ -39,6 +39,7 @@ public struct VideoClip: Codable, Equatable, Sendable, Identifiable {
         microphoneGain = try container.decodeIfPresent(Float.self, forKey: .microphoneGain) ?? 1
         cursorHidden = try container.decodeIfPresent(Bool.self, forKey: .cursorHidden) ?? false
         title = try container.decodeIfPresent(String.self, forKey: .title)
+        holdSource = try container.decodeIfPresent(UUID.self, forKey: .holdSource)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -52,6 +53,7 @@ public struct VideoClip: Codable, Equatable, Sendable, Identifiable {
         if microphoneGain != 1 { try container.encode(microphoneGain, forKey: .microphoneGain) }
         if cursorHidden { try container.encode(cursorHidden, forKey: .cursorHidden) }
         try container.encodeIfPresent(title, forKey: .title)
+        try container.encodeIfPresent(holdSource, forKey: .holdSource)
     }
 
     public func gain(for track: AudioTrack) -> Float { track == .system ? systemGain : microphoneGain }
@@ -69,16 +71,18 @@ public struct PointerSample: Codable, Equatable, Sendable {
     public var x: Double
     public var y: Double
     public var kind: Kind
-    public var desktopBounds: CGRect?
     public var cursorAssetID: String?
     public var shape: PointerShape?
     public var button: Int?
     public var clickCount: Int?
     public var scrollX: Double?
     public var scrollY: Double?
-    public init(time: Double, x: Double, y: Double, kind: Kind, desktopBounds: CGRect? = nil) {
-        self.time = time; self.x = x; self.y = y; self.kind = kind; self.desktopBounds = desktopBounds
+    public init(time: Double, x: Double, y: Double, kind: Kind) {
+        self.time = time; self.x = x; self.y = y; self.kind = kind
     }
+    // 录制时每个采样都带过一份桌面范围，但全仓没有任何一处读它——一场三十分钟的录制里
+    // 那是几百万个白存的 CGRect。删掉之后旧工程照常解码（多余的键会被忽略），文件也小了。
+    private enum CodingKeys: String, CodingKey { case time, x, y, kind, cursorAssetID, shape, button, clickCount, scrollX, scrollY }
 }
 
 /// 镜头内部的一处运动目标：从上一状态在 `time` 起用 `move` 秒过渡到本关键帧的位置与倍率，之后保持。
@@ -525,15 +529,42 @@ public struct EditHistory: Sendable {
     private var redoStack: [VideoEdit] = []
     public var canUndo: Bool { !undoStack.isEmpty }
     public var canRedo: Bool { !redoStack.isEmpty }
+    /// 撤销栈的粗略"份量"上限。只按条数封顶不够：一份快照里可能钉着几千个采样运镜关键帧、
+    /// 几百条字幕和上千个遮罩关键帧，一百份就能吃掉几百兆。这里按"关键点数"折算，够用且不用真去量字节。
+    static let weightLimit = 400_000
+    private var weights: [Int] = []
+    private static func weight(_ edit: VideoEdit) -> Int {
+        var value = edit.clips.count + edit.textList.count
+        value += (edit.cameraClips?.count ?? 0) + (edit.systemClips?.count ?? 0) + (edit.microphoneClips?.count ?? 0)
+        for cue in edit.captionList {
+            value += 1 + (cue.words?.count ?? 0)
+        }
+        for mask in edit.maskList {
+            value += 1 + (mask.positionKeys?.count ?? 0)
+            value += (mask.sizeKeys?.count ?? 0) + (mask.amountKeys?.count ?? 0)
+        }
+        for focus in edit.focuses {
+            value += 1 + (focus.path?.count ?? 0)
+        }
+        return max(1, value)
+    }
     public init() {}
     public mutating func record(_ previous: VideoEdit) {
-        undoStack.append(previous); if undoStack.count > 100 { undoStack.removeFirst() }; redoStack.removeAll()
+        undoStack.append(previous); weights.append(Self.weight(previous))
+        // 条数与份量双上限：先按条数削，再按份量削，保证再大的工程也不会让撤销栈无限长胖。
+        while undoStack.count > 100 || (weights.reduce(0, +) > Self.weightLimit && undoStack.count > 1) {
+            undoStack.removeFirst(); weights.removeFirst()
+        }
+        redoStack.removeAll()
     }
     public mutating func undo(current: VideoEdit) -> VideoEdit? {
-        guard let value = undoStack.popLast() else { return nil }; redoStack.append(current); return value
+        guard let value = undoStack.popLast() else { return nil }
+        if !weights.isEmpty { weights.removeLast() }
+        redoStack.append(current); return value
     }
     public mutating func redo(current: VideoEdit) -> VideoEdit? {
-        guard let value = redoStack.popLast() else { return nil }; undoStack.append(current); return value
+        guard let value = redoStack.popLast() else { return nil }
+        undoStack.append(current); weights.append(Self.weight(current)); return value
     }
 }
 

@@ -52,7 +52,9 @@ final class VideoEditorModel {
     }
     @ObservationIgnored private var focusPlanKey: FocusPlanKey?
     @ObservationIgnored private var focusPlan: [FocusSegment]?
-    @ObservationIgnored private var pointerSamples: [PointerSample]?
+    /// 后台预解的指针事件，见 open()。构建播放项时也要用同一份，别在会话里存两份解析结果——
+    /// 半小时的录制光指针事件就有几百万个采样。
+    @ObservationIgnored private var pointerPreloadTask: Task<Void, Never>?
 
     /// 和画面同一份数据：跟随镜头已经预编译成运镜路径。
     ///
@@ -64,10 +66,11 @@ final class VideoEditorModel {
         let key = FocusPlanKey(clips: edit.clips, layerOrder: edit.layerOrder, focuses: edit.focuses,
                                style: edit.focusStyle, automatic: edit.automaticFocus)
         if key != focusPlanKey {
-            if pointerSamples == nil {
-                pointerSamples = (try? EditStorage.events(in: entry.url, document: entry.document)) ?? []
+            if pointers == nil {
+                // 正常情况下 open() 里那次后台预解早已把它填好；这里是兜底（刚打开就立刻用到相机）。
+                pointers = try? ProjectMedia.loadPointers(url: entry.url, document: entry.document)
             }
-            focusPlan = edit.resolvingTimelineFocus(events: pointerSamples ?? []).focuses
+            focusPlan = edit.resolvingTimelineFocus(events: pointers?.focusSamples ?? []).focuses
             focusPlanKey = key
         }
         guard let focusPlan else { return edit }
@@ -204,6 +207,18 @@ final class VideoEditorModel {
                 }
             }
             reload()
+            // 指针事件先在后台解出来。第一次访问 renderEdit 才去同步读盘的话，
+            // 那一下往往正好落在鼠标事件里（画布命中测试就会取它），十分钟的录制能把界面卡住近百毫秒。
+            let projectURL = entry.url, projectDocument = entry.document
+            pointerPreloadTask = Task { [weak self] in
+                let loaded = await Task.detached(priority: .utility) {
+                    try? ProjectMedia.loadPointers(url: projectURL, document: projectDocument)
+                }.value
+                guard let self, !self.closed, self.pointers == nil, let loaded else { return }
+                self.pointers = loaded
+                // 之前若已经用空事件规划过，缓存要作废重排一次。
+                self.focusPlanKey = nil
+            }
             analysisTask = Task { [weak self] in
                 guard let self else { return }
                 do {
@@ -1041,6 +1056,13 @@ final class VideoEditorModel {
         if let observer { player.removeTimeObserver(observer) }; observer = nil
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }; endObserver = nil
         reloadTask?.cancel(); analysisTask?.cancel(); exportTask?.cancel(); posterTask?.cancel(); seekTask?.cancel(); voiceProcessingTask?.cancel()
+        pointerPreloadTask?.cancel(); pointerPreloadTask = nil
+        // 转写与打字防抖也要停：关窗之后它们还在读这份工程，用户此刻已经可以去删它了。
+        transcriptionTask?.cancel(); transcriptionTask = nil; transcription = nil
+        textCommitTask?.cancel(); textCommitTask = nil
+        // 播放项的观察者不摘掉，播放器换过之后仍会回调进一个已经关掉的会话。
+        itemStatusObservation?.invalidate(); itemStatusObservation = nil
+        if let itemFailureObserver { NotificationCenter.default.removeObserver(itemFailureObserver) }; itemFailureObserver = nil
         pendingFallback = nil; pendingSeek = nil; playAfterSeek = false; edgePreview = nil; skimPosition = nil; rebuildingEdit = nil
         let renderer = previewRenderer
         Task { await renderer.close() }

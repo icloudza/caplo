@@ -108,6 +108,9 @@ extension WindowLifecycleTests {
         let scrolledTime = try #require(model.skimPosition)
         #expect(scrolledTime > 0.25)
 
+        // 默认同类并行，两半在同一行；先把后半段钉成单独一行，才有"两行"可以换序。
+        model.commit { $0.placeBlock($0.clips[1].id, beforeRowContaining: $0.clips[0].id) }
+        harness.sync()
         try harness.mouse(.leftMouseDown, x: 24, y: 48)
         try harness.mouse(.leftMouseDragged, x: 24, y: 113)
         #expect(harness.view.dragGhostVisible)
@@ -562,10 +565,10 @@ extension WindowLifecycleTests {
         model.selectedMask = nil
         let harness = TimelinePointerHarness(model: model, zoom: 1)
         defer { harness.close() }
-        // 新加的遮罩排在最上面，所以先加的那条在第二行（y 落在 90）。
-        let center = TimelineViewportView.timeOrigin + 1.0 * 120
-        try harness.mouse(.leftMouseDown, x: center, y: 90)
-        try harness.mouse(.leftMouseUp, x: center, y: 90)
+        // 两条遮罩首尾相接、不重叠，默认同一行（遮罩行在最上面）；点先加的那条的正中。
+        let center = TimelineViewportView.timeOrigin + 1.5 * 120
+        try harness.mouse(.leftMouseDown, x: center, y: 49)
+        try harness.mouse(.leftMouseUp, x: center, y: 49)
         #expect(model.selectedMask == first && model.selectedFocus == nil && model.selectedMediaID == nil)
         model.deleteSelection()
         #expect(model.edit.maskList.map(\.id) == [second] && model.selectedMask == nil)

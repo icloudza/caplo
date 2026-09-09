@@ -11,9 +11,11 @@ import Testing
     let audioJoined = edit.placeBlock(audio, inRowContaining: camera)
     let focusJoined = edit.placeBlock(focus, inRowContaining: screen)
     #expect(cameraJoined && audioJoined && focusJoined)
-    #expect(edit.timelineRows.count == 3)
+    // 三段录制默认就同一行（同类不重叠），再把摄像头、声音、聚焦拖进来之后全在一行。
+    #expect(edit.timelineRows.count == 1)
     let shared = try #require(edit.timelineRows.first { $0.contains(screen) })
-    #expect(Set(shared) == Set([screen, camera, audio, focus]))
+    #expect(Set(shared) == Set(edit.orderedLayerIDs))
+    #expect(Set(shared).isSuperset(of: [screen, camera, audio, focus]))
     #expect(edit.rowGroups?.count == 1 && edit.rowGroups?.first == shared)
     #expect(edit.orderedLayerIDs == edit.timelineRows.flatMap { $0 })
     #expect(edit.timelineBlockRanges == ranges && edit.clips.map(\.sourceStart) == sourceStarts)
@@ -33,39 +35,47 @@ import Testing
     #expect(!missing && edit == before)
     edit.clips[1].timelineStart = 2
     let joined = edit.placeBlock(second, inRowContaining: first)
-    #expect(joined && edit.timelineRows.contains { Set($0) == Set([first, second]) })
+    #expect(joined)
+    let row = try #require(edit.timelineRows.first { $0.contains(first) })
+    #expect(row.contains(second))
 }
 
 @Test func blockCanLeaveSharedRowAndWholeRowMovesAsOneUnit() throws {
     var edit = rowFixture()
-    let a = edit.clips[0].id, b = edit.clips[1].id, c = edit.clips[2].id
-    _ = edit.placeBlock(b, inRowContaining: a)
+    let a = edit.clips[0].id
+    let camera = try #require(edit.cameraClips?.first?.id), audio = try #require(edit.systemClips?.first?.id)
+    _ = edit.placeBlock(camera, inRowContaining: a)
     let ranges = edit.timelineBlockRanges
     let members = try #require(edit.timelineRows.first { $0.contains(a) })
-    edit.moveTimelineRow(containing: b, before: c)
+    #expect(members.contains(camera))
+    edit.moveTimelineRow(containing: camera, before: audio)
     let rows = edit.timelineRows
-    let moved = try #require(rows.firstIndex { $0.contains(a) }), target = try #require(rows.firstIndex { $0.contains(c) })
+    let moved = try #require(rows.firstIndex { $0.contains(a) }), target = try #require(rows.firstIndex { $0.contains(audio) })
     #expect(moved + 1 == target && rows[moved] == members)
     #expect(edit.timelineBlockRanges == ranges)
-    edit.placeBlock(b, beforeRowContaining: a)
-    #expect(edit.rowGroups == nil)
+    // 拖出来自己占一行：默认是同类自动并行，所以必须留下"这一块单独成行"的显式记录，
+    // 不然下一次排行又把它并回去。
+    edit.placeBlock(camera, beforeRowContaining: a)
+    #expect(edit.rowGroups?.contains([camera]) == true)
     let separated = edit.timelineRows
-    let aRow = try #require(separated.firstIndex { $0.contains(a) })
-    #expect(aRow > 0 && separated[aRow - 1] == [b] && separated[aRow] == [a])
+    let cameraRow = try #require(separated.firstIndex { $0.contains(camera) })
+    #expect(separated[cameraRow] == [camera])
+    #expect(separated.first { $0.contains(a) }?.contains(camera) == false)
+    #expect(cameraRow < (separated.firstIndex { $0.contains(a) } ?? 0))
     #expect(edit.timelineBlockRanges == ranges)
 }
 
 @Test func deletedAndDuplicateRowMembersNormalizeWithoutOrphanRows() throws {
     var edit = rowFixture()
     let a = edit.clips[0].id, b = edit.clips[1].id, c = edit.clips[2].id
-    _ = edit.placeBlock(b, inRowContaining: a); _ = edit.placeBlock(c, inRowContaining: a)
-    edit.setMediaClips(.screen, edit.clips.filter { $0.id != b })
-    #expect(edit.rowGroups?.count == 1 && Set(edit.rowGroups?.first ?? []) == Set([a, c]))
-    edit.clips.removeAll { $0.id == c }
-    #expect(edit.timelineRows.allSatisfy { $0.count == 1 })
-    edit.normalizeTimelineRows()
-    #expect(edit.rowGroups == nil)
     let camera = try #require(edit.cameraClips?.first?.id)
+    // 把摄像头拖进录制那一行：这一下才会写出显式行（三段录制本来就自动同行）。
+    _ = edit.placeBlock(camera, inRowContaining: a)
+    edit.setMediaClips(.screen, edit.clips.filter { $0.id != b })
+    #expect(edit.rowGroups?.count == 1 && Set(edit.rowGroups?.first ?? []) == Set([a, c, camera]))
+    edit.clips.removeAll { $0.id == c }
+    edit.normalizeTimelineRows()
+    #expect(Set(edit.rowGroups?.first ?? []) == Set([a, camera]))
     edit.rowGroups = [[UUID(), a, a, camera], [camera, UUID()]]
     edit.normalizeTimelineRows()
     #expect(edit.rowGroups?.count == 1 && Set(edit.rowGroups?.first ?? []) == Set([a, camera]))
@@ -87,26 +97,30 @@ import Testing
     let videoRow = try #require(rows.firstIndex { $0.contains(a.id) })
     #expect(Set(rows[videoRow]) == Set([a.id, b.id, tail]))
     #expect(edit.focuses.count == 2)
-    for effect in edit.focuses {
-        let row = try #require(rows.firstIndex { $0.contains(effect.id) })
-        #expect(row < videoRow && rows[row].count == 1)
-    }
+    // 切开的两个镜头首尾相接，默认并到同一行，且整行压在录制那一行上面。
+    var effectRows = Set<Int>()
+    for effect in edit.focuses { effectRows.insert(try #require(rows.firstIndex { $0.contains(effect.id) })) }
+    #expect(effectRows.count == 1)
+    let effectRow = try #require(effectRows.first)
+    #expect(effectRow < videoRow && rows[effectRow].count == 2)
     #expect(edit.clips.first { $0.id == tail }?.timelineStart == 2)
     #expect(edit.clips.first { $0.id == tail }?.sourceStart == 2)
     #expect(edit.sourceTime(at: 3) == 3)
     try edit.validate(sourceDuration: 10)
 }
 
-@Test func splittingIndependentClipKeepsExistingNewRowBehaviorBesideOtherGroups() throws {
+/// 切一刀不该把一条轨劈成两行：两半首尾相接、同类，默认落回同一行。
+@Test func splittingAClipKeepsBothHalvesOnTheSameRow() throws {
     var edit = rowFixture()
     let a = edit.clips[0].id, b = edit.clips[1].id, c = edit.clips[2].id
-    _ = edit.placeBlock(b, inRowContaining: c)
-    let shared = try #require(edit.timelineRows.first { $0.contains(b) })
+    let before = try #require(edit.timelineRows.first { $0.contains(a) })
+    #expect(Set(before) == Set([a, b, c]), "三段录制本来就该在一行")
     let result = edit.splitMedia(.screen, id: a, at: 1)
     let tail = try #require(result)
-    let rows = edit.timelineRows, index = try #require(edit.timelineRows.firstIndex { $0.contains(a) })
-    #expect(index > 0 && rows[index - 1] == [tail] && rows[index] == [a])
-    #expect(rows.contains(shared))
+    let row = try #require(edit.timelineRows.first { $0.contains(a) })
+    #expect(Set(row) == Set([a, tail, b, c]), "切完之后行变成了 \(edit.timelineRows.count) 行")
+    // 切一刀不该把自动排出来的行写死成显式行，否则以后新加的同类块再也并不进来。
+    #expect(edit.rowGroups == nil)
 }
 
 @Test func rowDraggingStopsAtNeighborsWithoutChangingUnsharedBlocks() {
@@ -173,14 +187,16 @@ import Testing
     var edit = VideoEdit(duration: 0)
     edit.clips = [VideoClip(sourceStart: 0, duration: 4), VideoClip(sourceStart: 8, duration: 2)]
     let original = edit
-    #expect(edit.timelineRows == edit.clips.map { [$0.id] } && edit == original)
+    // 老工程的连续拼接：两块首尾相接、同类，默认就在一行，而且没动过任何数据。
+    #expect(edit.timelineRows == [edit.clips.map(\.id)] && edit == original)
     let json = try JSONEncoder().encode(edit)
     #expect(!(String(data: json, encoding: .utf8) ?? "").contains("rowGroups"))
     #expect(try JSONDecoder().decode(VideoEdit.self, from: json).timelineRows == edit.timelineRows)
     let expected = edit.sourceTime(at: 4.5)
     let result = edit.placeBlock(edit.clips[1].id, inRowContaining: edit.clips[0].id)
-    #expect(result && edit.timelineRows.count == 1)
-    #expect(edit.clips.map(\.timelineStart) == [0, 4] && edit.sourceTime(at: 4.5) == expected)
+    // 本来就同行，这一下什么都不用做：不写分组，也不把连续拼接冻成显式起点。
+    #expect(result && edit.timelineRows.count == 1 && edit.rowGroups == nil)
+    #expect(edit.clips.map(\.timelineStart) == [nil, nil] && edit.sourceTime(at: 4.5) == expected)
     #expect(edit.cameraClips == nil && edit.systemClips == nil && edit.microphoneClips == nil)
     try edit.validate(sourceDuration: 10)
 }
@@ -208,9 +224,9 @@ private func rowFixture() -> VideoEdit {
     }
     var camera = VideoClip(sourceStart: 12, duration: 2); camera.timelineStart = 12
     var audio = VideoClip(sourceStart: 16, duration: 2); audio.timelineStart = 16
-    // 聚焦覆盖第三段录制，可与第一段录制、后续摄像头和音频共享不交叠的显示行。
-    var focus = FocusSegment(start: 8, duration: 1, x: 0.5, y: 0.5)
-    focus.timelineStart = 8; focus.targetClipID = edit.clips[2].id
+    // 聚焦落在第一、二段录制之间的空档里，可以和三段录制、摄像头、声音同处一行。
+    var focus = FocusSegment(start: 2.5, duration: 1, x: 0.5, y: 0.5)
+    focus.timelineStart = 2.5
     edit.cameraClips = [camera]; edit.systemClips = [audio]; edit.microphoneClips = []
     edit.focuses = [focus]
     edit.layerOrder = [edit.clips[0].id, edit.clips[1].id, edit.clips[2].id, camera.id, focus.id, audio.id]

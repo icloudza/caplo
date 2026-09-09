@@ -395,6 +395,9 @@ extension VideoEdit {
             }
             let start = clip.timelineStart ?? 0
             let length = max(0.05, clip.duration)
+            // 卡段只能是全屏版式：定格片段是按"整幅画面被文字盖住"插进去的。
+            // 哪条路径把它改成了分屏，就在这里掰回来——否则整份工程会被校验判无效、编辑整笔回滚。
+            if list[index].layout != .fullscreen { list[index].layout = .fullscreen; changed = true }
             guard list[index].timelineStart != start || abs(list[index].duration - length) > 0.0001 else { continue }
             list[index].timelineStart = start
             list[index].duration = length

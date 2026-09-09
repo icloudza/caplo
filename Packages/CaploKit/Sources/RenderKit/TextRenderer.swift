@@ -82,12 +82,19 @@ public final class TextRenderer: @unchecked Sendable {
     }
     private var cache: [Key: Rendered] = [:]
     private var order: [Key] = []
+    private var weights: [Key: Int] = [:]
+    private var bytes = 0
     private let lock = NSLock()
     private static let capacity = 48
+    /// 只按"条数 48"封顶不够：4K 画布下一张满幅文字位图就是 33 MB，48 张能吃掉一两个 G。
+    /// 条数与字节双上限，两条谁先到就先淘汰谁。
+    private static let byteLimit = 192 * 1024 * 1024
 
     public init() {}
 
-    public func clear() { lock.lock(); cache.removeAll(); order.removeAll(); lock.unlock() }
+    public func clear() {
+        lock.lock(); cache.removeAll(); order.removeAll(); weights.removeAll(); bytes = 0; lock.unlock()
+    }
 
     /// 一段文字在这一帧的画面。`lightBackground` 为真时"自动"色取墨黑，否则取白。
     /// 返回 nil 表示这一帧不用画（文字为空、完全透明或排不出内容）。
@@ -160,9 +167,14 @@ public final class TextRenderer: @unchecked Sendable {
         }
         lock.unlock()
         guard let rendered = draw(state, box: box, canvas: canvas, lightBackground: lightBackground, highlight: highlight) else { return nil }
+        // 位图按 RGBA8 估重；CIImage 是懒的，这里量的是它兑现之后的量级，用来限总量足够。
+        let weight = max(1, Int(rendered.frame.width.rounded()) * Int(rendered.frame.height.rounded()) * 4)
         lock.lock()
-        cache[key] = rendered; order.append(key)
-        while order.count > Self.capacity, let oldest = order.first { order.removeFirst(); cache[oldest] = nil }
+        cache[key] = rendered; order.append(key); weights[key] = weight; bytes += weight
+        while (order.count > Self.capacity || bytes > Self.byteLimit), order.count > 1, let oldest = order.first {
+            order.removeFirst(); cache[oldest] = nil
+            bytes -= weights.removeValue(forKey: oldest) ?? 0
+        }
         lock.unlock()
         return rendered
     }

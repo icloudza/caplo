@@ -102,7 +102,7 @@ final class PointerRecorder {
                 captured = NativeCursorCapture.capture(cursor); lastCursorImage = bytes; lastHotspot = cursor.hotSpot
             }
         } else { shape = .arrow; captured = nil }
-        var sample = PointerSample(time: eventTime, x: position.x, y: position.y, kind: kind, desktopBounds: bounds)
+        var sample = PointerSample(time: eventTime, x: position.x, y: position.y, kind: kind)
         sample.shape = shape
         sample.cursorAssetID = captured?.id
         if kind == .click || kind == .release || kind == .drag { sample.button = event?.buttonNumber; if kind == .click { sample.clickCount = event?.clickCount } }

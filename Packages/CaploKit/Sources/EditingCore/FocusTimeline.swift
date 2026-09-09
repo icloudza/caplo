@@ -102,8 +102,14 @@ extension FocusSegment {
 }
 
 extension VideoEdit {
+    /// 镜头在成片时间轴上的可见段。与遮罩 / 文字 / 字幕同走 `projectSource`，只是**丢掉冻住的那一截**：
+    /// 保持末帧的画面上不该继续推近（那一段本来就没有新内容），这条与遮罩正好相反。
+    ///
+    /// 索引必须按 `orderedScreenClips` 建、按"真正露出来的段"投影：
+    /// 用 `clips` 原序 + `visibleClips` 的老写法在图层工程里既吃不到区间裁剪，
+    /// 也会让被上层完全盖住的片段照样投影出一段镜头。
     public func focusSpans(in range: Range<Double>? = nil, using existingIndex: TimelineIndex? = nil) -> [FocusSpan] {
-        let index = existingIndex ?? TimelineIndex(clips: clips)
+        let index = existingIndex ?? TimelineIndex(clips: orderedScreenClips)
         let visible = range ?? 0..<duration
         var result: [FocusSpan] = []
         for focus in focuses where !focus.automatic || automaticFocus {
@@ -111,15 +117,15 @@ extension VideoEdit {
                 if start < visible.upperBound && start + focus.duration > visible.lowerBound {
                     result.append(FocusSpan(focusID: focus.id, clipID: nil, start: start, duration: focus.duration))
                 }
-            } else {
-                for number in index.visibleClips(in: visible) {
-                    let clip = clips[number]
-                    let lower = max(clip.sourceStart, focus.start), upper = min(clip.sourceStart + clip.playableDuration, focus.start + focus.duration)
-                    guard upper > lower else { continue }
-                    let start = index.boundaries[number] + lower - clip.sourceStart
-                    if start < visible.upperBound && start + upper - lower > visible.lowerBound {
-                        result.append(FocusSpan(focusID: focus.id, clipID: clip.id, start: start, duration: upper - lower))
-                    }
+                continue
+            }
+            for span in index.visibleSpans(in: visible) {
+                let clip = index.clips[span.index]
+                for piece in Self.projectSource(low: focus.start, high: focus.start + focus.duration, clip: clip,
+                                                base: index.boundaries[span.index], spanStart: span.start, spanEnd: span.end)
+                where !piece.frozen {
+                    guard piece.start < visible.upperBound, piece.start + piece.duration > visible.lowerBound else { continue }
+                    result.append(FocusSpan(focusID: focus.id, clipID: clip.id, start: piece.start, duration: piece.duration))
                 }
             }
         }

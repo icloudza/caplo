@@ -259,11 +259,11 @@ extension VideoEdit {
     public func mask(id: UUID) -> MaskSegment? { maskList.first { $0.id == id } }
 
     /// 遮罩编号：只有一条时不编号；多条按在时间线上首次出现的位置排序，从 1 起。
-    public func maskNumbers() -> [UUID: Int] {
+    public func maskNumbers(using spans: [MaskSpan]? = nil) -> [UUID: Int] {
         let list = maskList
         guard list.count > 1 else { return [:] }
         var firstStart: [UUID: Double] = [:]
-        for span in maskSpans() { firstStart[span.maskID] = min(firstStart[span.maskID] ?? .infinity, span.start) }
+        for span in spans ?? maskSpans() { firstStart[span.maskID] = min(firstStart[span.maskID] ?? .infinity, span.start) }
         let ordered = list.enumerated().sorted { a, b in
             let x = firstStart[a.element.id] ?? (a.element.timelineStart ?? a.element.start)
             let y = firstStart[b.element.id] ?? (b.element.timelineStart ?? b.element.start)

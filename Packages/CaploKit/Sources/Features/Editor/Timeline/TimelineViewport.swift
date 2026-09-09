@@ -171,16 +171,21 @@ final class TimelineViewportView: NSView {
                                         start: timing.boundaries[number], duration: clip.duration, span: nil, hold: hold)
             }
         }
+        // 四类投影各算一次、共用一个索引；编号也吃同一份 spans。
+        // 从前是 spans 算一遍、numbers() 里再算一遍，逐块还要线性查一次 list。
+        let timing = TimelineIndex(clips: edit.orderedScreenClips)
         let focuses = Dictionary(uniqueKeysWithValues: edit.focuses.map { ($0.id, $0) })
         let numbers = edit.focusNumbers()
-        for span in edit.focusSpans() {
+        for span in edit.focusSpans(using: timing) {
             guard let focus = focuses[span.focusID] else { continue }
             let defaultTitle = edit.focusDefaultTitle(focus, numbers: numbers)
             values[span.focusID] = Block(id: span.focusID, role: nil, title: focus.title ?? defaultTitle, defaultTitle: defaultTitle, start: span.start, duration: span.duration, span: span)
         }
-        let maskNumbers = edit.maskNumbers()
-        for span in edit.maskSpans() {
-            guard let mask = edit.mask(id: span.maskID) else { continue }
+        let maskSpans = edit.maskSpans(using: timing)
+        let maskNumbers = edit.maskNumbers(using: maskSpans)
+        let maskLookup = Dictionary(uniqueKeysWithValues: edit.maskList.map { ($0.id, $0) })
+        for span in maskSpans {
+            guard let mask = maskLookup[span.maskID] else { continue }
             let defaultTitle = mask.defaultTitle(number: maskNumbers[mask.id])
             // 一条遮罩被剪成多段时每段都画，和聚焦一样；块 ID 相同，选中会一起高亮。
             let existing = values[span.maskID]
@@ -189,9 +194,11 @@ final class TimelineViewportView: NSView {
             values[span.maskID] = Block(id: span.maskID, role: nil, title: mask.title ?? defaultTitle, defaultTitle: defaultTitle,
                                         start: start, duration: end - start, span: nil, mask: true)
         }
-        let textNumbers = edit.textNumbers()
-        for span in edit.textSpans() {
-            guard let value = edit.text(id: span.textID) else { continue }
+        let textSpans = edit.textSpans(using: timing)
+        let textNumbers = edit.textNumbers(using: textSpans)
+        let textLookup = Dictionary(uniqueKeysWithValues: edit.textList.map { ($0.id, $0) })
+        for span in textSpans {
+            guard let value = textLookup[span.textID] else { continue }
             let defaultTitle = value.defaultTitle(number: textNumbers[value.id])
             let existing = values[span.textID]
             let start = min(existing?.start ?? span.start, span.start)
@@ -205,7 +212,7 @@ final class TimelineViewportView: NSView {
         rows = edit.timelineRows.map { $0.compactMap { lookup[$0] }.sorted { $0.start < $1.start } }.filter { !$0.isEmpty }
         // 字幕独占一条轨，不进 layerOrder：一条 25 分钟的录音有几百句，一句一行毫无意义。
         // 位置固定在效果行之下、媒体行之上。
-        let captionBlocks = self.captionBlocks()
+        let captionBlocks = self.captionBlocks(using: timing)
         if !captionBlocks.isEmpty {
             let insertion = rows.firstIndex { $0.contains { $0.role != nil } } ?? rows.count
             rows.insert(captionBlocks, at: insertion)
@@ -228,12 +235,14 @@ final class TimelineViewportView: NSView {
         navigator.update(items: items, duration: timelineExtent, visibleStart: offset, visibleDuration: contentWidth / scale, playhead: playbackPosition)
     }
     /// 字幕轨上的块：一句一块，被剪辑切成多段时取包络。
-    private func captionBlocks() -> [Block] {
+    private func captionBlocks(using timing: TimelineIndex) -> [Block] {
         guard !edit.captionList.isEmpty else { return [] }
         let numbers = edit.captionNumbers()
+        // 一句一次线性查找的话，四百条字幕就是四百次全表扫描——每次鼠标移动都跑一遍。
+        let lookup = Dictionary(uniqueKeysWithValues: edit.captionList.map { ($0.id, $0) })
         var byCue: [UUID: Block] = [:]
-        for span in edit.captionSpans() {
-            guard let cue = edit.caption(id: span.cueID) else { continue }
+        for span in edit.captionSpans(using: timing) {
+            guard let cue = lookup[span.cueID] else { continue }
             let defaultTitle = "字幕 \(numbers[cue.id] ?? 1)"
             let existing = byCue[span.cueID]
             let start = min(existing?.start ?? span.start, span.start)
@@ -377,6 +386,8 @@ final class TimelineViewportView: NSView {
     private func resolvedColor(_ color: NSColor) -> CGColor {
         TimelineTextRenderer.resolvedColor(color, appearance: effectiveAppearance)
     }
+    /// 块标题的宽度：每帧为每个块量一次文字是白花的钱，量过一次就记住。
+    private func labelWidth(_ text: String) -> Double { TimelineTextRenderer.width(text, size: 10, bold: true) }
     private var visibleRange: Range<Double> { offset..<(offset + contentWidth / scale) }
     private func x(_ time: Double) -> Double { timeOrigin + (time - offset) * scale }
     private func time(_ x: Double) -> Double { max(0, offset + (x - timeOrigin) / scale) }
@@ -398,6 +409,9 @@ final class TimelineViewportView: NSView {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        // 解析过的颜色、排好的文字、配好色的图标都跟外观走，换了就得重来。
+        TimelineTextRenderer.invalidateAppearanceCaches()
+        Self.iconCache.removeAll(keepingCapacity: true)
         refreshMaterialAppearance()
     }
     private func refreshMaterialAppearance() {
@@ -433,6 +447,8 @@ final class TimelineViewportView: NSView {
             stopDisplayLink()
             playbackPosition = model.position
             updatePlayhead()
+            // 播放期间跳过的提示区在这里补回来。
+            updateTooltips()
         }
     }
     private func stopDisplayLink() {
@@ -601,6 +617,41 @@ final class TimelineViewportView: NSView {
         if block.mask { return "rectangle.dashed" }
         switch block.role { case .system: return "speaker.wave.2.fill"; case .microphone: return "mic.fill"; case .camera: return "video.fill"; case .screen: return "play.rectangle.fill"; case nil: return "scope" }
     }
+    /// 配好色的类别图标。每帧为几百个块各造一次 NSImage（符号查找 + 配置 + 光栅化）是时间线最贵的一笔；
+    /// 符号名、字号、颜色都只有屈指可数的几种，缓存之后这一项基本归零。
+    private struct IconKey: Hashable {
+        let symbol: String
+        let size: Double
+        let tint: NSColor
+        let scale: Double
+    }
+    private static var iconCache: [IconKey: NSImage] = [:]
+    /// 缓存的是**已经光栅化好**的位图：矢量符号每次 draw 都要重新描一遍轮廓，
+    /// 一帧几百个块的话这一项就占掉近一半的绘制时间。位图按屏幕缩放倍数烤好，之后只是一次拷贝。
+    private static func icon(_ symbol: String, size: Double, tint: NSColor, scale: Double, description: String) -> NSImage? {
+        let key = IconKey(symbol: symbol, size: size, tint: tint, scale: scale)
+        if let cached = iconCache[key] { return cached }
+        guard let source = NSImage(systemSymbolName: symbol, accessibilityDescription: description)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: size, weight: .semibold)
+                .applying(.init(paletteColors: [tint]))) else { return nil }
+        let box = source.size
+        guard box.width > 0, box.height > 0,
+              let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int((box.width * scale).rounded(.up)),
+                                            pixelsHigh: Int((box.height * scale).rounded(.up)), bitsPerSample: 8,
+                                            samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return source }
+        bitmap.size = box
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        source.draw(in: CGRect(origin: .zero, size: box))
+        NSGraphicsContext.restoreGraphicsState()
+        let flat = NSImage(size: box)
+        flat.addRepresentation(bitmap)
+        if iconCache.count >= 128 { iconCache.removeAll(keepingCapacity: true) }
+        iconCache[key] = flat
+        return flat
+    }
+
     private func drawRoleIcon(_ block: Block, at rect: CGRect, badge: Bool = false) {
         let category = color(for: block)
         if badge {
@@ -608,14 +659,14 @@ final class TimelineViewportView: NSView {
             NSBezierPath(roundedRect: rect, xRadius: 7, yRadius: 7).fill()
         }
         let glyphColor = badge ? category : NSColor.white.withAlphaComponent(0.9)
+        let name = symbol(for: block)
         guard let tint = NSColor(cgColor: resolvedColor(glyphColor)),
-              let image = NSImage(systemSymbolName: symbol(for: block), accessibilityDescription: block.title)?
-                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: badge ? 11 : 12, weight: .semibold)
-                    .applying(.init(paletteColors: [tint]))) else { return }
+              let image = Self.icon(name, size: badge ? 11 : 12, tint: tint,
+                                    scale: Double(window?.backingScaleFactor ?? 2), description: block.title) else { return }
         // SymbolConfiguration 直接提供固定颜色，不再通过 lockFocus 嵌套切换当前图形上下文。
         // 符号位图四周带基线留白且不对称（"scope" 尤其明显），按位图里实际可见像素的中心对齐徽章中心；视图是翻转坐标，纵向按图像高度换算。
         let size = image.size
-        let visible = Self.visibleBounds(of: image, key: "\(symbol(for: block))@\(badge ? 11 : 12)")
+        let visible = Self.visibleBounds(of: image, key: "\(name)@\(badge ? 11 : 12)")
         image.draw(in: CGRect(x: rect.midX - visible.midX, y: rect.midY - (size.height - visible.midY), width: size.width, height: size.height))
     }
     private static var symbolVisibleBounds: [String: CGRect] = [:]
@@ -714,8 +765,11 @@ final class TimelineViewportView: NSView {
         addTrackingArea(tracking); mouseTracking = tracking
         updateTooltips()
     }
+    /// 工具提示整份重建不便宜（一行几百个块就是几百个 tooltip 矩形），而拖动和播放期间根本没人看。
+    /// 这两种状态下直接跳过，等它们结束再补一次。
     private func updateTooltips() {
         removeAllToolTips(); tooltipLabels.removeAll()
+        guard drag == nil, !model.playing else { return }
         let shown = presentedRows
         let first = max(0, Int(verticalOffset / rowHeight)), last = min(shown.count, Int((verticalOffset + trackArea.height) / rowHeight) + 1)
         guard first < last else { return }
@@ -723,9 +777,18 @@ final class TimelineViewportView: NSView {
             let members = shown[row]
             let head = CGRect(x: 0, y: rowY(row), width: headerWidth, height: rowHeight).intersection(trackArea)
             // 提示只报名字和时间，操作说明交给右键菜单。
-            if !head.isNull { tooltipLabels[addToolTip(head, owner: self, userData: nil)] = members.map(\.title).joined(separator: "、") }
+            if !head.isNull {
+                // 一行可能装着整条轨，名字只列前几个，后面报个数——否则光拼字符串就要扫几百个块。
+                let names = members.prefix(6).map(\.title).joined(separator: "、")
+                tooltipLabels[addToolTip(head, owner: self, userData: nil)] = members.count > 6 ? names + "…（共 \(members.count) 块）" : names
+            }
+            var lastEdge = -Double.infinity
             for block in visibleMembers(members) {
-                let rect = blockRect(block, row: row).intersection(CGRect(x: timeOrigin, y: trackArea.minY, width: contentWidth, height: trackArea.height))
+                let full = blockRect(block, row: row)
+                // 与绘制同一条规则：挤在同一像素列里的块只留一个提示区。
+                if full.maxX < lastEdge + 2 { continue }
+                lastEdge = max(lastEdge, full.maxX)
+                let rect = full.intersection(CGRect(x: timeOrigin, y: trackArea.minY, width: contentWidth, height: trackArea.height))
                 if !rect.isNull { tooltipLabels[addToolTip(rect, owner: self, userData: nil)] = block.title + "\n" + TimelineTime.code(block.start) + " → " + TimelineTime.code(block.start + block.duration) }
             }
         }
@@ -760,6 +823,8 @@ final class TimelineViewportView: NSView {
     }
     /// 测试钩子：立即刷新悬停时间码，并读出底板与文字层的位置。
     func refreshSkimmerForTesting() { updateSkimmer() }
+    /// 某个块落在第几行；测试用来把鼠标按到正确的行上。
+    func rowIndexForTesting(of id: UUID) -> Int? { rowByBlock[id] }
     func skimmerFramesForTesting() -> (plate: CGRect, text: CGRect)? { skimmerVisible ? (skimmerPlate.frame, skimmerTime.frame) : nil }
 
     private func updateSkimmer() {
@@ -806,7 +871,7 @@ final class TimelineViewportView: NSView {
         NSGraphicsContext.saveGraphicsState(); NSBezierPath(rect: trackArea).addClip()
         let shown = presentedRows
         let first = max(0, Int(verticalOffset / rowHeight)), last = min(shown.count, Int((verticalOffset + trackArea.height) / rowHeight) + 1)
-        var accessibleClips: [Any] = []
+        var accessibleClips: [(block: Block, row: Int)] = []
         visibleFocusDrawCount = 0
         if first < last {
             for number in first..<last {
@@ -819,8 +884,39 @@ final class TimelineViewportView: NSView {
                 }
                 NSGraphicsContext.saveGraphicsState()
                 NSBezierPath(rect: CGRect(x: timeOrigin, y: y, width: contentWidth, height: rowHeight)).addClip()
+                // 一行现在装的是整条轨：缩到最小时可能挤着上万个不到一像素的块。
+                // 同一像素列里只画一个——画面一模一样，重绘量却从"块数"降到"像素数"。
+                // 选中或正在拖的块一律画，不然选中框会凭空消失。
+                var painted: [Block] = []
+                var lastEdge = -Double.infinity
+                for block in visibleMembers(members) {
+                    let edge = blockRect(block, row: number).maxX
+                    if edge < lastEdge + 2, !isSelected(block), !isFloating(block.id) { continue }
+                    lastEdge = max(lastEdge, edge)
+                    painted.append(block)
+                }
                 // 极端缩放时最小外观可能相交；选中块置顶，并提供右键同行列表保证每个块都可访问。
-                let drawing = visibleMembers(members).sorted { !isSelected($0) && isSelected($1) }
+                let drawing = painted.sorted { !isSelected($0) && isSelected($1) }
+                // 底色与描边按类别攒成一条路径一次画完：一帧几百个块的话，
+                // 逐块 new NSBezierPath 再 fill 一次，光是对象分配就占掉三成绘制时间。
+                var fillOrder: [NSColor] = []
+                var fills: [NSColor: NSBezierPath] = [:]
+                let edges = NSBezierPath()
+                for block in drawing where !isFloating(block.id) {
+                    let rect = blockRect(block, row: number)
+                    guard rect.maxX > timeOrigin, rect.minX < bounds.width else { continue }
+                    let tint = color(for: block)
+                    if fills[tint] == nil { fills[tint] = NSBezierPath(); fillOrder.append(tint) }
+                    fills[tint]?.appendRoundedRect(rect, xRadius: 5, yRadius: 5)
+                    edges.appendRoundedRect(rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 4.5, yRadius: 4.5)
+                }
+                for tint in fillOrder {
+                    tint.withAlphaComponent(0.25).setFill(); fills[tint]?.fill()
+                }
+                if !edges.isEmpty {
+                    // 类别色仍是主要识别线索；细亮边只提供玻璃卡片的层次，不影响块的命中范围。
+                    CaploNSColor.glassEdge.setStroke(); edges.lineWidth = CaploMetrics.hairline; edges.stroke()
+                }
                 for block in drawing {
                     if isFloating(block.id) {
                         let placeholder = blockRect(block, row: number)
@@ -832,18 +928,15 @@ final class TimelineViewportView: NSView {
                     } else { drawBlock(block, row: number) }
                     if block.role == .screen { visibleClipDrawCount += 1 }
                     if block.role == nil, !block.mask, !block.text, !block.caption { visibleFocusDrawCount += 1 }
-                    let element = TimelineClipAccessibilityElement { [weak self] in self?.select(block) }
-                    element.setAccessibilityRole(.button)
-                    element.setAccessibilityLabel("\(block.title)，起点 \(TimelineTime.code(block.start))，时长 \(TimelineTime.code(block.duration))")
-                    element.setAccessibilityParent(self)
-                    let rect = blockRect(block, row: number)
-                    element.setAccessibilityFrameInParentSpace(CGRect(x: rect.minX, y: bounds.height - y - rowHeight, width: rect.width, height: rowHeight))
-                    accessibleClips.append(element)
+                    // 只记下"画了哪些块"，辅助功能元素等有人问的时候再造。
+                    // 每帧为几百个块各造一个 NSAccessibilityElement，光这一项就吃掉两三毫秒，
+                    // 而 VoiceOver 一秒也问不了几次。
+                    accessibleClips.append((block, number))
                 }
                 NSGraphicsContext.restoreGraphicsState()
             }
         }
-        setAccessibilityChildren(accessibleClips + [navigator])
+        accessibleBlocks = accessibleClips
         NSGraphicsContext.restoreGraphicsState()
         CaploNSColor.separator.setFill(); CGRect(x: headerWidth - 1, y: 0, width: 1, height: bounds.height).fill()
         NSGraphicsContext.saveGraphicsState()
@@ -854,6 +947,25 @@ final class TimelineViewportView: NSView {
             CaploNSColor.warning.withAlphaComponent(0.7).setFill(); CGRect(x: x(snappedTime), y: 0, width: 1, height: trackArea.maxY).fill()
         }
         drawScrollbars()
+    }
+    /// 上一帧画出来的块，供辅助功能按需生成元素。
+    private var accessibleBlocks: [(block: Block, row: Int)] = []
+    override func accessibilityChildren() -> [Any]? {
+        var result: [Any] = []
+        result.reserveCapacity(accessibleBlocks.count + 1)
+        for entry in accessibleBlocks {
+            let block = entry.block
+            let element = TimelineClipAccessibilityElement { [weak self] in self?.select(block) }
+            element.setAccessibilityRole(.button)
+            element.setAccessibilityLabel("\(block.title)，起点 \(TimelineTime.code(block.start))，时长 \(TimelineTime.code(block.duration))")
+            element.setAccessibilityParent(self)
+            let rect = blockRect(block, row: entry.row)
+            element.setAccessibilityFrameInParentSpace(CGRect(x: rect.minX, y: bounds.height - rowY(entry.row) - rowHeight,
+                                                              width: rect.width, height: rowHeight))
+            result.append(element)
+        }
+        result.append(navigator)
+        return result
     }
     private func label(_ text: String, in rect: CGRect, color: NSColor, size: Double = 10, bold: Bool = false) {
         guard let context = textDrawingContext else { return }
@@ -895,16 +1007,11 @@ final class TimelineViewportView: NSView {
         else if let role = block.role { model.selectedMedia = role; model.selectedMediaID = block.id }
         else { model.selectedFocus = block.id }
     }
+    /// 底色与描边已经在行里按类别攒成一条路径画过了（见 drawTimelineContents），这里只画块里的内容。
     private func drawBlock(_ block: Block, row: Int) {
         let rect = blockRect(block, row: row)
         guard rect.maxX > timeOrigin, rect.minX < bounds.width else { return }
         let color = color(for: block)
-        color.withAlphaComponent(0.25).setFill()
-        NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
-        // 类别色仍是主要识别线索；细亮边只提供玻璃卡片的层次，不影响块的命中范围。
-        CaploNSColor.glassEdge.setStroke()
-        let edge = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 4.5, yRadius: 4.5)
-        edge.lineWidth = CaploMetrics.hairline; edge.stroke()
         if block.role == .system || block.role == .microphone,
            let role = block.role, let clip = edit.mediaClips(role).first(where: { $0.id == block.id }) {
             let samples = role == .system ? analysis.system : analysis.microphone
@@ -927,7 +1034,7 @@ final class TimelineViewportView: NSView {
         if rect.width < 72 { drawRoleIcon(block, at: CGRect(x: rect.midX - 7, y: rect.midY - 7, width: 14, height: 14)) }
         else {
             // 标题固定在整块的正中，横向滚动时随块一起移动、不跟随可见部分；块比文字窄才靠左截断。
-            let width = ceil((block.title as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)]).width)
+            let width = labelWidth(block.title)
             let available = max(0, rect.width - 18)
             let x = width <= available ? rect.midX - width / 2 : rect.minX + 9
             label(block.title, in: CGRect(x: x, y: rect.minY + 8, width: min(width, available), height: 14), color: CaploNSColor.textPrimary, size: 10, bold: true)
@@ -967,25 +1074,48 @@ final class TimelineViewportView: NSView {
             return
         }
         let hit = hitBlock(at: point, row: number)
-        // 镜头行的空白处：选中该行并定位，不再拖出范围建新镜头。
-        if hit == nil, point.x >= timeOrigin, rows[number].allSatisfy({ $0.role == nil }) {
-            select(first)
+        // 行头（左边那一列轨道图标）：选中这一行并允许整行上下拖。
+        if point.x < headerWidth {
+            let block = hit?.0 ?? first
+            if block.role == .screen, event.modifierFlags.contains(.command) { model.selectClip(block.id, extending: true) }
+            else { select(block) }
+            retainedExtent = timelineExtent
+            drag = Drag(kind: .reorder(block.id), origin: point, snapshot: edit, timeline: index, scale: scale, offset: offset, rowIDs: rows.map { $0.map(\.id) }, snapEdges: [])
+            return
+        }
+        // 行内空白处：只把播放头挪过来，**不选中**任何块。
+        // 一行上现在可能同时有画面、卡段、镜头，"点空白就选中这一行的第一块"会选到八竿子打不着的东西。
+        guard let hit else {
             retainedExtent = 0; model.seek(time(point.x))
             return
         }
-        let block = hit?.0 ?? first
+        let block = hit.0
         if block.role == .screen, event.modifierFlags.contains(.command) { model.selectClip(block.id, extending: true) }
         else { select(block) }
         retainedExtent = timelineExtent
-        if point.x < headerWidth {
-            drag = Drag(kind: .reorder(block.id), origin: point, snapshot: edit, timeline: index, scale: scale, offset: offset, rowIDs: rows.map { $0.map(\.id) }, snapEdges: [])
-        } else if let edge = hit?.1 {
-            drag = Drag(kind: .block(block, edge), origin: point, snapshot: edit, timeline: index, scale: scale, offset: offset, rowIDs: rows.map { $0.map(\.id) }, snapEdges: snapTargets(for: block, edge: edge))
-        } else { retainedExtent = 0; model.seek(time(point.x)) }
+        drag = Drag(kind: .block(block, hit.1), origin: point, snapshot: edit, timeline: index, scale: scale, offset: offset, rowIDs: rows.map { $0.map(\.id) }, snapEdges: snapTargets(for: block, edge: hit.1))
+    }
+    /// 命中测试只看落点附近的那几块。一行现在装的是整条轨，全量扫一遍等于每次鼠标事件
+    /// 都在上万个块上分配一个数组。成员按起点有序，二分出一个窗口就够——
+    /// 窗口宽度取最小外观宽（块再短也有 44 点可点区域）。
+    private func members(near point: CGPoint, in row: [Block]) -> ArraySlice<Block> {
+        func lowerBound(_ value: Double) -> Int {
+            var low = 0, high = row.count
+            while low < high {
+                let mid = (low + high) / 2
+                if row[mid].start < value { low = mid + 1 } else { high = mid }
+            }
+            return low
+        }
+        let reach = (TimelineInteractionGeometry.minimumBlockWidth + 8) / scale
+        let value = time(point.x)
+        let first = max(0, lowerBound(value - reach) - 1)
+        let last = min(row.count, lowerBound(value + reach) + 1)
+        return row[first..<max(first, last)]
     }
     private func hitBlock(at point: CGPoint, row: Int) -> (Block, VideoEdit.FocusDragEdge)? {
         guard rows.indices.contains(row) else { return nil }
-        let hits = visibleMembers(rows[row]).compactMap { block -> (Block, VideoEdit.FocusDragEdge)? in
+        let hits = members(near: point, in: rows[row]).compactMap { block -> (Block, VideoEdit.FocusDragEdge)? in
             TimelineInteractionGeometry.hitEdge(at: point, rect: blockRect(block, row: row)).map { (block, $0) }
         }
         let value = time(point.x)
@@ -1214,7 +1344,9 @@ final class TimelineViewportView: NSView {
         switch drag.kind { case .reorder: reordering = true; default: reordering = false }
         if point.y < 50 { verticalOffset -= 12 }
         else if point.y > trackArea.maxY - 24 { verticalOffset += 12 }
-        if !reordering, point.x >= timeOrigin {
+        if !reordering {
+            // 不设 `point.x >= timeOrigin` 的门：鼠标拖到轨头那一侧（x 小于轨道起点）时，
+            // 自动左移正好该最快，加了门反而在最需要滚的位置整个停摆，块就跟不动了。
             let left = timeOrigin + 24, right = timeOrigin + contentWidth - 24
             if point.x < left { offset -= min(1, (left - point.x) / 24) * 15 / scale }
             else if point.x > right { offset += min(1, (point.x - right) / 24) * 15 / scale }
@@ -1225,6 +1357,7 @@ final class TimelineViewportView: NSView {
     }
     private func clearDrag() {
         autoScrollTask?.cancel(); autoScrollTask = nil
+        defer { updateTooltips() }
         drag = nil; dragLocation = nil; dropTarget = nil; snappedTime = nil
         dragGhost.removeAllAnimations(); dragGhost.isHidden = true; dragGhostVisible = false
         // 松手也保留当前可见起点，避免轨道刚完成裁剪便整片跳动。
@@ -1236,8 +1369,12 @@ final class TimelineViewportView: NSView {
         let first = max(0, Int(verticalOffset / rowHeight)), last = min(rows.count, Int((verticalOffset + trackArea.height) / rowHeight) + 1)
         if first < last {
             for row in first..<last {
+                var lastEdge = -Double.infinity
                 for block in visibleMembers(rows[row]) {
                     let rect = blockRect(block, row: row)
+                    // 与绘制同一条规则：挤在同一像素列里的块只留一份热区。
+                    if rect.maxX < lastEdge + 2 { continue }
+                    lastEdge = max(lastEdge, rect.maxX)
                     for x in [rect.minX - 4, rect.maxX - 8] {
                         let handle = CGRect(x: x, y: rect.minY - 3, width: 12, height: rect.height + 6).intersection(CGRect(x: timeOrigin, y: 28, width: contentWidth, height: trackArea.height))
                         if !handle.isNull { addCursorRect(handle, cursor: .resizeLeftRight) }

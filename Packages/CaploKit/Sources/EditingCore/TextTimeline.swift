@@ -392,11 +392,11 @@ extension VideoEdit {
     }
 
     /// 文字编号：只有一段时不编号；多段按在时间线上首次出现的位置排序。
-    public func textNumbers() -> [UUID: Int] {
+    public func textNumbers(using spans: [TextSpan]? = nil) -> [UUID: Int] {
         let list = textList
         guard list.count > 1 else { return [:] }
         var firstStart: [UUID: Double] = [:]
-        for span in textSpans() { firstStart[span.textID] = min(firstStart[span.textID] ?? .infinity, span.start) }
+        for span in spans ?? textSpans() { firstStart[span.textID] = min(firstStart[span.textID] ?? .infinity, span.start) }
         let ordered = list.enumerated().sorted { a, b in
             let x = firstStart[a.element.id] ?? (a.element.timelineStart ?? a.element.start)
             let y = firstStart[b.element.id] ?? (b.element.timelineStart ?? b.element.start)

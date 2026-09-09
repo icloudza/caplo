@@ -215,10 +215,13 @@ extension WindowLifecycleTests {
         #expect(model.edit.duration == 6)
         #expect(model.edit.clips.first { $0.id == second }?.mediaDuration == 3)
         model.undo(); sync()
+        // 默认同类并行，两段画面在同一行；先把后半段钉成单独一行，才有"两行"可以换序。
+        model.commit { $0.placeBlock(second, beforeRowContaining: first) }
+        sync()
         try mouse(.leftMouseDown, 12, 90); try mouse(.leftMouseDragged, 12, 29); try mouse(.leftMouseUp, 12, 29)
         #expect(model.edit.orderedLayerIDs.first == first)
         #expect(try EditStorage.load(in: url, document: document).layerOrder == model.edit.layerOrder)
-        model.undo(); #expect(model.edit == original)
+        model.undo(); model.undo(); #expect(model.edit == original)
         model.selectedMedia = .microphone; model.selectedMediaID = model.edit.microphoneClips?.first?.id
         model.seek(2); model.split()
         #expect(model.edit.microphoneClips?.count == 2)
@@ -248,7 +251,11 @@ extension WindowLifecycleTests {
         let event = try #require(NSEvent(cgEvent: wheel))
         view.scrollWheel(with: event); view.displayIfNeeded()
         let first = try #require(view.accessibilityChildren()?.first as? NSAccessibilityElement)
-        #expect(first.accessibilityLabel()?.hasPrefix("录制画面 01，") == true)
+        // 整条轨现在只占一行，可访问元素跟着可见区间裁剪：只保证第一个是画面块且标签成形，
+        // 不再假定它一定是第一段（横向滚过去之后本来就不该再为屏幕外的块建元素）。
+        let label = try #require(first.accessibilityLabel())
+        #expect(label.hasPrefix("录制画面 ") && label.contains("，起点 "), "标签是 \(label)")
+        #expect((view.accessibilityChildren()?.count ?? 0) < 600, "可访问元素没跟着裁剪，一行上万个块会把 VoiceOver 拖垮")
         viewport.fit(duration: model.edit.duration)
         try await Task.sleep(for: .milliseconds(100))
         view.displayIfNeeded()
