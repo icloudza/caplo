@@ -7,25 +7,19 @@ import EditingCore
 /// 文字定位在输出画面上，不跟着镜头推近一起放大；时间存在原素材上，剪掉中间一段文字会自己裂成两段。
 struct TextPanel: View {
     let model: VideoEditorModel
-    @State private var expanded: UUID?
     @State private var typographyExpanded: Bool
     @State private var appearanceExpanded: Bool
     private static let typographyKey = "editor.text.typographyExpanded"
     private static let appearanceKey = "editor.text.appearanceExpanded"
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(model: VideoEditorModel) {
         self.model = model
-        _expanded = State(initialValue: model.selectedText)
         _typographyExpanded = State(initialValue: UserDefaults.standard.object(forKey: Self.typographyKey) as? Bool ?? false)
         _appearanceExpanded = State(initialValue: UserDefaults.standard.object(forKey: Self.appearanceKey) as? Bool ?? false)
     }
 
-    private func toggle(_ id: UUID) {
-        withAnimation(CaploMotion.animation(0.22, reduceMotion: reduceMotion)) {
-            if expanded == id { expanded = nil } else { expanded = id; model.selectedText = id; model.reveal(id) }
-        }
-    }
+    /// 新建之后直接选中它并滚进视口——面板显示的永远是时间线上选中的那一段。
+    private func select(_ id: UUID) { model.selectedText = id; model.reveal(id) }
 
     var body: some View {
         PanelSection("预设", info: "预设只是一组排版与动画的初值，套用之后每一项都还能单独改。") {
@@ -39,34 +33,30 @@ struct TextPanel: View {
             }
         }
         PanelSection("文字") {
-            if model.edit.textList.isEmpty {
+            if let id = model.selectedText, let value = model.edit.text(id: id) {
+                PanelSelection(symbol: "text.alignleft",
+                               title: model.edit.textDisplayTitle(value, numbers: model.edit.textNumbers()),
+                               trailing: timecode(value.timelineStart ?? value.start)) {
+                    controls(for: id, value: value)
+                }
+            } else if model.edit.textList.isEmpty {
                 PanelNote("暂无文字。挑一个预设，或用下面的按钮在播放头处添加 3 秒文字。")
             } else {
-                let numbers = model.edit.textNumbers()
-                VStack(spacing: CaploMetrics.Spacing.xs) {
-                    ForEach(model.edit.textList) { value in
-                        PanelDisclosure(symbol: "text.alignleft",
-                                        title: model.edit.textDisplayTitle(value, numbers: numbers),
-                                        trailing: timecode(value.timelineStart ?? value.start),
-                                        expanded: expanded == value.id, toggle: { toggle(value.id) }) {
-                            controls(for: value.id, value: value)
-                        }
-                    }
-                }
+                PanelNote("在时间线的文字块上点一下，这里就显示那一段的参数。")
             }
             HStack(spacing: CaploMetrics.Spacing.s) {
-                Button("添加文字") { if let id = model.addText() { toggle(id) } }.buttonStyle(StudioButtonStyle(.secondary))
-                Button("添加全屏卡段") { if let id = model.addHoldCard() { toggle(id) } }
+                Button("添加文字") { if let id = model.addText() { select(id) } }.buttonStyle(StudioButtonStyle(.secondary))
+                Button("添加全屏卡段") { if let id = model.addHoldCard() { select(id) } }
                     .buttonStyle(StudioButtonStyle(.secondary))
                     .help("在播放头处插进一段定格：画面停住、声音静音，文字占满全屏，成片会因此变长。")
             }
         }
-        .onAppear { model.textEditing = true }
-        .onDisappear { model.textEditing = false }
-        .onChange(of: model.selectedText) { _, selected in
-            guard let selected, selected != expanded else { return }
-            withAnimation(CaploMotion.animation(0.22, reduceMotion: reduceMotion)) { expanded = selected }
+        // 进面板时还没选中任何一段就先选第一段，免得面板空着、非得先去时间线点一下。
+        .onAppear {
+            model.textEditing = true
+            if model.selectedText == nil { model.selectedText = model.edit.textList.first?.id }
         }
+        .onDisappear { model.textEditing = false }
         .onChange(of: typographyExpanded) { _, value in UserDefaults.standard.set(value, forKey: Self.typographyKey) }
         .onChange(of: appearanceExpanded) { _, value in UserDefaults.standard.set(value, forKey: Self.appearanceKey) }
     }
@@ -175,7 +165,7 @@ struct TextPanel: View {
     /// 点预设：已经选中一段就把预设套上去（文本、时间、版式、卡段归属都保留），否则新建一段。
     private func apply(_ preset: TextPreset) {
         guard let id = model.selectedText, model.edit.text(id: id) != nil else {
-            if let created = model.addText(preset: preset) { toggle(created) }
+            if let created = model.addText(preset: preset) { select(created) }
             return
         }
         model.commit { edit in

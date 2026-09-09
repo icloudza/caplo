@@ -25,13 +25,13 @@ extension WindowLifecycleTests {
         }
     }
 
-    /// 展开一段文字前后，面板列宽与列内控件的宽度完全一致。
+    /// 时间线上选中一段文字（面板从"空着"变成"显示这一段的参数"）前后，面板列宽与列内控件宽度完全一致。
     ///
-    /// 用户遇到的那一幕是「始终显示滚动条」（接鼠标时系统也会切过去）下才有：展开让内容变高、
-    /// 传统滚动条冒出来吃掉 17 点，列宽当场从 268 掉到 251，整列跟着重排。
+    /// 用户遇到的那一幕是「始终显示滚动条」（接鼠标时系统也会切过去）下才有：内容变高、
+    /// 传统滚动条冒出来吃掉 17 点，列宽当场从 268 掉到 251，整列含预设格子跟着重排。
     /// 这里尽量把进程切到传统滚动条再测——AppKit 只在首次取用时解析这个偏好，整套跑时可能已经被别的用例定死成浮层，
     /// 那样这条就只剩浮层下的弱断言；机制本身由上面那条超宽子视图的用例守着，单独跑这条能看到 268 → 251。
-    @Test func expandingATextEntryKeepsThePanelWidth() async throws {
+    @Test func selectingATextKeepsThePanelWidth() async throws {
         _ = NSApplication.shared
         let scrollerKey = "AppleShowScrollBars"
         let previousScrollers = UserDefaults.standard.object(forKey: scrollerKey)
@@ -55,35 +55,40 @@ extension WindowLifecycleTests {
         model.commit { $0 = edit }
         let id = try #require(model.edit.textList.first?.id)
 
+        let host = NSHostingView(rootView: TextPanelProbe(model: model))
+        host.frame = CGRect(x: 0, y: 0, width: 900, height: 1600)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.contentView = host
+        defer { window.contentView = nil; window.close() }
+
+        // 面板一出现就会自动选中第一段，所以先量"选中"这一态，再手动清掉选中量"空着"那一态。
         var columns: [CGFloat] = []
-        var segments: [CGFloat] = []
         var rows: [Bool: Set<CGFloat>] = [:]
-        for expanded in [false, true] {
-            model.selectedText = expanded ? id : nil
-            let host = NSHostingView(rootView: TextPanelProbe(model: model))
-            host.frame = CGRect(x: 0, y: 0, width: 900, height: 1600)
-            let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-            window.isReleasedWhenClosed = false
-            window.appearance = NSAppearance(named: .darkAqua)
-            window.contentView = host
-            defer { window.contentView = nil; window.close() }
+        var segments: [CGFloat] = []
+        for selected in [true, false] {
+            model.selectedText = selected ? id : nil
             host.layoutSubtreeIfNeeded()
-            // 第一支卡尺是列宽探针（排在面板内容前面），其余都是展开后条目里的参数行。
+            // 第一支卡尺是列宽探针（排在面板内容前面），其余都是那一段的参数行。
             let subviews = allPanelSubviews(of: host)
             let calipers = subviews.compactMap { ($0 as? CaliperView)?.bounds.width }
             columns.append(try #require(calipers.first))
-            rows[expanded] = Set(calipers.dropFirst())
+            rows[selected] = Set(calipers.dropFirst())
             // 版式那一排四个中文选项：标题另起一行之后它才占得满整行，挤在同一行会被压窄、标题竖排成两个字。
             segments += subviews.filter { String(describing: type(of: $0)).hasSuffix("SwiftUISegmentedControl") }.map(\.bounds.width)
         }
-        // 展开与否，列宽一模一样，并且就是写死的那个值。
+        // 选没选中，列宽一模一样，并且就是写死的那个值。
         #expect(columns == [CaploMetrics.panelContentWidth, CaploMetrics.panelContentWidth], "列宽 \(columns)")
-        // 展开后条目里的参数行彼此等宽，且不超出列宽。
-        let expandedRows = try #require(rows[true])
-        #expect(expandedRows.count == 1, "展开后参数行宽度不一致：\(expandedRows)")
-        #expect(expandedRows.allSatisfy { $0 <= CaploMetrics.panelContentWidth })
+        // 选中那一段的参数行彼此等宽，且不超出列宽；没选中时没有参数行。
+        let selectedRows = try #require(rows[true])
+        #expect(selectedRows.count == 1, "参数行宽度不一致：\(selectedRows)")
+        #expect(selectedRows.allSatisfy { $0 <= CaploMetrics.panelContentWidth })
         #expect(rows[false]?.isEmpty == true)
-        #expect(segments == [expandedRows.first], "版式选择器被挤窄了：\(segments)，行宽 \(expandedRows)")
+        // AppKit 的分段控件会比 SwiftUI 给的框略宽几点，所以比的是"没被压回最小宽度"，不是逐点相等。
+        let row = try #require(selectedRows.first)
+        #expect(segments.count == 1 && segments.allSatisfy { $0 >= row && $0 <= CaploMetrics.panelContentWidth },
+                "版式选择器被挤窄了：\(segments)，行宽 \(row)")
     }
 
     private func allPanelSubviews(of view: NSView) -> [NSView] {

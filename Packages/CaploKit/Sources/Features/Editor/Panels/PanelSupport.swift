@@ -75,53 +75,38 @@ struct PanelNote: View {
 }
 
 /// 新控件的宽度预算：面板内容列 `CaploMetrics.panelContentWidth`（268 点），
-/// 装进 `PanelDisclosure` 之后再减去左右各 10 点留白，只剩 248 点。
+/// 装进 `PanelSelection` 之后再减去左右各 10 点留白，只剩 248 点。
 /// 列宽是写死的，超出的控件不会再把整列顶宽，而是**静默被裁掉**——没有可见症状提醒你，自己核对。
 ///
-/// 可展开的面板条目：一行表头（图标、名字、次要文字、箭头），展开后表头高亮、下面是参数；
-/// 高度变化带动画，整体裁成圆角卡片。镜头、遮罩这类"列表 + 选中项参数"的分区都用它。
-struct PanelDisclosure<Content: View>: View {
+/// 当前选中的那一个的参数卡：表头是图标、名字与起点时间码（只读），下面是参数。
+/// 面板里不再摆一整列可折叠的条目——挑哪一个是时间线的事，面板只跟着时间线的选中走，
+/// 时间线上换一块，这里的内容跟着换。镜头、遮罩、文字都用它。
+struct PanelSelection<Content: View>: View {
     /// 左侧图标。
     let symbol: String
     /// 与时间线块相同的显示名（自定义名优先，多个同类块时带编号）。
     let title: String
     /// 右侧的次要文字，一般是起点时间码。
     let trailing: String
-    let expanded: Bool
-    let toggle: () -> Void
     @ViewBuilder let content: () -> Content
-    @State private var hovered = false
     private var radius: CGFloat { CaploMetrics.Radius.control + 2 }
 
     var body: some View {
         VStack(spacing: 0) {
-            Button(action: toggle) {
-                // 表头显示与时间线块相同的名字（自定义名优先），右侧是次要文字。
-                HStack(spacing: CaploMetrics.Spacing.s) {
-                    Image(systemName: symbol).frame(width: CaploMetrics.Icon.control)
-                    Text(title).font(CaploFont.bodyMedium).lineLimit(1).truncationMode(.tail)
-                    Spacer(minLength: CaploMetrics.Spacing.s)
-                    Text(trailing).font(CaploFont.value).foregroundStyle(expanded ? CaploColor.textPrimary : CaploColor.textSecondary)
-                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(CaploColor.textTertiary)
-                        .rotationEffect(.degrees(expanded ? 90 : 0))
-                }
-                .padding(.horizontal, 10).frame(height: CaploMetrics.ControlHeight.large)
-                .foregroundStyle(CaploColor.textPrimary)
-                .background(expanded ? CaploColor.accentSoft : CaploColor.surfaceRaised.opacity(hovered ? 1 : 0.8))
-                .contentShape(Rectangle())
+            HStack(spacing: CaploMetrics.Spacing.s) {
+                Image(systemName: symbol).frame(width: CaploMetrics.Icon.control)
+                Text(title).font(CaploFont.bodyMedium).lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: CaploMetrics.Spacing.s)
+                Text(trailing).font(CaploFont.value)
             }
-            .buttonStyle(.plain)
-            .onHover { hovered = $0 }
-            .accessibilityAddTraits(expanded ? .isSelected : [])
-            .accessibilityValue(expanded ? "已展开" : "已收起")
-            if expanded {
-                VStack(alignment: .leading, spacing: CaploMetrics.Spacing.s) { content() }
-                    .padding(.horizontal, 10).padding(.top, CaploMetrics.Spacing.s).padding(.bottom, CaploMetrics.Spacing.m)
-                    .background(CaploColor.surfaceRaised.opacity(0.5))
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
+            .padding(.horizontal, 10).frame(height: CaploMetrics.ControlHeight.large)
+            .foregroundStyle(CaploColor.textPrimary)
+            .background(CaploColor.accentSoft)
+            VStack(alignment: .leading, spacing: CaploMetrics.Spacing.s) { content() }
+                .padding(.horizontal, 10).padding(.top, CaploMetrics.Spacing.s).padding(.bottom, CaploMetrics.Spacing.m)
+                .background(CaploColor.surfaceRaised.opacity(0.5))
         }
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(expanded ? CaploColor.accent : CaploColor.separator, lineWidth: expanded ? 1.5 : 1))
+        .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(CaploColor.accent, lineWidth: 1.5))
     }
 }

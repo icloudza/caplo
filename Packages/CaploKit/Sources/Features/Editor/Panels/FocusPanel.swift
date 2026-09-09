@@ -9,20 +9,10 @@ struct FocusPanel: View {
     /// 折叠状态用本地状态驱动动画（AppStorage 的变化经偏好通知异步回流，不在动画事务里，折叠会"跳"），再手动写回偏好。
     @State private var autoParametersExpanded: Bool
     private static let autoParametersKey = "editor.focus.autoParametersExpanded"
-    /// 当前展开的镜头；面板创建时按已选中的镜头展开。
-    @State private var expanded: UUID?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(model: VideoEditorModel) {
         self.model = model
-        _expanded = State(initialValue: model.selectedFocus)
         _autoParametersExpanded = State(initialValue: UserDefaults.standard.object(forKey: Self.autoParametersKey) as? Bool ?? false)
-    }
-
-    private func toggle(_ id: UUID) {
-        withAnimation(CaploMotion.animation(0.22, reduceMotion: reduceMotion)) {
-            if expanded == id { expanded = nil } else { expanded = id; model.selectedFocus = id; model.reveal(id) }
-        }
     }
 
     /// 单个镜头的参数：跟随、缓动、推近 / 拉远、倍率、位置，最后是删除。起止时间只在时间线上拖。
@@ -65,28 +55,22 @@ struct FocusPanel: View {
                 Task { await model.regenerateFocus(); generating = false }
             }.buttonStyle(StudioButtonStyle(.secondary)).disabled(generating)
         }
+        // 挑哪一个镜头是时间线的事：这里只显示时间线上选中的那一个，换一块内容跟着换。
         PanelSection("镜头") {
-            if model.edit.focuses.isEmpty {
+            if let id = model.selectedFocus, let focus = model.edit.focuses.first(where: { $0.id == id }) {
+                PanelSelection(symbol: focus.automatic ? "sparkles" : "viewfinder",
+                               title: model.edit.focusDisplayTitle(focus, numbers: model.edit.focusNumbers()),
+                               trailing: timecode(focus.editingStart)) {
+                    controls(for: id, focus: focus)
+                }
+            } else if model.edit.focuses.isEmpty {
                 PanelNote("暂无镜头。在时间线右键“在此处添加聚焦”，或用工具栏按钮在播放头处添加 2 秒镜头。")
             } else {
-                // 每个镜头是一个可展开条目：默认收起只占一行，点开向下展开这个镜头的参数；展开即选中，时间线里选中也会展开。
-                let numbers = model.edit.focusNumbers()
-                VStack(spacing: CaploMetrics.Spacing.xs) {
-                    ForEach(model.edit.focuses) { focus in
-                        PanelDisclosure(symbol: focus.automatic ? "sparkles" : "viewfinder",
-                                        title: model.edit.focusDisplayTitle(focus, numbers: numbers),
-                                        trailing: timecode(focus.editingStart),
-                                        expanded: expanded == focus.id, toggle: { toggle(focus.id) }) {
-                            controls(for: focus.id, focus: focus)
-                        }
-                    }
-                }
+                PanelNote("在时间线的镜头块上点一下，这里就显示那一个的参数。")
             }
         }
-        .onChange(of: model.selectedFocus) { _, selected in
-            guard let selected, selected != expanded else { return }
-            withAnimation(CaploMotion.animation(0.22, reduceMotion: reduceMotion)) { expanded = selected }
-        }
+        // 进面板时还没选中就先选第一个，免得面板空着、非得先去时间线点一下。
+        .onAppear { if model.selectedFocus == nil { model.selectedFocus = model.edit.focuses.first?.id } }
         .onChange(of: autoParametersExpanded) { _, value in UserDefaults.standard.set(value, forKey: Self.autoParametersKey) }
     }
 

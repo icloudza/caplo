@@ -8,20 +8,9 @@ import EditingCore
 /// 0.15 秒乘 30 帧就是四帧可读的密钥。要柔化边界请用羽化，那不会让原文重新出现。
 struct MaskPanel: View {
     let model: VideoEditorModel
-    /// 当前展开的遮罩；面板创建时按已选中的遮罩展开。
-    @State private var expanded: UUID?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(model: VideoEditorModel) {
-        self.model = model
-        _expanded = State(initialValue: model.selectedMask)
-    }
-
-    private func toggle(_ id: UUID) {
-        withAnimation(CaploMotion.animation(0.22, reduceMotion: reduceMotion)) {
-            if expanded == id { expanded = nil } else { expanded = id; model.selectedMask = id; model.reveal(id) }
-        }
-    }
+    /// 新建之后直接选中它并滚进视口——面板显示的永远是时间线上选中的那一条。
+    private func select(_ id: UUID) { model.selectedMask = id; model.reveal(id) }
 
     /// 单条遮罩的参数：类型、遮挡方式与强度、形状与位置，最后是删除。起止时间只在时间线上拖。
     @ViewBuilder private func controls(for id: UUID, mask: MaskSegment) -> some View {
@@ -65,40 +54,36 @@ struct MaskPanel: View {
 
     var body: some View {
         PanelSection("遮罩", info: "遮罩贴在录制内容上，镜头推近时跟着内容一起放大，不会因为相机移动而露出被挡的东西。时间记在原素材上，剪掉中间一段，遮罩会自己裂成两段。") {
-            if model.edit.maskList.isEmpty {
+            if let id = model.selectedMask, let mask = model.edit.mask(id: id) {
+                // 高亮画成"虚线框里有一块亮区"，与敏感遮罩的空心虚线框成对；别写没有的符号名（"spotlight" 不存在，图标会整个空掉）。
+                PanelSelection(symbol: mask.kind == .highlight
+                               ? (mask.shape == .ellipse ? "circle.dashed.inset.filled" : "square.dashed.inset.filled")
+                               : (mask.shape == .ellipse ? "circle.dashed" : "rectangle.dashed"),
+                               title: model.edit.maskDisplayTitle(mask, numbers: model.edit.maskNumbers()),
+                               trailing: timecode(mask.timelineStart ?? mask.start)) {
+                    controls(for: id, mask: mask)
+                }
+            } else if model.edit.maskList.isEmpty {
                 PanelNote("暂无遮罩。用下面的按钮在播放头处添加 2 秒遮罩，然后在画布上拖动它的位置和大小。")
             } else {
-                let numbers = model.edit.maskNumbers()
-                VStack(spacing: CaploMetrics.Spacing.xs) {
-                    ForEach(model.edit.maskList) { mask in
-                        // 高亮画成"虚线框里有一块亮区"，与敏感遮罩的空心虚线框成对；别写没有的符号名（"spotlight" 不存在，图标会整个空掉）。
-                        PanelDisclosure(symbol: mask.kind == .highlight
-                                        ? (mask.shape == .ellipse ? "circle.dashed.inset.filled" : "square.dashed.inset.filled")
-                                        : (mask.shape == .ellipse ? "circle.dashed" : "rectangle.dashed"),
-                                        title: model.edit.maskDisplayTitle(mask, numbers: numbers),
-                                        trailing: timecode(mask.timelineStart ?? mask.start),
-                                        expanded: expanded == mask.id, toggle: { toggle(mask.id) }) {
-                            controls(for: mask.id, mask: mask)
-                        }
-                    }
-                }
+                PanelNote("在时间线的遮罩块上点一下，这里就显示那一条的参数。")
             }
             HStack(spacing: CaploMetrics.Spacing.s) {
-                Button("添加遮罩") { if let id = model.addMask(kind: .sensitive) { toggle(id) } }
+                Button("添加遮罩") { if let id = model.addMask(kind: .sensitive) { select(id) } }
                     .buttonStyle(StudioButtonStyle(.secondary))
-                Button("添加高亮") { if let id = model.addMask(kind: .highlight) { toggle(id) } }
+                Button("添加高亮") { if let id = model.addMask(kind: .highlight) { select(id) } }
                     .buttonStyle(StudioButtonStyle(.secondary))
             }
             if model.edit.hasWeakMask {
                 PanelNote("有遮罩的强度低于 \(Int(MaskSegment.weakAmount))，导出前请确认它确实盖住了内容。")
             }
         }
-        .onAppear { model.maskEditing = true }
-        .onDisappear { model.maskEditing = false }
-        .onChange(of: model.selectedMask) { _, selected in
-            guard let selected, selected != expanded else { return }
-            withAnimation(CaploMotion.animation(0.22, reduceMotion: reduceMotion)) { expanded = selected }
+        // 进面板时还没选中就先选第一条，免得面板空着、非得先去时间线点一下。
+        .onAppear {
+            model.maskEditing = true
+            if model.selectedMask == nil { model.selectedMask = model.edit.maskList.first?.id }
         }
+        .onDisappear { model.maskEditing = false }
     }
 
     // MARK: 绑定
