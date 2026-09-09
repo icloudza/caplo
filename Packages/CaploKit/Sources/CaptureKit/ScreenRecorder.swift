@@ -207,7 +207,8 @@ public final class ScreenRecorder {
             config.showsCursor = true
             // 系统声音使用独立过滤流，选择应用不会改变屏幕画面，也不受窗口来源限制。
             config.capturesAudio = false
-            config.excludesCurrentProcessAudio = true
+            // 录制期间本进程不出声，不需要排除本进程音频；这个开关疑似让录完后本进程的播放器音频时钟起不来（HAL 报 stop）。
+            config.excludesCurrentProcessAudio = false
             config.captureMicrophone = audioPlan.microphoneDeviceID != nil
             config.microphoneCaptureDeviceID = audioPlan.microphoneDeviceID
             config.sampleRate = 48_000; config.channelCount = 2
@@ -299,7 +300,7 @@ public final class ScreenRecorder {
                 }
                 let audioConfig = SCStreamConfiguration()
                 audioConfig.capturesAudio = true
-                audioConfig.excludesCurrentProcessAudio = true
+                audioConfig.excludesCurrentProcessAudio = false
                 audioConfig.sampleRate = 48_000; audioConfig.channelCount = 2
                 audioConfig.width = 2; audioConfig.height = 2
                 audioConfig.minimumFrameInterval = CMTime(seconds: 1, preferredTimescale: 1)

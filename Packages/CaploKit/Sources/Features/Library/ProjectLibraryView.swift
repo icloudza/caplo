@@ -25,7 +25,10 @@ final class ProjectLibraryModel {
     func refresh() async {
         guard !loading else { return }
         loading = true
-        let extra = UserDefaults.standard.stringArray(forKey: "externalProjects") ?? []
+        // 外部工程记录里目录已经不在的（用户删掉了）直接从记录里去掉，不再每次报“manifest.json 不存在”。
+        let recorded = UserDefaults.standard.stringArray(forKey: "externalProjects") ?? []
+        let extra = recorded.filter { FileManager.default.fileExists(atPath: $0) }
+        if extra.count != recorded.count { UserDefaults.standard.set(extra, forKey: "externalProjects") }
         let result = await Task.detached(priority: .utility) {
             var entries: [LibraryEntry] = []
             var issues: [String] = []

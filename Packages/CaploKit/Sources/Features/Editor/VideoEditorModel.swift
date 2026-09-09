@@ -1,5 +1,14 @@
 import SwiftUI
 import AVFoundation
+
+extension AVPlayer {
+    /// 编辑器用的播放器：本地合成没有网络缓冲，不做“评估缓冲速率”的等待，起播就走。
+    static func caploPlayer() -> AVPlayer {
+        let player = AVPlayer()
+        player.automaticallyWaitsToMinimizeStalling = false
+        return player
+    }
+}
 import Observation
 import ProjectKit
 import ExportKit
@@ -11,7 +20,13 @@ import EditingCore
 @MainActor @Observable
 final class VideoEditorModel {
     let entry: LibraryEntry
-    let player = AVPlayer()
+    /// 播放器可以整个重建：录完一段后本进程的音频时钟偶尔起不来（HAL 报 stop、时间倒退、一直“评估缓冲”），换一个新播放器就好。
+    private(set) var player = AVPlayer.caploPlayer()
+    /// 一次卡住只重建一次，避免反复重建。
+    private var recoveredFromStall = false
+    /// 播放项失败要回报到界面：状态观察与“播到一半失败”通知，换播放项时重挂。
+    @ObservationIgnored private var itemStatusObservation: NSKeyValueObservation?
+    @ObservationIgnored private var itemFailureObserver: NSObjectProtocol?
     @ObservationIgnored let canvas = CanvasPresenter()
     let audioTracks: Set<AudioTrack>
     var edit: VideoEdit
@@ -131,15 +146,7 @@ final class VideoEditorModel {
             VideoEditorSessions.current = self
             // 初次自动生成镜头也落盘，重新打开时保持相同结果。
             try EditStorage.save(edit, in: entry.url, document: entry.document)
-            observer = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] time in
-                MainActor.assumeIsolated {
-                    guard let self, !self.closed else { return }
-                    // 暂停定位时播放器回调可能仍是旧时间，不能覆盖用户正在拖动的播放头；重建中旧播放项的时间线已失效。
-                    guard self.playing, self.seekTask == nil, !self.loading, !self.rebuilding else { return }
-                    if time.seconds.isFinite { self.position = min(self.edit.duration, max(0, time.seconds)) }
-                    self.playing = self.player.rate != 0
-                }
-            }
+            installTimeObserver()
             // 播放到结尾自动回到暂停态，播放头停在末尾；再按播放从头开始（togglePlayback 已处理）。
             endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] note in
                 // 通知对象不是 Sendable，只把它的身份带进主线程闭包比较。
@@ -413,8 +420,56 @@ final class VideoEditorModel {
             }
         }
     }
+    private func installTimeObserver() {
+        if let observer { player.removeTimeObserver(observer) }
+        observer = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] time in
+            MainActor.assumeIsolated {
+                guard let self, !self.closed else { return }
+                // 暂停定位时播放器回调可能仍是旧时间，不能覆盖用户正在拖动的播放头；重建中旧播放项的时间线已失效。
+                guard self.playing, self.seekTask == nil, !self.loading, !self.rebuilding else { return }
+                if time.seconds.isFinite { self.position = min(self.edit.duration, max(0, time.seconds)) }
+                self.playing = self.player.rate != 0
+                if self.playing { self.recoveredFromStall = false }
+            }
+        }
+    }
+
+    /// 播放器起不来时整个换新：新的 AVPlayer 会重新绑定音频设备时钟；播放项按当前编辑重建，重建完成后从原位置起播。
+    private func replacePlayerAndRetry() {
+        let stalled = player
+        stalled.pause(); stalled.replaceCurrentItem(with: nil)
+        if let observer { stalled.removeTimeObserver(observer) }; observer = nil
+        canvas.attach(item: nil); presentedEdit = nil
+        player = AVPlayer.caploPlayer()
+        installTimeObserver()
+        playAfterSeek = true
+        reload()
+    }
+
+    /// 播放项状态变成失败、或播到一半失败：把原因写进界面与日志，按钮回到未播放。没有这层，播放失败就是“点了没反应”。
+    private func observeFailures(of item: AVPlayerItem) {
+        itemStatusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+            guard item.status == .failed else { return }
+            Task { @MainActor in self?.reportPlaybackFailure(item.error, stage: "播放项就绪失败") }
+        }
+        if let itemFailureObserver { NotificationCenter.default.removeObserver(itemFailureObserver) }
+        itemFailureObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: item, queue: .main) { [weak self] note in
+            let error = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+            Task { @MainActor in self?.reportPlaybackFailure(error, stage: "播放中断") }
+        }
+    }
+    private func reportPlaybackFailure(_ failure: Error?, stage: String) {
+        let nsError = failure as NSError?
+        let underlying = (nsError?.userInfo[NSUnderlyingErrorKey] as? NSError).map { "，底层 \($0.domain) \($0.code)" } ?? ""
+        let detail = nsError.map { "\($0.localizedDescription)（\($0.domain) \($0.code)\(underlying)）" } ?? "没有错误详情"
+        NSLog("Caplo：%@：%@", stage, detail)
+        error = stage + "：" + (nsError?.localizedDescription ?? "未知原因")
+        playing = false; playAfterSeek = false
+    }
+
     func togglePlayback() {
         if playing || playAfterSeek { pause(); return }
+        if let item = player.currentItem, item.status == .failed { reportPlaybackFailure(item.error, stage: "播放项就绪失败"); return }
         let wasSkimming = skimPosition != nil
         skimPosition = nil
         if position >= edit.duration - 0.04 { seek(0) }
@@ -425,7 +480,33 @@ final class VideoEditorModel {
         }
         // 定位未完成或播放项正在重建：先记住"定位完成后起播"，不能让旧播放项从错误的时间播出来。
         if seekTask != nil || rebuilding || loading { playAfterSeek = true }
-        else { player.play(); playing = true }
+        else {
+            player.playImmediately(atRate: 1); playing = true
+            if let item = player.currentItem, item.status != .readyToPlay { NSLog("Caplo：起播时播放项状态 %d（0 未知 / 2 失败），播放器错误：%@", item.status.rawValue, player.error?.localizedDescription ?? "无") }
+            watchPlaybackStall()
+        }
+    }
+    /// 起播 2 秒后播放器还在“等待”（画面出不来、素材读不到）就把原因写进界面与日志，不让用户对着不动的画面猜。
+    private func watchPlaybackStall() {
+        let started = player.currentTime().seconds
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard let self, playing, !closed else { return }
+            let now = player.currentTime().seconds
+            guard now - started < 0.2 else { return }
+            let reason = player.reasonForWaitingToPlay?.rawValue ?? "无"
+            let status = player.currentItem?.status.rawValue ?? -1
+            NSLog("Caplo：起播 2 秒画面没动：时间 %.2f → %.2f，控制状态 %d，等待原因 %@，播放项状态 %d，错误 %@", started, now, player.timeControlStatus.rawValue, reason, status,
+                  (player.currentItem?.error ?? player.error)?.localizedDescription ?? "无")
+            // 播放项本身就绪却不动：本进程的播放器时钟坏了（录完一段后常见），换一个新播放器重来一次。
+            if status == AVPlayerItem.Status.readyToPlay.rawValue, !recoveredFromStall {
+                recoveredFromStall = true
+                NSLog("Caplo：换新播放器重试")
+                replacePlayerAndRetry()
+                return
+            }
+            if error == nil { error = "播放器起播后画面没有前进（等待原因：\(reason)）；请把日志里“Caplo：”开头的几行发来。" }
+        }
     }
     func pause() {
         player.pause(); playing = false; playAfterSeek = false
@@ -495,6 +576,7 @@ final class VideoEditorModel {
                 try Task.checkCancellation()
                 guard !closed else { return }
                 player.replaceCurrentItem(with: item)
+                observeFailures(of: item)
                 canvas.attach(item: item)
                 presentedEdit = snapshot; rebuildingEdit = nil
                 loading = false; rebuilding = false

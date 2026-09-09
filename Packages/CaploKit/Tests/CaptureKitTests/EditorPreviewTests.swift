@@ -102,3 +102,55 @@ import EditingCore
     let range = try await track.load(.timeRange)
     #expect(abs(range.end.seconds - document.duration) < 0.002, "合成的画面轨道补到工程末尾：\(range.end.seconds) vs \(document.duration)")
 }
+
+/// 两个手动镜头（1.8× 与靠近末尾的 3.0×）走播放 / 导出的合成：播放项能建、合成帧能渲染、尺寸正常。
+@Test @MainActor func compositionRendersWithStackedFocusSegments() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let url = try ProjectStorage.create(in: root, name: "多镜头")
+    let writer = SegmentedCaptureWriter(project: url, width: 320, height: 180, systemAudio: true, microphone: false, onStarted: {}, onFailure: { _ in })
+    try await onQueue(writer) {
+        writer.ingest(try makeFrame(at: CMTime(seconds: 10, preferredTimescale: 600)), role: .screen)
+        writer.ingest(try makeAudio(at: CMTime(seconds: 10, preferredTimescale: 600), duration: 1, channels: 2), role: .systemAudio)
+    }
+    try await writer.finish(at: CMTime(seconds: 24.5, preferredTimescale: 600))
+    let document = try ProjectStorage.load(url)
+    var edit = VideoEdit(duration: document.duration)
+    edit.prepareLayerEditing(camera: false, system: true, microphone: false)
+    edit.focuses = [FocusSegment(start: 2, duration: 8, x: 0.4, y: 0.4, scale: 1.8), FocusSegment(start: 11, duration: 3.4, x: 0.6, y: 0.6, scale: 3)]
+    edit.automaticFocus = true
+    try edit.validate(sourceDuration: document.duration)
+    let item = try await ProjectMedia.playerItem(url: url, document: document, levels: edit.audio, edit: edit)
+    let size = try #require(item.videoComposition?.renderSize)
+    #expect(size.width > 0 && size.height > 0 && size.width.isFinite)
+    for time in [1.0, 5.0, 12.5, 14.0] {
+        let poster = try await ProjectMedia.poster(url: url, document: document, edit: edit, time: time)
+        #expect(poster.width > 0 && poster.height > 0, "\(time)")
+    }
+}
+
+/// 播放项不只是能建：真正交给 AVPlayer 播 1 秒，状态要变成就绪、时间要往前走（合成有问题时播放器会静默停住）。
+@Test @MainActor func playerActuallyAdvancesOnTheComposition() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let url = try ProjectStorage.create(in: root, name: "真播")
+    let writer = SegmentedCaptureWriter(project: url, width: 320, height: 180, systemAudio: true, microphone: false, onStarted: {}, onFailure: { _ in })
+    try await onQueue(writer) {
+        writer.ingest(try makeFrame(at: CMTime(seconds: 10, preferredTimescale: 600)), role: .screen)
+        writer.ingest(try makeAudio(at: CMTime(seconds: 10, preferredTimescale: 600), duration: 1, channels: 2), role: .systemAudio)
+    }
+    try await writer.finish(at: CMTime(seconds: 24.5, preferredTimescale: 600))
+    var document = try ProjectStorage.load(url)
+    document.segments[0].duration += 0.3   // 素材比工程记的时长短一点：末帧拉长那条路径也要能播
+    var edit = VideoEdit(duration: document.duration)
+    edit.prepareLayerEditing(camera: false, system: true, microphone: false)
+    edit.focuses = [FocusSegment(start: 2, duration: 8, x: 0.4, y: 0.4, scale: 1.8), FocusSegment(start: 11, duration: 3.4, x: 0.6, y: 0.6, scale: 3)]
+    let item = try await ProjectMedia.playerItem(url: url, document: document, levels: edit.audio, edit: edit)
+    let player = AVPlayer(playerItem: item)
+    player.isMuted = true
+    player.play()
+    for _ in 0..<40 where item.status != .failed && player.currentTime().seconds < 0.5 { try await Task.sleep(for: .milliseconds(100)) }
+    #expect(item.status == .readyToPlay, "播放项状态 \(item.status.rawValue)：\(item.error?.localizedDescription ?? "")")
+    #expect(player.currentTime().seconds >= 0.5, "播放 4 秒内时间没有前进：\(player.currentTime().seconds)，等待原因 \(player.reasonForWaitingToPlay?.rawValue ?? "无")")
+    player.pause()
+}
