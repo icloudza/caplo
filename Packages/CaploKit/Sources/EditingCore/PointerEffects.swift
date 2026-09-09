@@ -98,6 +98,8 @@ public struct PointerFrame: Sendable {
 public struct PointerTimeline: Sendable {
     private let capturedCursors: [String: CapturedCursor]
     private let events: [PointerSample]
+    /// 去掉小幅反向抖动后的样本，只喂给平滑弹簧的目标；点击落点与真实位置仍用原始样本。
+    private let motionEvents: [PointerSample]
     private let clicks: [PointerSample]
     private let appearance: PointerAppearance
     private let lastMotion: [Double]
@@ -120,6 +122,7 @@ public struct PointerTimeline: Sendable {
         self.events = events.filter { $0.time.isFinite && $0.time >= 0 && $0.x.isFinite && $0.y.isFinite && (0...1).contains($0.x) && (0...1).contains($0.y) }
             .sorted { $0.time < $1.time }
         self.clicks = self.events.filter { $0.kind == .click }
+        self.motionEvents = Self.removingJitter(self.events)
         self.cursorEmbedded = cursorEmbedded
         self.systemCursorScale = Self.systemCursorScale(events: self.events, cursors: capturedCursors)
         self.appearance = PointerAppearance(events: self.events)
@@ -191,7 +194,26 @@ public struct PointerTimeline: Sendable {
         return result
     }
 
-    private func rawPosition(at source: Double, clipStart: Double) -> CGPoint? {
+    /// 抖动陷波：三点方向反转、两段位移都不到 0.015 且落在 100 毫秒窗内，就去掉中间那个点。
+    /// 只针对"小幅来回"，不是低通，慢速直线移动一个点都不丢。
+    static func removingJitter(_ samples: [PointerSample]) -> [PointerSample] {
+        guard samples.count > 2 else { return samples }
+        var result: [PointerSample] = [samples[0]]
+        result.reserveCapacity(samples.count)
+        for index in 1..<samples.count - 1 {
+            let previous = result[result.count - 1], current = samples[index], next = samples[index + 1]
+            let isMove = current.kind == .move && previous.kind == .move && next.kind == .move
+            let ax = current.x - previous.x, ay = current.y - previous.y, bx = next.x - current.x, by = next.y - current.y
+            let reversal = ax * bx + ay * by < 0
+            if isMove, reversal, hypot(ax, ay) < 0.015, hypot(bx, by) < 0.015, next.time - previous.time <= 0.1 { continue }
+            result.append(current)
+        }
+        result.append(samples[samples.count - 1])
+        return result
+    }
+
+    private func rawPosition(at source: Double, clipStart: Double) -> CGPoint? { rawPosition(at: source, clipStart: clipStart, in: events) }
+    private func rawPosition(at source: Double, clipStart: Double, in events: [PointerSample]) -> CGPoint? {
         let next = upperBound(source, in: events)
         guard next > 0 else { return nil }
         let previous = events[next - 1]
@@ -220,11 +242,14 @@ public struct PointerTimeline: Sendable {
             let count = max(1, Int(ceil((end - clipStart) * rate)))
             var values: [CGPoint?] = []; values.reserveCapacity(count + 1)
             var x: PointerSpring?, y: PointerSpring?
+            // 相位补偿：弹簧追动目标的稳态滞后 = 阻尼 / 刚度，让目标提前这么多采样，平滑后的光标压在真实位置上而不是拖在后面。
+            let lag = PointerSpring.lag(smoothing: amount)
             for step in 0...count {
                 let t = min(end, clipStart + Double(step) / rate)
                 guard let p = rawPosition(at: t, clipStart: clipStart) else { values.append(nil); x = nil; y = nil; continue }
+                let target = rawPosition(at: min(end, t + lag), clipStart: clipStart, in: motionEvents) ?? p
                 if x == nil { x = PointerSpring(value: p.x); y = PointerSpring(value: p.y) }
-                else { x?.step(target: p.x, dt: 1 / rate, smoothing: amount); y?.step(target: p.y, dt: 1 / rate, smoothing: amount) }
+                else { x?.step(target: target.x, dt: 1 / rate, smoothing: amount); y?.step(target: target.y, dt: 1 / rate, smoothing: amount) }
                 var position = CGPoint(x: x!.value, y: y!.value)
                 let index = upperBound(t, in: clicks)
                 var weight = 0.0

@@ -45,7 +45,8 @@ private func maxStep(_ edit: VideoEdit, from: Double, to: Double, rate: Double =
     #expect(SceneEvaluator.focus(edit: edit, time: shot.start + shot.duration + 0.01).scale == 1)
     #expect(SceneEvaluator.focus(edit: edit, time: shot.start + shot.duration - 0.001).scale < 1.05)
     let step = maxStep(edit, from: shot.start - 0.1, to: shot.start + shot.duration + 0.1)
-    #expect(step.position < 0.006 && step.scale < 0.02)
+    // 两次点击相距大半个画面，追赶阶段相机限速放宽到 2.2 画面宽 / 秒，每 1/240 秒最多走 0.009；连续曲线，不是跳变。
+    #expect(step.position < 0.012 && step.scale < 0.02)
 }
 
 @Test func idleGapSplitsShotsAndScatteredClicksWidenTheView() {

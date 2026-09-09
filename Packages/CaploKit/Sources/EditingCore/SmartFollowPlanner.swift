@@ -4,17 +4,34 @@ import CoreGraphics
 /// 智能跟随：提交目标安全区、点击保持与临界阻尼跟随；距离自适应的目标平滑消除阈值跳变。
 /// 录后可读到未来真实事件，因此前瞻采用已记录位置，避免速度外推在转弯时预测到错误方向。
 ///
-/// 无点击的讲解镜头（手动添加、只跟指针）也走这里，为此的三处细化：
+/// 无点击的讲解镜头（手动添加、只跟指针）也走这里，为此的几处细化：
 /// 1. 光标离开安全区时只把它带回内区（`innerZone`），而不是整轴回中，阅读扫视时相机几乎不动；
-/// 2. 指针移动越快前瞻越远（读的是真实未来），相机在指针冲出视口之前就开始动；
-/// 3. 光标已在视口之外时放宽加速度与限速追赶，追回来即恢复，上限随偏出距离连续变化，没有台阶。
+/// 2. 前瞻由弹簧本身推导：临界阻尼弹簧追动目标的稳态滞后恰好是 2 / ω，用它作前瞻下限把滞后精确抵消，
+///    "平滑响应"滑块一动前瞻自动跟；指针移动越快再多看一点（读的是真实未来）；档位切换时前瞻经一阶低通，不跳变；
+/// 3. 光标已在视口之外时放宽加速度与限速追赶，追回来即恢复，上限随偏出距离连续变化，没有台阶；
+/// 4. 点击提前 0.35 秒对准落点、按住拖动期间弹簧更硬（拖拽档），三档之间速度连续；
+/// 5. 目标始终落在可达带内，相机撞到画面边界时像撞墙一样停住（等价于把取景中心参数化成 0…1 的行进比例），
+///    不再需要"提前减速"这类事后补丁。
 enum SmartFollowPlanner {
+    /// 点击到松开之间的区间：拖拽期间弹簧切到更硬的档位。
+    static func dragIntervals(clicks: [PointerSample], samples: [PointerSample]) -> [ClosedRange<Double>] {
+        var result: [ClosedRange<Double>] = []
+        for click in clicks where click.time >= 0 {
+            let end: Double
+            if let release = samples.first(where: { ($0.kind == .release || $0.kind == .exit) && $0.time > click.time }) { end = release.time }
+            else if let lastDrag = samples.last(where: { $0.kind == .drag && $0.time > click.time }) { end = lastDrag.time + 0.1 }
+            else { continue }
+            if end - click.time > 0.12 { result.append(click.time...end) }
+        }
+        return result
+    }
+
     static func path(samples: [PointerSample], clicks: [PointerSample], start: Double, end: Double, scale: Double, style: AutoFocusStyle) -> [FocusKeyframe] {
         guard let first = clicks.first, end > start else { return [] }
         let initial = AutoFocus.clamp(CGPoint(x: first.x, y: first.y), scale: scale)
         var position = initial, committed = initial, filtered = initial, velocity = CGPoint.zero
         var frames = [FocusKeyframe(time: 0, x: initial.x, y: initial.y, scale: scale, move: 0)]
-        var sampleIndex = 0, clickIndex = 0
+        var sampleIndex = 0, clickIndex = 0, dragIndex = 0
         let prediction = min(0.4, max(0, style.prediction ?? 0.16))
         let response = min(1.5, max(0.15, style.panResponse ?? 0.55))
         let dt = 1.0 / 120, length = end - start
@@ -22,10 +39,26 @@ enum SmartFollowPlanner {
         let outputStride = max(4, Int(ceil(Double(steps) / 190_000)))
         var lastTarget = initial
         let speedProbe = PointerSpeedProbe(samples: samples)
+        let drags = dragIntervals(clicks: clicks, samples: samples)
+        let baseOmega = 6 / response
+        // 前瞻的一阶低通：约 0.13 秒时间常数，弹簧档位切换时前瞻量平滑过渡而不是跳变。
+        let leadSmoothing = 1 - exp(-dt / 0.13)
+        var lookahead = max(prediction, 2 / baseOmega)
+        // 点击提前对准：落点在 0.35 秒内就把目标换成点击处，相机先到、点击后到。
+        let clickLead = max(prediction, 0.35)
         for step in 1...steps {
             let local = min(length, Double(step) * dt), time = start + local
-            // 速度自适应前瞻：0.05 秒内的真实位移换算成速度，每 1 画面宽 / 秒多看 0.12 秒，最多再多 0.28 秒。
-            let lookahead = min(0.4, prediction + min(0.28, speedProbe.speed(at: time) * 0.12))
+            while dragIndex < drags.count && drags[dragIndex].upperBound < time { dragIndex += 1 }
+            let dragging = dragIndex < drags.count && drags[dragIndex].contains(time)
+            while clickIndex + 1 < clicks.count && clicks[clickIndex + 1].time - clickLead <= time { clickIndex += 1 }
+            let click = clicks[clickIndex]
+            let holding = time >= click.time - clickLead && time <= click.time + 0.4
+            // 弹簧档位：点击附近略硬，拖拽期间更硬；ω 变了，滞后补偿也跟着变。
+            let profile = dragging ? 1.4 : holding ? 1.15 : 1.0
+            let omega = baseOmega * profile
+            // 前瞻 = 弹簧滞后补偿（2 / ω）与用户前瞻取大，再按指针速度多看一点：每 1 画面宽 / 秒多 0.12 秒，最多再多 0.28 秒。
+            let wantedLookahead = min(0.4, max(prediction, 2 / omega) + min(0.28, speedProbe.speed(at: time) * 0.12))
+            lookahead += (wantedLookahead - lookahead) * leadSmoothing
             let future = min(end, time + lookahead)
             while sampleIndex + 1 < samples.count && samples[sampleIndex + 1].time <= future { sampleIndex += 1 }
             var cursor: CGPoint?
@@ -43,9 +76,6 @@ enum SmartFollowPlanner {
                     cursor = p
                 }
             }
-            while clickIndex + 1 < clicks.count && clicks[clickIndex + 1].time - prediction <= time { clickIndex += 1 }
-            let click = clicks[clickIndex]
-            let holding = time >= click.time - prediction && time <= click.time + 0.4
             if local < length - style.easeOut {
                 if holding {
                     let target = AutoFocus.clamp(CGPoint(x: click.x, y: click.y), scale: scale)
@@ -68,11 +98,11 @@ enum SmartFollowPlanner {
                 lastTarget = filtered
             }
             // 弹簧运动：速度保留，目标改变不会重启 ease-in。
-            let omega = (6 / response) * (holding ? 1.15 : 1)
             let ax = omega * omega * (lastTarget.x - position.x) - 2 * omega * velocity.x
             let ay = omega * omega * (lastTarget.y - position.y) - 2 * omega * velocity.y
             // 追赶：光标（前瞻后的位置）已在视口之外时放宽加速度与限速，偏出越多放得越开，追回来即恢复。
-            var maxAcceleration = 3.0, maxVelocity = 0.8
+            // 加速度上限随档位平方放宽（弹簧刚度也是 ω²），拖拽档另放宽限速；否则更硬的弹簧会被上限抹平，档位形同虚设。
+            var maxAcceleration = 3.0 * profile * profile, maxVelocity = 0.8 * (dragging ? 1.4 : 1)
             if let cursor {
                 let half = CGFloat(0.5 / scale) * 0.9
                 let outside = max(abs(cursor.x - position.x) - half, abs(cursor.y - position.y) - half)
@@ -85,12 +115,13 @@ enum SmartFollowPlanner {
             velocity.y += min(maxAcceleration, max(-maxAcceleration, ay)) * dt
             velocity.x = min(maxVelocity, max(-maxVelocity, velocity.x))
             velocity.y = min(maxVelocity, max(-maxVelocity, velocity.y))
-            // 接近画面边界时提前减速，而不是撞上坐标 clamp 才突然停住。
-            let margin = CGFloat(0.5 / scale)   // 明确为 CGFloat：旧编译器下 Double 与 CGFloat 混算会报 "*" 歧义
-            velocity.x = min((1 - margin - position.x) * 4, max((margin - position.x) * 4, velocity.x))
-            velocity.y = min((1 - margin - position.y) * 4, max((margin - position.y) * 4, velocity.y))
             position.x += velocity.x * dt; position.y += velocity.y * dt
-            position = AutoFocus.clamp(position, scale: scale)
+            // 画面边界是墙：目标本来就在可达带内，临界阻尼不会过冲，只有追赶阶段偶尔撞上；撞上就停在墙上并吃掉朝外的速度。
+            let margin = CGFloat(0.5 / scale)   // 明确为 CGFloat：旧编译器下 Double 与 CGFloat 混算会报 "*" 歧义
+            if position.x < margin { position.x = margin; velocity.x = max(0, velocity.x) }
+            if position.x > 1 - margin { position.x = 1 - margin; velocity.x = min(0, velocity.x) }
+            if position.y < margin { position.y = margin; velocity.y = max(0, velocity.y) }
+            if position.y > 1 - margin { position.y = 1 - margin; velocity.y = min(0, velocity.y) }
             if step % outputStride == 0 || step == steps {
                 frames.append(FocusKeyframe(time: local, x: position.x, y: position.y, scale: scale, move: 0))
             }

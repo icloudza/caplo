@@ -7,12 +7,23 @@ struct PointerSpring {
     var value: Double
     var velocity = 0.0
 
-    mutating func step(target: Double, dt: Double, smoothing: Double) {
+    /// 平滑档位对应的弹簧常数（刚度、阻尼、质量）。
+    static func constants(smoothing: Double) -> (stiffness: Double, damping: Double, mass: Double) {
         let s = min(2, max(0, smoothing))
         let n = s <= 0.5 ? s / 0.5 : (s - 0.5) / 1.5
         let stiffness = (s <= 0.5 ? 760 - n * 420 : 340 - n * 180) * 1.12
         let damping = (s <= 0.5 ? 34 + n * 24 : 58 + n * 22)
         let mass = (s <= 0.5 ? 0.85 + n * 0.55 : 1.35 + n * 0.45)
+        return (stiffness, damping, mass)
+    }
+    /// 追动目标时的稳态滞后（秒）= 阻尼 / 刚度，与质量无关；让目标提前这么多采样，平滑后的光标就压在真实位置上。
+    static func lag(smoothing: Double) -> Double {
+        let c = constants(smoothing: smoothing)
+        return c.damping / c.stiffness
+    }
+
+    mutating func step(target: Double, dt: Double, smoothing: Double) {
+        let (stiffness, damping, mass) = Self.constants(smoothing: smoothing)
         let omega = sqrt(stiffness / mass), zeta = damping / (2 * sqrt(stiffness * mass))
         let delta = target - value, initialVelocity = -velocity
         func position(_ t: Double) -> Double {

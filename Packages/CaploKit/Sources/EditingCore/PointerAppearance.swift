@@ -38,6 +38,9 @@ struct PointerAppearance: Sendable {
             }
         }
         if let end = events.last?.time, end - lastMotion >= 2.75 { rests.append(Rest(start: lastMotion, end: .infinity)) }
+        // 短命形状去抖：A → B → A 且 B 不到 0.3 秒（扫过按钮、链接边缘时的闪一下），整段按 A 算，形状不再高频闪烁；
+        // 真正停在控件上的手形（≥ 0.3 秒）照常显示。
+        shapes = Self.removingBlips(shapes)
         // 多个鼠标键重叠按下时合并保持区间，后按的键松开不会提前弹回。
         var merged: [Press] = []
         for press in presses {
@@ -46,6 +49,21 @@ struct PointerAppearance: Sendable {
             } else { merged.append(press) }
         }
         self.presses = merged; self.shapes = shapes; self.rests = rests
+    }
+
+    static func removingBlips(_ shapes: [Shape]) -> [Shape] {
+        var result = shapes
+        var index = 0
+        while index + 1 < result.count {
+            let change = result[index], back = result[index + 1]
+            if back.current == change.previous, back.time - change.time < 0.3 {
+                result.removeSubrange(index...index + 1)
+                // 去掉一对后，后一个变化的"之前形状"要接回去掉之前的形状。
+                if index < result.count { result[index] = Shape(time: result[index].time, previous: change.previous, current: result[index].current) }
+                index = max(0, index - 1)
+            } else { index += 1 }
+        }
+        return result
     }
 
     private func lastIndex<T>(_ values: [T], at time: Double, key: (T) -> Double) -> Int {

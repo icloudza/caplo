@@ -56,7 +56,8 @@ import Foundation
     _ = pointers.frame(at: 1.7, timeline: timeline, effects: effects)
     let b = pointers.frame(at: 0.8, timeline: timeline, effects: effects)
     #expect(a.position == b.position && a.rotation == b.rotation && a.trail == b.trail)
-    #expect((a.position?.x ?? 1) < 0.37 && a.trail.count <= 5)
+    // 相位补偿后平滑光标压在真实位置附近（0.8 秒时真实 x = 0.37），而不是拖在后面。
+    #expect(abs((a.position?.x ?? 1) - 0.37) < 0.012 && a.trail.count <= 5)
     #expect(pointers.frame(at: 1, timeline: timeline, effects: effects).position?.x == 0.45)
     #expect(pointers.frame(at: 1.09, timeline: timeline, effects: effects).scale < 0.8)
     let cut = TimelineIndex(clips: [VideoClip(sourceStart: 1.4, duration: 0.5)])

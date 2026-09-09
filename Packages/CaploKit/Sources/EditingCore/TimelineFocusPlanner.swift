@@ -76,24 +76,25 @@ private struct TimelineFocusPlanner {
             else { guard event.x.isFinite, event.y.isFinite, (0...1).contains(event.x), (0...1).contains(event.y) else { return nil } }
             return (index, sample)
         }.sorted { $0.1.time == $1.1.time ? $0.0 < $1.0 : $0.1.time < $1.1.time }.map(\.1)
-        // 录制通常产生 60Hz 或更密的移动事件；先按 30Hz 确定性取最后位置，点击和 exit 始终保留。
+        // 录制通常产生 60Hz 或更密的移动事件；先按 30Hz 确定性取最后位置，点击、松开和 exit 这些语义事件始终保留
+        //（松开决定拖拽档位的区间，被抽稀掉拖拽就形同虚设）。
+        func semantic(_ kind: PointerSample.Kind) -> Bool { kind == .click || kind == .exit || kind == .release }
         var reduced: [PointerSample] = []
         for sample in ordered {
-            if sample.kind != .click, sample.kind != .exit, let previous = reduced.last,
-               previous.kind != .click, previous.kind != .exit,
+            if !semantic(sample.kind), let previous = reduced.last, !semantic(previous.kind),
                floor(previous.time * 30) == floor(sample.time * 30) { reduced[reduced.count - 1] = sample }
             else { reduced.append(sample) }
         }
-        let semanticCount = reduced.reduce(0) { $0 + ($1.kind == .click || $1.kind == .exit ? 1 : 0) }
+        let semanticCount = reduced.reduce(0) { $0 + (semantic($1.kind) ? 1 : 0) }
         let continuousBudget = max(1, 180_000 - semanticCount)
         let stride = max(1, Int(ceil(Double(reduced.count - semanticCount) / Double(continuousBudget))))
         if stride == 1 { samples = reduced }
         else {
             var ordinal = 0
             samples = reduced.enumerated().compactMap { index, sample in
-                if sample.kind == .click || sample.kind == .exit { return sample }
+                if semantic(sample.kind) { return sample }
                 defer { ordinal += 1 }
-                let boundary = index == 0 || index == reduced.count - 1 || reduced[index + 1].kind == .click || reduced[index + 1].kind == .exit
+                let boundary = index == 0 || index == reduced.count - 1 || semantic(reduced[index + 1].kind)
                 return ordinal % stride == 0 || boundary ? sample : nil
             }
         }

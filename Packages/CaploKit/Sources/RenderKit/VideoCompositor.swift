@@ -204,8 +204,13 @@ public enum SceneRenderer {
         let geometry = geometry(edit: edit, sourceSize: sourceSize, size: size)
         guard geometry.rect.width > 0, geometry.rect.height > 0, edit.layout.shadow, edit.layout.shadowOpacity > 0 else { return nil }
         let unit = size.width / 960
-        let shape = roundedShape(geometry, bounds: bounds)
         let opacity = min(1, max(0, edit.layout.shadowOpacity))
+        // 解析阴影：同一个距离场直接算出衰减，没有模糊 pass；柔和度取高斯 σ 的两倍，边缘处一半不透明度，与老路径观感一致。
+        if let analytic = CardShape.shadow(rect: geometry.rect, radius: geometry.radius, blur: edit.layout.shadowBlur * unit * 2,
+                                           offset: edit.layout.shadowOffset * unit, opacity: opacity, bounds: bounds) {
+            return analytic
+        }
+        let shape = roundedShape(geometry, bounds: bounds)
         var shadow = shape.applyingFilter("CIColorMatrix", parameters: [
             "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 0),
             "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: opacity),
@@ -218,6 +223,8 @@ public enum SceneRenderer {
     static func cameraIsBehind(_ edit: VideoEdit) -> Bool { edit.camera?.enabled == true && edit.camera?.underScreen == true }
 
     static func roundedShape(_ geometry: Geometry, bounds: CGRect) -> CIImage {
+        // 距离场覆盖率：4 次亚像素采样抗锯齿，形状指数可切超椭圆；内核不可用时回退系统圆角生成器。
+        if let coverage = CardShape.coverage(rect: geometry.rect, radius: geometry.radius, bounds: bounds) { return coverage }
         let mask = CIFilter.roundedRectangleGenerator()
         mask.extent = geometry.rect; mask.radius = Float(geometry.radius)
         mask.color = CIColor.white
@@ -318,17 +325,24 @@ public enum SceneRenderer {
             .concatenating(CGAffineTransform(scaleX: layout.mirrored ? -scale : scale, y: scale))
             .concatenating(CGAffineTransform(translationX: rect.midX, y: rect.midY))
         let image = source.transformed(by: transform).cropped(to: rect)
-        let mask = CIFilter.roundedRectangleGenerator()
-        mask.extent = rect; mask.color = .white
         // 一律按短边乘以面板里的圆角比例：圆形预设是 1 : 1 加 0.5，拉小就成圆角方块；人像全屏没有圆角。
-        mask.radius = Float(layout.isCameraFull ? 0 : min(rect.width, rect.height) * min(0.5, max(0, layout.cornerRadius)))
-        let shape = mask.outputImage!.cropped(to: bounds)
+        let radius = layout.isCameraFull ? 0 : min(rect.width, rect.height) * min(0.5, max(0, layout.cornerRadius))
+        let shape: CIImage
+        if let coverage = CardShape.coverage(rect: rect, radius: radius, bounds: bounds) { shape = coverage } else {
+            let mask = CIFilter.roundedRectangleGenerator()
+            mask.extent = rect; mask.color = .white; mask.radius = Float(radius)
+            shape = mask.outputImage!.cropped(to: bounds)
+        }
         var base = background
         // 垫在录屏下面的人像（在后、全屏）不画自己的阴影；分屏的卡片跟随画面布局的阴影设置。
         if layout.isSplit ? edit.layout.shadow : (layout.shadow && !layout.underScreen) {
-            base = shape.applyingFilter("CIColorMatrix", parameters: ["inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 0), "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0.28 * opacity)])
-                .transformed(by: CGAffineTransform(translationX: 0, y: -rect.width * 0.025))
-                .applyingGaussianBlur(sigma: rect.width * 0.045).composited(over: base)
+            if let analytic = CardShape.shadow(rect: rect, radius: radius, blur: rect.width * 0.09, offset: rect.width * 0.025, opacity: 0.28 * opacity, bounds: bounds) {
+                base = analytic.composited(over: base)
+            } else {
+                base = shape.applyingFilter("CIColorMatrix", parameters: ["inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 0), "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0.28 * opacity)])
+                    .transformed(by: CGAffineTransform(translationX: 0, y: -rect.width * 0.025))
+                    .applyingGaussianBlur(sigma: rect.width * 0.045).composited(over: base)
+            }
         }
         // 先按形状裁出人像，再整体（预乘的四个通道一起）按不透明度压暗，最后叠到底图上；阴影已按同一比例变淡。
         let clear = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0)).cropped(to: bounds)
