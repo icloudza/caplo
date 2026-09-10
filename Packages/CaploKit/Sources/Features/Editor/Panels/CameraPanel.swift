@@ -106,7 +106,7 @@ struct CameraPanel: View {
                     if layout.isSplit {
                         // 分屏的尺寸完全由画布决定，没有可调的大小。
                     } else if layout.isCameraFull {
-                        EditorSlider(model: model, title: "录屏小窗", value: Binding(get: { model.edit.layout.screenScale }, set: { model.edit.layout.screenScale = $0 }),
+                        EditorSlider(model: model, title: "录屏大小", value: Binding(get: { model.edit.layout.screenScale }, set: { model.edit.layout.screenScale = $0 }),
                                      range: 0.2...0.6, suffix: "%", percentage: true, detents: [0.32])
                     } else if layout.isBehind {
                         EditorSlider(model: model, title: "人像高度", value: binding(\.sideHeight), range: 0.6...1, suffix: "%", percentage: true, detents: [0.9])
@@ -117,7 +117,7 @@ struct CameraPanel: View {
                     }
                     // 每种布局都能调圆角：圆形预设 50 % 是正圆，拉小就是圆角方块；人像全屏没有圆角（小窗的圆角在“画面布局”）。
                     if !layout.isCameraFull {
-                        EditorSlider(model: model, title: "摄像头圆角", value: binding(\.cornerRadius), range: 0...0.5, suffix: "%", percentage: true, detents: [0.14, 0.5])
+                        EditorSlider(model: model, title: "圆角", value: binding(\.cornerRadius), range: 0...0.5, suffix: "%", percentage: true, detents: [0.14, 0.5])
                     }
                     // 镜头推近时人像随同一条包络缩小并淡一点，拉远时放回来（像 FocuSee）；在后与分屏的人像不参与。
                     if !layout.ignoresFocus {
@@ -125,7 +125,7 @@ struct CameraPanel: View {
                             SettingLabel("聚焦时缩小人像", systemImage: "arrow.down.right.and.arrow.up.left")
                         }.toggleStyle(StudioToggleStyle())
                         if layout.shrinkOnFocus {
-                            EditorSlider(model: model, title: "聚焦时大小", value: binding(\.focusedScale), range: 0.4...1, suffix: "%", percentage: true, detents: [0.7])
+                            EditorSlider(model: model, title: "聚焦时缩放", value: binding(\.focusedScale), range: 0.4...1, suffix: "%", percentage: true, detents: [0.7])
                         }
                     }
                     Toggle(isOn: Binding(get: { model.edit.camera?.mirrored == true }, set: { value in model.commit { $0.camera?.mirrored = value } })) {

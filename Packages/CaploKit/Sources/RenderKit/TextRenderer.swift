@@ -21,7 +21,6 @@ public final class TextRenderer: @unchecked Sendable {
         let size: Double
         let weight: Double
         let family: String
-        let italic: Bool
         let alignment: String
         let lineHeight: Double
         let tracking: Double
@@ -171,7 +170,7 @@ public final class TextRenderer: @unchecked Sendable {
         guard !segment.text.isEmpty else { return nil }
         let box = Self.box(for: segment, canvas: canvas)
         let key = Key(text: segment.text, revealed: min(state.revealedCount, segment.text.count),
-                      size: segment.size, weight: segment.weight, family: segment.family.rawValue, italic: segment.italic,
+                      size: segment.size, weight: segment.weight, family: segment.family.rawValue,
                       alignment: segment.alignment.rawValue, lineHeight: segment.lineHeight, tracking: segment.tracking,
                       maxWidth: segment.maxWidth, color: segment.color.rawValue,
                       plate: segment.plate, plateColor: segment.plateColor.rawValue, plateOpacity: segment.plateOpacity,
@@ -209,7 +208,7 @@ public final class TextRenderer: @unchecked Sendable {
         let segment = state.segment
         let unit = canvas.height / Self.referenceHeight
         let fontSize = max(1, segment.size * unit)
-        let font = Self.font(family: segment.family, size: fontSize, weight: segment.weight, italic: segment.italic)
+        let font = Self.font(family: segment.family, size: fontSize, weight: segment.weight)
         let textColor = Self.color(segment.color, lightBackground: lightBackground)
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = switch segment.alignment { case .leading: .left; case .center: .center; case .trailing: .right }
@@ -344,19 +343,15 @@ public final class TextRenderer: @unchecked Sendable {
 
     // MARK: 字体与颜色
 
-    static func font(family: TextSegment.Family, size: Double, weight: Double, italic: Bool) -> NSFont {
+    static func font(family: TextSegment.Family, size: Double, weight: Double) -> NSFont {
         let nsWeight = Self.weight(weight)
-        var font: NSFont
+        let font: NSFont
         switch family {
         case .system: font = .systemFont(ofSize: size, weight: nsWeight)
         case .sans: font = NSFont(descriptor: NSFont.systemFont(ofSize: size, weight: nsWeight).fontDescriptor, size: size) ?? .systemFont(ofSize: size, weight: nsWeight)
         case .serif: font = Self.designed(.serif, size: size, weight: nsWeight)
         case .rounded: font = Self.designed(.rounded, size: size, weight: nsWeight)
         case .mono: font = .monospacedSystemFont(ofSize: size, weight: nsWeight)
-        }
-        if italic {
-            let descriptor = font.fontDescriptor.withSymbolicTraits(.italic)
-            font = NSFont(descriptor: descriptor, size: size) ?? font
         }
         return font
     }

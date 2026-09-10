@@ -80,9 +80,9 @@ struct TextPanel: View {
         .disabled(value.holdClipID != nil)
         if value.layout != .overlay {
             PanelNote(value.layout == .fullscreen
-                      ? "全屏：文字占满画面，底下的录制画面缩一点并淡出。要让成片在这里停住，再打开下面的「插入时长」。"
+                      ? "全屏：文字占满画面，底下的录制画面缩一点并淡出。要让成片在这里停住，再打开下面的「画面定格」。"
                       : "分屏：录制画面退到一栏，文字占另一栏。浮在画面上的画中画会待在画面那一栏里，不跟着画面一起缩小。")
-            EditorSlider(model: model, title: "版式过渡", value: binding(id, \.layoutTransition), range: 0...3, defaultValue: 0.35)
+            EditorSlider(model: model, title: "过渡时长", value: binding(id, \.layoutTransition), range: 0...3, defaultValue: 0.35)
         }
         if value.layout.textOnLeft != nil {
             // 人像被当成画面构图一部分的那几种布局（侧边 / 在后 / 分屏 / 人像全屏）没法摘出来单独摆，
@@ -90,28 +90,28 @@ struct TextPanel: View {
             if model.hasCameraMedia, let camera = model.edit.camera, camera.enabled, !camera.isFloatingPortrait {
                 PanelNote("人像当前不是浮在画面上的画中画，它属于画面构图的一部分，会跟着画面一起缩进这一栏。想让人像保持原大小，去「人像」面板换成圆形或圆角矩形那两种叠放预设。")
             }
-            EditorSlider(model: model, title: "画面占比", value: binding(id, \.splitRatio), range: TextSegment.splitRatioRange,
+            EditorSlider(model: model, title: "画面栏宽", value: binding(id, \.splitRatio), range: TextSegment.splitRatioRange,
                          suffix: "%", percentage: true, defaultValue: TextSegment.defaultSplitRatio, detents: [0.5])
-            EditorSlider(model: model, title: "分栏间距", value: binding(id, \.splitGap), range: 0...240, decimals: 0,
+            EditorSlider(model: model, title: "栏间距", value: binding(id, \.splitGap), range: 0...240, decimals: 0,
                          defaultValue: TextSegment.defaultSplitGap)
         }
         if value.layout == .fullscreen {
-            Toggle("插入时长（时钟暂停）", isOn: holdBinding(id)).toggleStyle(StudioToggleStyle())
+            Toggle("画面定格", isOn: holdBinding(id)).toggleStyle(StudioToggleStyle())
                 .help("打开之后成片会在这里停住：画面定格、声音静音，这一段是真实增加的时长。")
         }
         if value.holdClipID != nil {
             // 起止时间一律在时间线上拖，面板不再放重复的卡尺。
             PanelNote("这一段是插进成片里的定格，长度在时间线上拖这一块的右缘来改，后面的所有内容跟着往后挪。")
         }
-        Picker("进场动画", selection: animationBinding(id, \.enterKind)) { animationOptions }.environment(\.colorScheme, .dark)
-        EditorSlider(model: model, title: "进场时长", value: binding(id, \.enterDuration), range: 0...3, defaultValue: 0.4)
+        Picker("入场动画", selection: animationBinding(id, \.enterKind)) { animationOptions }.environment(\.colorScheme, .dark)
+        EditorSlider(model: model, title: "入场时长", value: binding(id, \.enterDuration), range: 0...3, defaultValue: 0.4)
         Picker("出场动画", selection: animationBinding(id, \.exitKind)) { animationOptions }.environment(\.colorScheme, .dark)
         EditorSlider(model: model, title: "出场时长", value: binding(id, \.exitDuration), range: 0...3, defaultValue: 0.35)
         if value.enterDuration + value.exitDuration > value.duration {
             PanelNote("进出时长之和超过了本段时长，已按比例压缩。")
         }
         PanelSection("排版", expanded: $typographyExpanded) {
-            Picker("字体族", selection: familyBinding(id)) {
+            Picker("字体", selection: familyBinding(id)) {
                 Text("系统").tag(TextSegment.Family.system)
                 Text("无衬线").tag(TextSegment.Family.sans)
                 Text("衬线").tag(TextSegment.Family.serif)
@@ -122,28 +122,27 @@ struct TextPanel: View {
                          decimals: 0, detents: [26, 40, 44, 56, 96, 160])
             EditorSlider(model: model, title: "字重", value: binding(id, \.weight), range: TextSegment.weightRange,
                          decimals: 0, defaultValue: 500, detents: [400, 700])
-            Toggle("斜体", isOn: boolBinding(id, \.italic)).toggleStyle(StudioToggleStyle())
-            EditorSlider(model: model, title: "行高", value: binding(id, \.lineHeight), range: 0.8...2.0, defaultValue: 1.30, detents: [1.0, 1.3])
-            EditorSlider(model: model, title: "字距", value: binding(id, \.tracking), range: -2...20, decimals: 1, defaultValue: 0, detents: [0])
+            EditorSlider(model: model, title: "行距", value: binding(id, \.lineHeight), range: 0.8...2.0, defaultValue: 1.30, detents: [1.0, 1.3])
+            EditorSlider(model: model, title: "字间距", value: binding(id, \.tracking), range: -2...20, decimals: 1, defaultValue: 0, detents: [0])
             EditorSlider(model: model, title: "水平位置", value: binding(id, \.x), range: 0...1, suffix: "%", percentage: true, detents: [0.5])
             EditorSlider(model: model, title: "垂直位置", value: binding(id, \.y), range: 0...1, suffix: "%", percentage: true, detents: [0.5])
-            EditorSlider(model: model, title: "最大宽度", value: binding(id, \.maxWidth), range: 0.2...1, suffix: "%", percentage: true, defaultValue: 0.8)
+            EditorSlider(model: model, title: "文本框宽度", value: binding(id, \.maxWidth), range: 0.2...1, suffix: "%", percentage: true, defaultValue: 0.8)
         }
         PanelSection("外观", expanded: $appearanceExpanded) {
             SwatchRow(title: "文字颜色", selection: paletteBinding(id, \.color))
             EditorSlider(model: model, title: "不透明度", value: binding(id, \.opacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 1)
-            Toggle("文字底色", isOn: boolBinding(id, \.plate)).toggleStyle(StudioToggleStyle())
+            Toggle("文字背景", isOn: boolBinding(id, \.plate)).toggleStyle(StudioToggleStyle())
             if value.plate {
-                SwatchRow(title: "底色", selection: paletteBinding(id, \.plateColor))
-                EditorSlider(model: model, title: "底色不透明度", value: binding(id, \.plateOpacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 0.55)
+                SwatchRow(title: "背景色", selection: paletteBinding(id, \.plateColor))
+                EditorSlider(model: model, title: "背景不透明度", value: binding(id, \.plateOpacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 0.55)
                 EditorSlider(model: model, title: "内边距", value: binding(id, \.platePadding), range: 0...48, decimals: 0, defaultValue: 16)
-                EditorSlider(model: model, title: "底色圆角", value: binding(id, \.plateRadius), range: 0...32, decimals: 0, defaultValue: 8)
+                EditorSlider(model: model, title: "背景圆角", value: binding(id, \.plateRadius), range: 0...32, decimals: 0, defaultValue: 8)
                 Toggle("铺满整行", isOn: boolBinding(id, \.plateFull)).toggleStyle(StudioToggleStyle())
             }
             Toggle("阴影", isOn: boolBinding(id, \.shadow)).toggleStyle(StudioToggleStyle())
             if value.shadow {
-                EditorSlider(model: model, title: "阴影不透明度", value: binding(id, \.shadowOpacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 0.45)
-                EditorSlider(model: model, title: "柔和度", value: binding(id, \.shadowBlur), range: 0...60, decimals: 0, defaultValue: 18)
+                EditorSlider(model: model, title: "不透明度", value: binding(id, \.shadowOpacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 0.45)
+                EditorSlider(model: model, title: "模糊", value: binding(id, \.shadowBlur), range: 0...60, decimals: 0, defaultValue: 18)
                 EditorSlider(model: model, title: "距离", value: binding(id, \.shadowOffset), range: -40...40, decimals: 0, defaultValue: 6, detents: [0])
             }
         }
@@ -235,7 +234,6 @@ private struct PresetTile: View {
                     .font(.system(size: 9 + min(1, max(0, (sample.size - 26) / 134)) * 13,
                                   weight: Font.Weight.from(sample.weight),
                                   design: sample.family.design))
-                    .italic(sample.italic)
                     .lineLimit(1).minimumScaleFactor(0.5)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 Text(preset.name).font(CaploFont.caption).foregroundStyle(CaploColor.textSecondary)

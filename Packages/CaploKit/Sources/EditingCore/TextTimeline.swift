@@ -71,7 +71,6 @@ public struct TextSegment: Codable, Equatable, Sendable, Identifiable {
     public var size: Double = 96
     public var weight: Double = 700
     public var family: Family = .system
-    public var italic = false
     public var alignment: Alignment = .center
     public var lineHeight: Double = 1.15
     public var tracking: Double = 0
@@ -125,7 +124,7 @@ public struct TextSegment: Codable, Equatable, Sendable, Identifiable {
     // 所以除了起止时间之外一律 decodeIfPresent + 默认值。CameraLayout 早就是这么写的。
     private enum CodingKeys: String, CodingKey {
         case id, start, duration, timelineStart, text, preset, layout, layoutTransition, splitGap, splitRatio, holdClipID
-        case size, weight, family, italic, alignment, lineHeight, tracking, x, y, maxWidth
+        case size, weight, family, alignment, lineHeight, tracking, x, y, maxWidth
         case color, opacity, plate, plateColor, plateOpacity, platePadding, plateRadius, plateFull
         case shadow, shadowOpacity, shadowBlur, shadowOffset
         case enterKind, enterDuration, exitKind, exitDuration, enabled, title
@@ -150,7 +149,6 @@ public struct TextSegment: Codable, Equatable, Sendable, Identifiable {
         size = try value(.size, 96)
         weight = try value(.weight, 700)
         family = try value(.family, Family.system)
-        italic = try value(.italic, false)
         alignment = try value(.alignment, Alignment.center)
         lineHeight = try value(.lineHeight, 1.15)
         tracking = try value(.tracking, 0)
@@ -496,7 +494,7 @@ public enum TextPreset: String, CaseIterable, Sendable, Identifiable {
             value.enterKind = .pop; value.enterDuration = 0.50; value.exitKind = .fade; value.exitDuration = 0.30
             value.shadow = true; value.shadowOpacity = 0.55; value.shadowBlur = 28; value.shadowOffset = 10
         case .quote:
-            value.size = 56; value.weight = 500; value.family = .serif; value.italic = true
+            value.size = 56; value.weight = 500; value.family = .serif
             value.alignment = .center; value.lineHeight = 1.45
             value.x = 0.5; value.y = 0.5; value.maxWidth = 0.7
             value.enterKind = .fade; value.enterDuration = 0.50; value.exitKind = .fade; value.exitDuration = 0.40
@@ -525,7 +523,7 @@ public enum TextPreset: String, CaseIterable, Sendable, Identifiable {
         var result = value
         result.preset = sample.preset
         result.size = sample.size; result.weight = sample.weight; result.family = sample.family
-        result.italic = sample.italic; result.alignment = sample.alignment
+        result.alignment = sample.alignment
         result.lineHeight = sample.lineHeight; result.tracking = sample.tracking
         result.x = sample.x; result.y = sample.y; result.maxWidth = sample.maxWidth
         result.color = sample.color; result.opacity = sample.opacity

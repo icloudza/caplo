@@ -55,7 +55,7 @@ struct CaptionPanel: View {
 
         if !model.edit.captionList.isEmpty {
             PanelSection("样式", expanded: $styleExpanded) {
-                Picker("字体族", selection: styleBinding(\.family)) {
+                Picker("字体", selection: styleBinding(\.family)) {
                     Text("系统").tag(TextSegment.Family.system)
                     Text("无衬线").tag(TextSegment.Family.sans)
                     Text("衬线").tag(TextSegment.Family.serif)
@@ -66,9 +66,9 @@ struct CaptionPanel: View {
                 EditorSlider(model: model, title: "字重", value: numberBinding(\.weight), range: TextSegment.weightRange, decimals: 0, defaultValue: 600, detents: [400, 600, 700])
                 EditorSlider(model: model, title: "垂直位置", value: numberBinding(\.y), range: 0.5...0.98, suffix: "%", percentage: true, defaultValue: 0.86)
                 EditorSlider(model: model, title: "最大宽度", value: numberBinding(\.maxWidth), range: 0.3...1, suffix: "%", percentage: true, defaultValue: 0.72)
-                Toggle("底板", isOn: boolBinding(\.plate)).toggleStyle(StudioToggleStyle())
+                Toggle("文字背景", isOn: boolBinding(\.plate)).toggleStyle(StudioToggleStyle())
                 if model.edit.captionStyleOrDefault.plate {
-                    EditorSlider(model: model, title: "底板不透明度", value: numberBinding(\.plateOpacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 0.55)
+                    EditorSlider(model: model, title: "背景不透明度", value: numberBinding(\.plateOpacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 0.55)
                 }
                 Picker("逐词高亮", selection: highlightBinding) {
                     ForEach(CaptionStyle.Highlight.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -88,11 +88,11 @@ struct CaptionPanel: View {
                     PanelNote("字幕不会烧进导出的视频，记得把 SRT 一起交付。")
                 }
             }
-            PanelSection("时序", expanded: $timingExpanded) {
-                EditorSlider(model: model, title: "提前出现", value: numberBinding(\.lead), range: 0...1, defaultValue: 0.06)
-                EditorSlider(model: model, title: "说完停留", value: numberBinding(\.tail), range: 0...2, defaultValue: 0.35)
-                EditorSlider(model: model, title: "最短显示", value: numberBinding(\.minHold), range: 0.3...4, defaultValue: 1.0)
-                EditorSlider(model: model, title: "接上下一句", value: numberBinding(\.bridge), range: 0...1, defaultValue: 0.25)
+            PanelSection("时间", expanded: $timingExpanded) {
+                EditorSlider(model: model, title: "提前显示", value: numberBinding(\.lead), range: 0...1, defaultValue: 0.06)
+                EditorSlider(model: model, title: "延后消失", value: numberBinding(\.tail), range: 0...2, defaultValue: 0.35)
+                EditorSlider(model: model, title: "最短时长", value: numberBinding(\.minHold), range: 0.3...4, defaultValue: 1.0)
+                EditorSlider(model: model, title: "衔接间隔", value: numberBinding(\.bridge), range: 0...1, defaultValue: 0.25)
                 EditorSlider(model: model, title: "淡入", value: numberBinding(\.fadeIn), range: 0...1, defaultValue: 0.12)
                 EditorSlider(model: model, title: "淡出", value: numberBinding(\.fadeOut), range: 0...1, defaultValue: 0.12)
             }

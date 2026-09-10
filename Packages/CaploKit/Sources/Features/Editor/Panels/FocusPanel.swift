@@ -29,9 +29,9 @@ struct FocusPanel: View {
                     Text("柔和平滑").tag(FocusSegment.Easing.smooth)
                     Text("演示推近").tag(FocusSegment.Easing.demo)
                 }.environment(\.colorScheme, .dark)
-                EditorSlider(model: model, title: "推近秒数", value: optionalBinding(id, \.easeIn, fallback: 0.6), range: 0.05...2, defaultValue: 0.6)
-                EditorSlider(model: model, title: "拉远秒数", value: optionalBinding(id, \.easeOut, fallback: 0.7), range: 0.05...2, defaultValue: 0.7)
-                EditorSlider(model: model, title: "倍率", value: binding(id, \.scale), range: 1...3, suffix: "×", detents: [1.5, 2, 2.5])
+                EditorSlider(model: model, title: "推近时长", value: optionalBinding(id, \.easeIn, fallback: 0.6), range: 0.05...2, defaultValue: 0.6)
+                EditorSlider(model: model, title: "拉远时长", value: optionalBinding(id, \.easeOut, fallback: 0.7), range: 0.05...2, defaultValue: 0.7)
+                EditorSlider(model: model, title: "缩放倍率", value: binding(id, \.scale), range: 1...3, suffix: "×", detents: [1.5, 2, 2.5])
                 EditorSlider(model: model, title: "水平位置", value: binding(id, \.x), range: 0...1, detents: [0.5])
                 EditorSlider(model: model, title: "垂直位置", value: binding(id, \.y), range: 0...1, detents: [0.5])
         Button("删除此镜头") { model.selectedFocus = id; model.deleteSelection() }.buttonStyle(StudioButtonStyle(.destructive, size: .small))
@@ -43,13 +43,13 @@ struct FocusPanel: View {
                          tip: "按点击推近，提前读取鼠标轨迹并平滑跟随。不点鼠标的讲解也能聚焦：在时间线右键“在此处添加聚焦”，镜头会推近到指针所在并跟着走。相邻镜头间隔小于合并间隔时直接平移过去，不拉远。手动指定水平或垂直位置后改为固定聚焦。")
         }.toggleStyle(StudioToggleStyle())
         // 默认收起，专注于各镜头的参数；需要时展开调整。状态随偏好保留。
-        PanelSection("自动镜头参数", expanded: $autoParametersExpanded) {
-            EditorSlider(model: model, title: "默认倍率", value: styleBinding(\.baseScale), range: 1...3, suffix: "×", detents: [1.5, 2, 2.5])
-            EditorSlider(model: model, title: "停留秒数", value: styleBinding(\.idleTimeout), range: 0.5...5)
-            EditorSlider(model: model, title: "合并 / 衔接间隔", value: styleBinding(\.mergeGap), range: 0...2)
-            EditorSlider(model: model, title: "轨迹前瞻（秒）", value: optionalStyleBinding(\.prediction, fallback: 0.16), range: 0...0.4)
-            EditorSlider(model: model, title: "镜头平滑响应", value: optionalStyleBinding(\.panResponse, fallback: 0.55), range: 0.15...1.5)
-            EditorSlider(model: model, title: "中心安全区", value: styleBinding(\.safeZone), range: 0.2...0.9)
+        PanelSection("自动聚焦设置", expanded: $autoParametersExpanded) {
+            EditorSlider(model: model, title: "默认缩放倍率", value: styleBinding(\.baseScale), range: 1...3, suffix: "×", detents: [1.5, 2, 2.5])
+            EditorSlider(model: model, title: "拉远延迟", value: styleBinding(\.idleTimeout), range: 0.5...5)
+            EditorSlider(model: model, title: "合并间隔", value: styleBinding(\.mergeGap), range: 0...2)
+            EditorSlider(model: model, title: "前瞻时长", value: optionalStyleBinding(\.prediction, fallback: 0.16), range: 0...0.4)
+            EditorSlider(model: model, title: "跟随平滑度", value: optionalStyleBinding(\.panResponse, fallback: 0.55), range: 0.15...1.5)
+            EditorSlider(model: model, title: "安全区", value: styleBinding(\.safeZone), range: 0.2...0.9)
             Button(generating ? "正在生成…" : "重新生成自动镜头") {
                 generating = true
                 Task { await model.regenerateFocus(); generating = false }

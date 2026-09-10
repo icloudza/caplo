@@ -205,7 +205,7 @@ private func text(_ layout: TextSegment.Layout, ratio: Double = 0.5, gap: Double
         var stripped = preset.applied(to: value)
         stripped.preset = value.preset
         stripped.size = value.size; stripped.weight = value.weight; stripped.family = value.family
-        stripped.italic = value.italic; stripped.alignment = value.alignment
+        stripped.alignment = value.alignment
         stripped.lineHeight = value.lineHeight; stripped.tracking = value.tracking
         stripped.x = value.x; stripped.y = value.y; stripped.maxWidth = value.maxWidth
         stripped.color = value.color; stripped.opacity = value.opacity

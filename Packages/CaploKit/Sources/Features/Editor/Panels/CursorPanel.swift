@@ -38,9 +38,9 @@ struct CursorPanel: View {
                     }
                 }
                 // 允许小于 1×：最小值就是与录制时系统光标同大的倍率（按真实光标的点尺寸换算），并作为一个档位。
-                EditorSlider(model: model, title: "光标大小", value: value(\.cursorScale), range: model.systemCursorScale...3, suffix: "×", defaultValue: 1, detents: [model.systemCursorScale, 1, 2])
-                EditorSlider(model: model, title: "光标角度", value: value(\.angle), range: -180...180, suffix: "°", decimals: 0, defaultValue: 0, detents: [0])
-                EditorSlider(model: model, title: "动态光标方向", value: value(\.directionFollow), range: 0...1, suffix: "%", percentage: true, defaultValue: 0)
+                EditorSlider(model: model, title: "大小", value: value(\.cursorScale), range: model.systemCursorScale...3, suffix: "×", defaultValue: 1, detents: [model.systemCursorScale, 1, 2])
+                EditorSlider(model: model, title: "角度", value: value(\.angle), range: -180...180, suffix: "°", decimals: 0, defaultValue: 0, detents: [0])
+                EditorSlider(model: model, title: "随移动转向", value: value(\.directionFollow), range: 0...1, suffix: "%", percentage: true, defaultValue: 0)
             }
             .disabled(!editable)
             Group {
@@ -48,7 +48,7 @@ struct CursorPanel: View {
                     EditorSlider(model: model, title: "轨迹平滑", value: value(\.smoothing), range: 0...2, defaultValue: 0)
                     EditorSlider(model: model, title: "点击弹跳", value: value(\.bounce), range: 0...0.4, defaultValue: 0)
                     EditorSlider(model: model, title: "弹跳速度", value: value(\.bounceSpeed), range: 0.5...2, suffix: "×", defaultValue: 1, detents: [1])
-                    EditorSlider(model: model, title: "移动摆动", value: value(\.sway), range: 0...1, defaultValue: 0)
+                    EditorSlider(model: model, title: "摆动", value: value(\.sway), range: 0...1, defaultValue: 0)
                     EditorSlider(model: model, title: "运动模糊", value: value(\.motionBlur), range: 0...1, defaultValue: 0)
                     Toggle("静止时淡出", isOn: toggle(\.hideIdle)).toggleStyle(StudioToggleStyle())
                     Toggle("结尾回到起点", isOn: toggle(\.loop)).toggleStyle(StudioToggleStyle())

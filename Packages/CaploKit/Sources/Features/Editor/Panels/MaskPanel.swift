@@ -29,10 +29,10 @@ struct MaskPanel: View {
                 PanelNote("强度偏低，画面里的文字可能仍然认得出来。导出前建议提到 \(Int(MaskSegment.weakAmount)) 以上。")
             }
         } else {
-            EditorSlider(model: model, title: "区域外压暗", value: binding(id, \.darkness),
+            EditorSlider(model: model, title: "周围压暗", value: binding(id, \.darkness),
                          range: 0...0.95, suffix: "%", percentage: true, defaultValue: 0.55)
-            EditorSlider(model: model, title: "淡入秒数", value: optionalBinding(id, \.fadeIn, fallback: 0.15), range: 0...1.5, defaultValue: 0.15)
-            EditorSlider(model: model, title: "淡出秒数", value: optionalBinding(id, \.fadeOut, fallback: 0.15), range: 0...1.5, defaultValue: 0.15)
+            EditorSlider(model: model, title: "淡入", value: optionalBinding(id, \.fadeIn, fallback: 0.15), range: 0...1.5, defaultValue: 0.15)
+            EditorSlider(model: model, title: "淡出", value: optionalBinding(id, \.fadeOut, fallback: 0.15), range: 0...1.5, defaultValue: 0.15)
         }
         Picker("形状", selection: shapeBinding(id)) {
             Text("矩形").tag(MaskSegment.Shape.rectangle)
@@ -46,7 +46,7 @@ struct MaskPanel: View {
             EditorSlider(model: model, title: "圆角", value: binding(id, \.cornerRadius), range: 0...80, decimals: 0, defaultValue: 0)
         }
         if mask.kind == .sensitive {
-            EditorSlider(model: model, title: "边缘羽化", value: binding(id, \.feather), range: 0...60, decimals: 0, defaultValue: 0)
+            EditorSlider(model: model, title: "羽化", value: binding(id, \.feather), range: 0...60, decimals: 0, defaultValue: 0)
         }
         Button("删除此遮罩") { model.selectedMask = id; model.deleteSelection() }
             .buttonStyle(StudioButtonStyle(.destructive, size: .small))
