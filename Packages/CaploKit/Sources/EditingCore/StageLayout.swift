@@ -16,9 +16,12 @@ public struct StageTransform: Equatable, Sendable {
     /// 这是"画面退到一栏、另一栏放文字"的分屏，不是整体淡出。
     /// 渲染时据此把浮在录屏之上的画中画从画面层里摘出来——人像跟着画面一起缩到半栏就没法看了。
     public var split = false
+    /// 画面布局「留白」在这一刻还剩多少（1 常态、0 完全收起）。分屏时画面要铺满自己那一栏：
+    /// 留白本来是给画面四周留空的，再连同画面一起缩进栏里就成了两层空白，白白浪费一栏的宽度。
+    public var paddingScale: Double = 1
 
-    public init(scale: Double = 1, centerX: Double = 0.5, centerY: Double = 0.5, alpha: Double = 1, split: Bool = false) {
-        self.scale = scale; self.centerX = centerX; self.centerY = centerY; self.alpha = alpha; self.split = split
+    public init(scale: Double = 1, centerX: Double = 0.5, centerY: Double = 0.5, alpha: Double = 1, split: Bool = false, paddingScale: Double = 1) {
+        self.scale = scale; self.centerX = centerX; self.centerY = centerY; self.alpha = alpha; self.split = split; self.paddingScale = paddingScale
     }
 
     /// 画面层当前占着画布上的哪一块（Core Image 左下原点）。摘出来的画中画摆在这里面。
@@ -28,7 +31,7 @@ public struct StageTransform: Equatable, Sendable {
 
     /// 常态：什么都不用做，渲染时可以整段跳过。
     public var isIdentity: Bool {
-        abs(scale - 1) < 0.0005 && abs(centerX - 0.5) < 0.0005 && abs(centerY - 0.5) < 0.0005 && alpha > 0.9995
+        abs(scale - 1) < 0.0005 && abs(centerX - 0.5) < 0.0005 && abs(centerY - 0.5) < 0.0005 && alpha > 0.9995 && abs(paddingScale - 1) < 0.0005
     }
 
     /// 画布像素坐标下的仿射变换（Core Image 左下原点）。
@@ -46,7 +49,8 @@ public struct StageTransform: Equatable, Sendable {
                               centerX: 0.5 + (target.centerX - 0.5) * t,
                               centerY: 0.5 + (target.centerY - 0.5) * t,
                               alpha: 1 + (target.alpha - 1) * t,
-                              split: target.split && t > 0.0001)
+                              split: target.split && t > 0.0001,
+                              paddingScale: 1 + (target.paddingScale - 1) * t)
     }
 }
 
@@ -84,7 +88,8 @@ extension TextSegment {
             {
                 let column = splitColumns.picture
                 let width = column.upperBound - column.lowerBound
-                return StageTransform(scale: width, centerX: (column.lowerBound + column.upperBound) / 2, split: true)
+                // 留白随版式过渡一起收到 0：画面铺满这一栏，只留分屏栏自己的外缘。
+                return StageTransform(scale: width, centerX: (column.lowerBound + column.upperBound) / 2, split: true, paddingScale: 0)
             }()
         }
     }

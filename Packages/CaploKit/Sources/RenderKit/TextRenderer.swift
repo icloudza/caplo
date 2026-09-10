@@ -81,8 +81,10 @@ public final class TextRenderer: @unchecked Sendable {
     private struct Rendered {
         let image: CIImage
         let frame: CGRect
-        /// 文字本身（不含底板与阴影）的包围盒，画布坐标；选中框与把手用它。
+        /// 文字本身（不含底板与阴影）的包围盒，画布坐标。
         let textFrame: CGRect
+        /// 眼睛看得见的那一块：有底板就是底板（底板一定比文字大一圈），没有就是文字本身。不含阴影的模糊。
+        let visibleFrame: CGRect
     }
     private var cache: [Key: Rendered] = [:]
     private var order: [Key] = []
@@ -108,14 +110,8 @@ public final class TextRenderer: @unchecked Sendable {
         guard alpha > 0.002 else { return nil }
         guard let rendered = layout(state, canvas: canvas, lightBackground: lightBackground, highlight: highlight) else { return nil }
         var image = rendered.image
-        // 缩放绕文字中心，位移按画面高度的比例；两者都不改变已经排好的版。
-        let center = CGPoint(x: rendered.textFrame.midX, y: rendered.textFrame.midY)
-        let scale = state.animation.scale
-        let dy = -state.animation.offset * canvas.height
-        if abs(scale - 1) > 0.0005 || abs(dy) > 0.01 {
-            let transform = CGAffineTransform(translationX: -center.x, y: -center.y)
-                .concatenating(CGAffineTransform(scaleX: scale, y: scale))
-                .concatenating(CGAffineTransform(translationX: center.x, y: center.y + dy))
+        if let transform = Self.animation(for: state, center: CGPoint(x: rendered.textFrame.midX, y: rendered.textFrame.midY),
+                                          canvas: canvas) {
             image = image.transformed(by: transform)
         }
         if alpha < 0.998 {
@@ -127,9 +123,34 @@ public final class TextRenderer: @unchecked Sendable {
         return image.cropped(to: CGRect(origin: .zero, size: canvas))
     }
 
-    /// 文字本身的包围盒（画布坐标，左下原点），不含底板与阴影。画布上的选中框用它。
+    /// 这一帧的动画变换：缩放绕文字中心，位移按画面高度的比例；两者都不改变已经排好的版。
+    /// 画面和画布上的选中框都从这里取，少一处就会在进出场那几帧对不上（上滑进场时框停在终点、文字还在下面）。
+    private static func animation(for state: TextState, center: CGPoint, canvas: CGSize) -> CGAffineTransform? {
+        let scale = state.animation.scale
+        let dy = -state.animation.offset * canvas.height
+        guard abs(scale - 1) > 0.0005 || abs(dy) > 0.01 else { return nil }
+        return CGAffineTransform(translationX: -center.x, y: -center.y)
+            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+            .concatenating(CGAffineTransform(translationX: center.x, y: center.y + dy))
+    }
+
+    /// 文字本身的包围盒（画布坐标，左下原点），不含底板与阴影，**已经跟着这一帧的动画走**。
     public func textFrame(for state: TextState, canvas: CGSize, lightBackground: Bool) -> CGRect? {
-        layout(state, canvas: canvas, lightBackground: lightBackground, highlight: nil)?.textFrame
+        guard let rendered = layout(state, canvas: canvas, lightBackground: lightBackground, highlight: nil) else { return nil }
+        return Self.applying(rendered.textFrame, of: rendered, state: state, canvas: canvas)
+    }
+
+    /// 画布上选中框该框住的那一块：有底板时是底板（底板比文字大一圈，只框文字的话框会落在底板里面，看着就是错位），
+    /// 没有底板时就是文字自己。阴影不算——它是软的，框住它反而虚。同样跟着这一帧的动画走。
+    public func visibleFrame(for state: TextState, canvas: CGSize, lightBackground: Bool) -> CGRect? {
+        guard let rendered = layout(state, canvas: canvas, lightBackground: lightBackground, highlight: nil) else { return nil }
+        return Self.applying(rendered.visibleFrame, of: rendered, state: state, canvas: canvas)
+    }
+
+    private static func applying(_ rect: CGRect, of rendered: Rendered, state: TextState, canvas: CGSize) -> CGRect {
+        let center = CGPoint(x: rendered.textFrame.midX, y: rendered.textFrame.midY)
+        guard let transform = animation(for: state, center: center, canvas: canvas) else { return rect }
+        return rect.applying(transform)
     }
 
     /// 当前版式下文字可用的矩形（画布坐标，左下原点）。
@@ -288,7 +309,8 @@ public final class TextRenderer: @unchecked Sendable {
 
         guard let cgImage = context.makeImage() else { return nil }
         let image = CIImage(cgImage: cgImage).transformed(by: CGAffineTransform(translationX: bounds.minX, y: bounds.minY))
-        return Rendered(image: image, frame: bounds, textFrame: textFrame)
+        return Rendered(image: image, frame: bounds, textFrame: textFrame,
+                        visibleFrame: segment.plate ? plateFrame.union(textFrame) : textFrame)
     }
 
     /// 高亮词在画布上的矩形。跨行时只取它落在的第一行——药丸本来就不该跨行。

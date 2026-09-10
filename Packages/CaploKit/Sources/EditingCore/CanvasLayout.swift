@@ -138,7 +138,7 @@ public struct CanvasLayout: Equatable, Codable, Sendable {
     public var background: CanvasBackground = .iris
     /// 工程包内的自定义背景图相对路径（`Backgrounds/…`）；存在时覆盖色板背景。
     public var backgroundImage: String?
-    public var padding: Double = 40
+    public var padding: Double = 0
     public var cornerRadius: Double = 12
     public var shadow: Bool = true
     /// 阴影参数以 960 点宽画布为参考：不透明度 0…1，柔和度（模糊 σ）与向下距离单位为点。

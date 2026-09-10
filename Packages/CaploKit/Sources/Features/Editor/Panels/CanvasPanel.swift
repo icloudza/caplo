@@ -56,7 +56,7 @@ struct CanvasPanel: View {
             }
         }
         PanelSection("样式") {
-            EditorSlider(model: model, title: "留白", value: Binding(get: { model.edit.layout.padding }, set: { model.edit.layout.padding = $0 }), range: 0...120, decimals: 0, defaultValue: 40)
+            EditorSlider(model: model, title: "留白", value: Binding(get: { model.edit.layout.padding }, set: { model.edit.layout.padding = $0 }), range: 0...120, decimals: 0, defaultValue: 0)
             EditorSlider(model: model, title: "圆角", value: Binding(get: { model.edit.layout.cornerRadius }, set: { model.edit.layout.cornerRadius = $0 }), range: 0...40, decimals: 0, defaultValue: 12)
         }
         PanelSection("阴影") {

@@ -10,7 +10,7 @@ import RenderKit
 ///    所以先要过一遍 `crop.remap`；
 /// 2. 内容按 `geometry(...)` 摆进成片矩形，固定取景时还在框内按 `focus.scale` 推近；
 /// 3. 整体推近时整幅画面被 `sceneZoom` 变换；
-/// 4. 全屏卡段 / 分屏时画面层再被 `StageTransform` 缩放挪位。
+/// 4. 全屏卡段 / 分屏时画面层再被 `StageTransform` 缩放挪位（分屏还会把留白收掉，几何按收掉后的留白算）。
 ///
 /// 传进来的 `focus` 必须由 `edit.cropResolved()` 求得，和渲染端同一个口径。
 enum MaskCanvasMath {
@@ -18,7 +18,7 @@ enum MaskCanvasMath {
     /// `sourceSize` 必须是裁切后的像素尺寸。
     static func normalized(_ point: CGPoint, videoRect: CGRect, edit: VideoEdit, sourceSize: CGSize,
                            focus: FocusState, stage: StageTransform = StageTransform()) -> CGPoint? {
-        guard let context = Context(videoRect: videoRect, edit: edit, sourceSize: sourceSize, focus: focus) else { return nil }
+        guard let context = Context(videoRect: videoRect, edit: SceneRenderer.stagedEdit(edit, stage: stage), sourceSize: sourceSize, focus: focus) else { return nil }
         var q = CGPoint(x: point.x - videoRect.minX, y: point.y - videoRect.minY)
         if !stage.isIdentity { q = q.applying(stage.affine(canvas: videoRect.size).inverted()) }
         if context.follow { q = q.applying(context.zoom.inverted()) }
@@ -32,7 +32,7 @@ enum MaskCanvasMath {
     /// 整幅画面的归一化坐标 → 视图点。画遮罩框与把手用。
     static func viewPoint(_ normalized: CGPoint, videoRect: CGRect, edit: VideoEdit, sourceSize: CGSize,
                           focus: FocusState, stage: StageTransform = StageTransform()) -> CGPoint? {
-        guard let context = Context(videoRect: videoRect, edit: edit, sourceSize: sourceSize, focus: focus) else { return nil }
+        guard let context = Context(videoRect: videoRect, edit: SceneRenderer.stagedEdit(edit, stage: stage), sourceSize: sourceSize, focus: focus) else { return nil }
         let inCrop = context.crop?.remap(normalized) ?? normalized
         let u = 0.5 + (inCrop.x - context.centerX) * context.scale
         let v = 0.5 + (inCrop.y - context.centerY) * context.scale
@@ -56,7 +56,7 @@ enum MaskCanvasMath {
     /// 成片矩形（录屏画面在视图里占的位置）。
     static func screenRect(videoRect: CGRect, edit: VideoEdit, sourceSize: CGSize,
                            focus: FocusState, stage: StageTransform = StageTransform()) -> CGRect? {
-        guard let context = Context(videoRect: videoRect, edit: edit, sourceSize: sourceSize, focus: focus) else { return nil }
+        guard let context = Context(videoRect: videoRect, edit: SceneRenderer.stagedEdit(edit, stage: stage), sourceSize: sourceSize, focus: focus) else { return nil }
         var rect = context.rect
         if context.follow { rect = rect.applying(context.zoom) }
         if !stage.isIdentity { rect = rect.applying(stage.affine(canvas: videoRect.size)) }

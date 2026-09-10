@@ -81,6 +81,57 @@ private func state(_ segment: TextSegment, alpha: Double = 1, scale: Double = 1,
     #expect(abs(left.width - right.width) < 1 && abs(left.midY - right.midY) < 1)
 }
 
+/// 进出场动画期间，画布上的选中框必须跟着文字一起走：`image(for:)` 会按动画绕文字中心缩放、
+/// 按画面高度比例位移，`textFrame` / `visibleFrame` 少套这一层的话，上滑进场那几帧框停在终点、文字还在下面。
+@Test func theFrameFollowsTheEnterAnimation() throws {
+    let size = CGSize(width: 1920, height: 1080)
+    let renderer = TextRenderer()
+    var segment = TextPreset.lowerThird.segment(start: 0, duration: 3)
+    segment.text = "npm run build"; segment.shadow = false
+    let settled = state(segment)
+    let sliding = TextState(id: segment.id, segment: segment,
+                            animation: TextAnimationState(alpha: 1, offset: 0.05, scale: 1, reveal: 1),
+                            revealedCount: segment.text.count)
+    let atRest = try #require(renderer.visibleFrame(for: settled, canvas: size, lightBackground: false))
+    let moved = try #require(renderer.visibleFrame(for: sliding, canvas: size, lightBackground: false))
+    // 位移就是 -offset × 画面高度，横向与尺寸都不变。
+    #expect(abs(moved.minY - (atRest.minY - 0.05 * size.height)) < 0.5, "框没跟着上滑：\(atRest) → \(moved)")
+    #expect(abs(moved.minX - atRest.minX) < 0.5 && abs(moved.width - atRest.width) < 0.5)
+    // 与真正画出来的像素对齐：框套住画面里所有不透明的像素，四周只多出底板留白之内的余量。
+    let drawn = try #require(shot(renderer.image(for: sliding, canvas: size, lightBackground: false), size: size).box)
+    // 位图坐标自上而下，换算回画布坐标再比。
+    let flipped = CGRect(x: drawn.minX, y: size.height - drawn.maxY, width: drawn.width, height: drawn.height)
+    #expect(moved.insetBy(dx: -2, dy: -2).contains(flipped), "框 \(moved) 没盖住画出来的 \(flipped)")
+    // 缩放动画同样跟着：绕文字中心放大，框也放大。
+    let popped = TextState(id: segment.id, segment: segment,
+                           animation: TextAnimationState(alpha: 1, offset: 0, scale: 1.5, reveal: 1),
+                           revealedCount: segment.text.count)
+    let big = try #require(renderer.visibleFrame(for: popped, canvas: size, lightBackground: false))
+    #expect(abs(big.width - atRest.width * 1.5) < 0.5 && abs(big.midX - atRest.midX) < 0.5)
+}
+
+/// 画布上的选中框要框住"眼睛看得见的那一块"：带底板的预设（代码、字幕条）底板比文字大一圈，
+/// 只框文字的话框会落在底板里面、把手压在底板脸上，看着就是错位。
+@Test func theVisibleFrameWrapsThePlateNotJustTheGlyphs() throws {
+    let size = CGSize(width: 1920, height: 1080)
+    let renderer = TextRenderer()
+    var segment = TextPreset.code.segment(start: 0, duration: 3)
+    segment.text = "npm run build"; segment.shadow = false
+    let text = try #require(renderer.textFrame(for: state(segment), canvas: size, lightBackground: false))
+    let visible = try #require(renderer.visibleFrame(for: state(segment), canvas: size, lightBackground: false))
+    // 底板四周各留 platePadding（按 1080 参考高度换算），所以正好宽出两倍留白，且完整套住文字。
+    let padding = segment.platePadding * size.height / 1080
+    #expect(visible.contains(text))
+    #expect(abs(visible.width - (text.width + 2 * padding)) < 1)
+    #expect(abs(visible.height - (text.height + 2 * padding)) < 1)
+    #expect(abs(visible.midX - text.midX) < 0.5 && abs(visible.midY - text.midY) < 0.5)
+    // 没有底板的预设两者就是同一个框。
+    var plain = TextPreset.title.segment(start: 0, duration: 3)
+    plain.text = "产品演示"
+    #expect(renderer.visibleFrame(for: state(plain), canvas: size, lightBackground: false)
+            == renderer.textFrame(for: state(plain), canvas: size, lightBackground: false))
+}
+
 @Test func anchorAndAlignmentPlaceTheTextWhereTheyPromise() throws {
     let size = CGSize(width: 1920, height: 1080)
     let renderer = TextRenderer()
@@ -510,4 +561,41 @@ private extension Double { var intValue: Int { Int(self) } }
     // 摄像头轨空档的那几帧同样要铺满：背景是恒满幅的。
     let without = opaquePixels(camera: nil)
     #expect(without > total * 9 / 10, "摄像头轨空档处背景丢了 \(total - without) 个像素")
+}
+
+/// 分屏时画面铺满自己那一栏：留白 40 和留白 0 渲染出来必须一模一样；不分屏时两者当然不同。
+@Test func splitScreenIgnoresTheCanvasPaddingSoThePictureFillsItsColumn() throws {
+    let size = CGSize(width: 960, height: 540), bounds = CGRect(origin: .zero, size: size)
+    let source = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: CGRect(x: 0, y: 0, width: 1920, height: 1080))
+    func makeEdit(padding: Double, split: Bool) -> VideoEdit {
+        var edit = VideoEdit(duration: 4)
+        edit.layout.padding = padding; edit.layout.cornerRadius = 0; edit.layout.shadow = false; edit.layout.background = .solidBlack
+        guard split else { return edit }
+        var segment = TextPreset.title.segment(start: 0, duration: 4)
+        segment.text = "标题"; segment.layout = .splitLeft; segment.layoutTransition = 0.2
+        segment.enterKind = .none; segment.exitKind = .none; segment.enterDuration = 0; segment.exitDuration = 0
+        edit.addText(segment)
+        return edit
+    }
+    func bitmap(_ edit: VideoEdit) -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: Int(size.width * size.height) * 4)
+        CIContext().render(SceneRenderer.frame(source: source, edit: edit, time: 2, size: size), toBitmap: &bytes,
+                           rowBytes: Int(size.width) * 4, bounds: bounds, format: .RGBA8, colorSpace: textSpace)
+        return bytes
+    }
+    func differing(_ a: [UInt8], _ b: [UInt8]) -> Int {
+        var count = 0
+        for index in stride(from: 0, to: a.count, by: 4) where abs(Int(a[index]) - Int(b[index])) > 8 { count += 1 }
+        return count
+    }
+    // 不分屏：留白 40 会让画面四周露出背景，和留白 0 明显不同。
+    #expect(differing(bitmap(makeEdit(padding: 40, split: false)), bitmap(makeEdit(padding: 0, split: false))) > 5000)
+    // 分屏：留白被收掉，两者逐像素一致。
+    let padded = bitmap(makeEdit(padding: 40, split: true)), flush = bitmap(makeEdit(padding: 0, split: true))
+    #expect(differing(padded, flush) < 50, "分屏时留白仍然影响画面（\(differing(padded, flush)) 个像素不同）")
+    // 画面确实铺到了右栏的栏边：右栏（6 % 外缘之内）靠边一列的像素是白的录屏，不是背景。
+    var probe = TextPreset.title.segment(start: 0, duration: 4); probe.layout = .splitLeft
+    let target = probe.stageTarget
+    let x = Int(((target.centerX + target.scale / 2) * size.width).rounded(.down)) - 2, y = Int(size.height / 2)
+    #expect(padded[(y * Int(size.width) + x) * 4] > 200, "右栏靠边处不是录屏画面")
 }

@@ -217,6 +217,15 @@ public enum SceneRenderer {
         layout.portraitRect(canvas: size, padding: edit.layout.padding * size.width / 960, screen: sourceSize, progress: focus, region: region)
     }
 
+    /// 版式变换生效时用来算画面层几何的工程：留白按 `stage.paddingScale` 收起（分屏时收到 0，画面铺满自己那一栏）。
+    /// 阴影、圆角、人像卡片都从这份工程取留白，才会跟画面一起贴到栏边。
+    public static func stagedEdit(_ edit: VideoEdit, stage: StageTransform) -> VideoEdit {
+        guard abs(stage.paddingScale - 1) > 0.0005 else { return edit }
+        var result = edit
+        result.layout.padding *= min(1, max(0, stage.paddingScale))
+        return result
+    }
+
     /// 裁切后的源画面像素尺寸。
     public static func croppedSourceSize(_ full: CGSize, layout: CanvasLayout) -> CGSize {
         guard let crop = layout.effectiveCrop else { return full }
@@ -304,7 +313,7 @@ public enum SceneRenderer {
         let covered = masked(full, edit: edit, time: time, timeline: timeline)
         // 裁切保留原像素坐标系：指针仍按完整画面归一化坐标映射，聚焦则换算到裁切区域。
         var source = covered
-        var edit = edit
+        var edit = staged ? stagedEdit(edit, stage: stage) : edit
         if let crop = edit.layout.effectiveCrop {
             let extent = covered.extent
             let cropRect = CGRect(x: extent.minX + extent.width * crop.x, y: extent.minY + extent.height * (1 - crop.y - crop.height),

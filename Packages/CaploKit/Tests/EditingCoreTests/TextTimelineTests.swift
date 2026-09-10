@@ -129,3 +129,20 @@ private func edit(clips: [(Double, Double)]) -> VideoEdit {
     let numbers = value.textNumbers()
     #expect(numbers[early.id] == 1 && numbers[late.id] == 2)
 }
+
+@Test func splitLayoutCollapsesTheCanvasPaddingAlongWithTheTransition() {
+    // 分屏时留白收到 0，且随版式过渡插值；全屏和叠加不碰留白。
+    var segment = TextPreset.title.segment(start: 0, duration: 4)
+    segment.layout = .splitLeft
+    #expect(segment.stageTarget.paddingScale == 0 && segment.stageTarget.split)
+    segment.layout = .splitRight
+    #expect(segment.stageTarget.paddingScale == 0)
+    segment.layout = .fullscreen
+    #expect(segment.stageTarget.paddingScale == 1)
+    segment.layout = .overlay
+    #expect(segment.stageTarget.paddingScale == 1 && segment.stageTarget.isIdentity)
+    let half = StageTransform.blend(StageTransform(scale: 0.5, split: true, paddingScale: 0), progress: 0.5)
+    #expect(abs(half.paddingScale - 0.5) < 0.000001)
+    #expect(!StageTransform(paddingScale: 0).isIdentity)
+    #expect(StageTransform.blend(StageTransform(paddingScale: 0), progress: 0).isIdentity)
+}
