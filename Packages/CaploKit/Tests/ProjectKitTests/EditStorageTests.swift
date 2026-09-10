@@ -1,4 +1,6 @@
 import Foundation
+import ImageIO
+import CoreGraphics
 import Testing
 import EditingCore
 @testable import ProjectKit
@@ -158,4 +160,49 @@ import EditingCore
     // 读回来内容一致。
     let loaded = try EditStorage.load(in: url, document: document)
     #expect(loaded.maskList.count == 1 && loaded.textList.count == 1)
+}
+
+/// 新工程默认拿当前桌面壁纸当背景；取不到壁纸就照旧退回渐变，绝不因此让工程打不开。
+@Test func aBrandNewEditAdoptsTheDesktopWallpaperAndSurvivesABadOne() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let url = try ProjectStorage.create(in: root, name: "默认壁纸")
+    var document = ProjectDocument(name: "默认壁纸")
+    document.segments = [SegmentRecord(id: 0, duration: 2, files: [:])]
+
+    // 造一张壁纸：一张纯色 PNG 就够，导入路径只关心它能不能解码。
+    let wallpaper = root.appendingPathComponent("wall.png")
+    let context = CGContext(data: nil, width: 64, height: 40, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    context.setFillColor(CGColor(srgbRed: 0.2, green: 0.5, blue: 0.9, alpha: 1))
+    context.fill(CGRect(x: 0, y: 0, width: 64, height: 40))
+    let image = context.makeImage()!
+    let destination = CGImageDestinationCreateWithURL(wallpaper as CFURL, "public.png" as CFString, 1, nil)!
+    CGImageDestinationAddImage(destination, image, nil)
+    #expect(CGImageDestinationFinalize(destination))
+
+    let adopted = try EditStorage.load(in: url, document: document, wallpaper: wallpaper)
+    let path = try #require(adopted.layout.backgroundImage)
+    #expect(path.hasPrefix("Backgrounds/"))
+    #expect(FileManager.default.fileExists(atPath: try ProjectStorage.backgroundURL(path, in: url).path))
+    // 边距与阴影的新默认：都不上。
+    #expect(adopted.layout.padding == 0 && !adopted.layout.shadow)
+
+    // 壁纸不存在 / 读不出来：背景留空退回渐变，不抛错。
+    let bare = try ProjectStorage.create(in: root, name: "坏壁纸")
+    let broken = try EditStorage.load(in: bare, document: document, wallpaper: root.appendingPathComponent("不存在.png"))
+    #expect(broken.layout.backgroundImage == nil)
+    // 不传壁纸也一样。
+    let plain = try ProjectStorage.create(in: root, name: "没壁纸")
+    #expect(try EditStorage.load(in: plain, document: document).layout.backgroundImage == nil)
+}
+
+/// 背景模糊是新加的键：旧工程没有它，读出来该是 0，存回去再读一模一样。
+@Test func backgroundBlurDefaultsToZeroAndRoundTrips() throws {
+    var layout = CanvasLayout()
+    #expect(layout.backgroundBlur == 0)
+    layout.backgroundBlur = 42
+    let reloaded = try JSONDecoder().decode(CanvasLayout.self, from: JSONEncoder().encode(layout))
+    #expect(reloaded.backgroundBlur == 42 && reloaded == layout)
 }

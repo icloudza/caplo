@@ -66,7 +66,6 @@ extension WindowLifecycleTests {
         // 面板一出现就会自动选中第一段，所以先量"选中"这一态，再手动清掉选中量"空着"那一态。
         var columns: [CGFloat] = []
         var rows: [Bool: Set<CGFloat>] = [:]
-        var segments: [CGFloat] = []
         for selected in [true, false] {
             model.selectedText = selected ? id : nil
             host.layoutSubtreeIfNeeded()
@@ -75,8 +74,6 @@ extension WindowLifecycleTests {
             let calipers = subviews.compactMap { ($0 as? CaliperView)?.bounds.width }
             columns.append(try #require(calipers.first))
             rows[selected] = Set(calipers.dropFirst())
-            // 版式那一排四个中文选项：标题另起一行之后它才占得满整行，挤在同一行会被压窄、标题竖排成两个字。
-            segments += subviews.filter { String(describing: type(of: $0)).hasSuffix("SwiftUISegmentedControl") }.map(\.bounds.width)
         }
         // 选没选中，列宽一模一样，并且就是写死的那个值。
         #expect(columns == [CaploMetrics.panelContentWidth, CaploMetrics.panelContentWidth], "列宽 \(columns)")
@@ -85,10 +82,7 @@ extension WindowLifecycleTests {
         #expect(selectedRows.count == 1, "参数行宽度不一致：\(selectedRows)")
         #expect(selectedRows.allSatisfy { $0 <= CaploMetrics.panelContentWidth })
         #expect(rows[false]?.isEmpty == true)
-        // AppKit 的分段控件会比 SwiftUI 给的框略宽几点，所以比的是"没被压回最小宽度"，不是逐点相等。
-        let row = try #require(selectedRows.first)
-        #expect(segments.count == 1 && segments.allSatisfy { $0 >= row && $0 <= CaploMetrics.panelContentWidth },
-                "版式选择器被挤窄了：\(segments)，行宽 \(row)")
+        // 版式选择器现在是纯 SwiftUI 的 SegmentedBar，按 maxWidth 铺满参数行，没有 AppKit 视图可量；宽度由参数行统一保证。
     }
 
     private func allPanelSubviews(of view: NSView) -> [NSView] {

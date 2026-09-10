@@ -31,7 +31,6 @@ public final class TextRenderer: @unchecked Sendable {
         let plateOpacity: Double
         let platePadding: Double
         let plateRadius: Double
-        let plateFull: Bool
         let shadow: Bool
         let shadowOpacity: Double
         let shadowBlur: Double
@@ -44,7 +43,6 @@ public final class TextRenderer: @unchecked Sendable {
         let boxY: Double
         let anchorX: Double
         let anchorY: Double
-        let light: Bool
         /// 逐词高亮：字符范围、颜色与是否画药丸底。
         let highlightLocation: Int
         let highlightLength: Int
@@ -84,6 +82,9 @@ public final class TextRenderer: @unchecked Sendable {
         let textFrame: CGRect
         /// 眼睛看得见的那一块：有底板就是底板（底板一定比文字大一圈），没有就是文字本身。不含阴影的模糊。
         let visibleFrame: CGRect
+        /// 承载文字的那一块：宽度是折行宽度（`maxWidth × 文字盒宽`），高度同文字。
+        /// 文字短于它时框比字宽，正是"这里还能再放几个字"的意思。
+        let carryFrame: CGRect
     }
     private var cache: [Key: Rendered] = [:]
     private var order: [Key] = []
@@ -101,13 +102,13 @@ public final class TextRenderer: @unchecked Sendable {
         lock.lock(); cache.removeAll(); order.removeAll(); weights.removeAll(); bytes = 0; lock.unlock()
     }
 
-    /// 一段文字在这一帧的画面。`lightBackground` 为真时"自动"色取墨黑，否则取白。
+    /// 一段文字在这一帧的画面。
     /// 返回 nil 表示这一帧不用画（文字为空、完全透明或排不出内容）。
-    public func image(for state: TextState, canvas: CGSize, lightBackground: Bool, highlight: Highlight? = nil) -> CIImage? {
+    public func image(for state: TextState, canvas: CGSize, highlight: Highlight? = nil) -> CIImage? {
         guard canvas.width > 1, canvas.height > 1 else { return nil }
         let alpha = state.animation.alpha * state.segment.opacity
         guard alpha > 0.002 else { return nil }
-        guard let rendered = layout(state, canvas: canvas, lightBackground: lightBackground, highlight: highlight) else { return nil }
+        guard let rendered = layout(state, canvas: canvas, highlight: highlight) else { return nil }
         var image = rendered.image
         if let transform = Self.animation(for: state, center: CGPoint(x: rendered.textFrame.midX, y: rendered.textFrame.midY),
                                           canvas: canvas) {
@@ -134,16 +135,22 @@ public final class TextRenderer: @unchecked Sendable {
     }
 
     /// 文字本身的包围盒（画布坐标，左下原点），不含底板与阴影，**已经跟着这一帧的动画走**。
-    public func textFrame(for state: TextState, canvas: CGSize, lightBackground: Bool) -> CGRect? {
-        guard let rendered = layout(state, canvas: canvas, lightBackground: lightBackground, highlight: nil) else { return nil }
+    public func textFrame(for state: TextState, canvas: CGSize) -> CGRect? {
+        guard let rendered = layout(state, canvas: canvas, highlight: nil) else { return nil }
         return Self.applying(rendered.textFrame, of: rendered, state: state, canvas: canvas)
     }
 
     /// 画布上选中框该框住的那一块：有底板时是底板（底板比文字大一圈，只框文字的话框会落在底板里面，看着就是错位），
     /// 没有底板时就是文字自己。阴影不算——它是软的，框住它反而虚。同样跟着这一帧的动画走。
-    public func visibleFrame(for state: TextState, canvas: CGSize, lightBackground: Bool) -> CGRect? {
-        guard let rendered = layout(state, canvas: canvas, lightBackground: lightBackground, highlight: nil) else { return nil }
+    public func visibleFrame(for state: TextState, canvas: CGSize) -> CGRect? {
+        guard let rendered = layout(state, canvas: canvas, highlight: nil) else { return nil }
         return Self.applying(rendered.visibleFrame, of: rendered, state: state, canvas: canvas)
+    }
+
+    /// 承载文字的矩形（画布坐标，左下原点）：画布上拖左右边改的就是它的宽度。同样跟着这一帧的动画走。
+    public func carryFrame(for state: TextState, canvas: CGSize) -> CGRect? {
+        guard let rendered = layout(state, canvas: canvas, highlight: nil) else { return nil }
+        return Self.applying(rendered.carryFrame, of: rendered, state: state, canvas: canvas)
     }
 
     private static func applying(_ rect: CGRect, of rendered: Rendered, state: TextState, canvas: CGSize) -> CGRect {
@@ -165,7 +172,7 @@ public final class TextRenderer: @unchecked Sendable {
 
     // MARK: 排版
 
-    private func layout(_ state: TextState, canvas: CGSize, lightBackground: Bool, highlight: Highlight?) -> Rendered? {
+    private func layout(_ state: TextState, canvas: CGSize, highlight: Highlight?) -> Rendered? {
         let segment = state.segment
         guard !segment.text.isEmpty else { return nil }
         let box = Self.box(for: segment, canvas: canvas)
@@ -174,12 +181,11 @@ public final class TextRenderer: @unchecked Sendable {
                       alignment: segment.alignment.rawValue, lineHeight: segment.lineHeight, tracking: segment.tracking,
                       maxWidth: segment.maxWidth, color: segment.color.rawValue,
                       plate: segment.plate, plateColor: segment.plateColor.rawValue, plateOpacity: segment.plateOpacity,
-                      platePadding: segment.platePadding, plateRadius: segment.plateRadius, plateFull: segment.plateFull,
+                      platePadding: segment.platePadding, plateRadius: segment.plateRadius,
                       shadow: segment.shadow, shadowOpacity: segment.shadowOpacity, shadowBlur: segment.shadowBlur,
                       shadowOffset: segment.shadowOffset,
                       boxWidth: box.width, boxHeight: box.height, boxX: box.minX, boxY: box.minY,
                       anchorX: segment.x, anchorY: segment.y,
-                      light: lightBackground,
                       highlightLocation: highlight?.location ?? -1, highlightLength: highlight?.length ?? 0,
                       highlightColor: (highlight?.color.rawValue ?? "") + (highlight?.pillColor.rawValue ?? ""),
                       // 过渡权重量化到 1/16，避免每一帧都换缓存键。
@@ -191,7 +197,7 @@ public final class TextRenderer: @unchecked Sendable {
             lock.unlock(); return hit
         }
         lock.unlock()
-        guard let rendered = draw(state, box: box, canvas: canvas, lightBackground: lightBackground, highlight: highlight) else { return nil }
+        guard let rendered = draw(state, box: box, canvas: canvas, highlight: highlight) else { return nil }
         // 位图按 RGBA8 估重；CIImage 是懒的，这里量的是它兑现之后的量级，用来限总量足够。
         let weight = max(1, Int(rendered.frame.width.rounded()) * Int(rendered.frame.height.rounded()) * 4)
         lock.lock()
@@ -204,12 +210,12 @@ public final class TextRenderer: @unchecked Sendable {
         return rendered
     }
 
-    private func draw(_ state: TextState, box: CGRect, canvas: CGSize, lightBackground: Bool, highlight: Highlight?) -> Rendered? {
+    private func draw(_ state: TextState, box: CGRect, canvas: CGSize, highlight: Highlight?) -> Rendered? {
         let segment = state.segment
         let unit = canvas.height / Self.referenceHeight
         let fontSize = max(1, segment.size * unit)
         let font = Self.font(family: segment.family, size: fontSize, weight: segment.weight)
-        let textColor = Self.color(segment.color, lightBackground: lightBackground)
+        let textColor = Self.color(segment.color)
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = switch segment.alignment { case .leading: .left; case .center: .center; case .trailing: .right }
         // 行高直接钉死上下限，字体自身的行距不再参与，面板里的数值才对得上肉眼。
@@ -232,7 +238,7 @@ public final class TextRenderer: @unchecked Sendable {
         if let highlight, highlight.length > 0, highlight.location >= 0, highlight.location + highlight.length <= total {
             let range = NSRange(location: highlight.location, length: highlight.length)
             highlightRange = range
-            let target = Self.color(highlight.color, lightBackground: lightBackground)
+            let target = Self.color(highlight.color)
             let mixed = textColor.blended(withFraction: min(1, max(0, highlight.progress)), of: target) ?? target
             attributed.addAttribute(.foregroundColor, value: mixed, range: range)
         }
@@ -253,12 +259,16 @@ public final class TextRenderer: @unchecked Sendable {
         case .trailing: anchorX - textSize.width
         }
         let textFrame = CGRect(x: left, y: anchorY - textSize.height / 2, width: textSize.width, height: textSize.height)
+        // 承载区与文字同一条基准：对齐方式决定它压着锚点的哪一边，宽度就是折行宽度。
+        let carryLeft = switch segment.alignment {
+        case .leading: anchorX
+        case .center: anchorX - limit / 2
+        case .trailing: anchorX - limit
+        }
+        let carryFrame = CGRect(x: carryLeft, y: textFrame.minY, width: limit, height: textFrame.height)
 
         let padding = segment.plate ? segment.platePadding * unit : 0
-        var plateFrame = textFrame.insetBy(dx: -padding, dy: -padding)
-        if segment.plate, segment.plateFull {
-            plateFrame = CGRect(x: box.minX, y: plateFrame.minY, width: box.width, height: plateFrame.height)
-        }
+        let plateFrame = textFrame.insetBy(dx: -padding, dy: -padding)
         // 位图要装下底板、阴影的模糊与偏移。
         let blur = segment.shadow ? segment.shadowBlur * unit : 0
         let offset = segment.shadow ? segment.shadowOffset * unit : 0
@@ -276,7 +286,7 @@ public final class TextRenderer: @unchecked Sendable {
 
         if segment.plate {
             context.saveGState()
-            let color = TextSegment.Palette.rgb(segment.plateColor, lightBackground: lightBackground)
+            let color = segment.plateColor.rgb
             context.setFillColor(CGColor(srgbRed: color.0, green: color.1, blue: color.2, alpha: segment.plateOpacity))
             let radius = min(segment.plateRadius * unit, min(plateFrame.width, plateFrame.height) / 2)
             context.addPath(CGPath(roundedRect: plateFrame, cornerWidth: radius, cornerHeight: radius, transform: nil))
@@ -296,7 +306,7 @@ public final class TextRenderer: @unchecked Sendable {
            let pill = Self.pillRect(frame: frame, range: highlightRange, origin: textFrame.origin, padding: fontSize * 0.18) {
             context.saveGState()
             context.setShadow(offset: .zero, blur: 0, color: nil)
-            let color = Self.color(highlight?.pillColor ?? .amber, lightBackground: lightBackground)
+            let color = Self.color(highlight?.pillColor ?? .amber)
             context.setFillColor(color.withAlphaComponent(min(1, max(0, highlight?.progress ?? 1)) * 0.85).cgColor)
             let radius = min(pill.height / 2, fontSize * 0.4)
             context.addPath(CGPath(roundedRect: pill, cornerWidth: radius, cornerHeight: radius, transform: nil))
@@ -309,7 +319,8 @@ public final class TextRenderer: @unchecked Sendable {
         guard let cgImage = context.makeImage() else { return nil }
         let image = CIImage(cgImage: cgImage).transformed(by: CGAffineTransform(translationX: bounds.minX, y: bounds.minY))
         return Rendered(image: image, frame: bounds, textFrame: textFrame,
-                        visibleFrame: segment.plate ? plateFrame.union(textFrame) : textFrame)
+                        visibleFrame: segment.plate ? plateFrame.union(textFrame) : textFrame,
+                        carryFrame: carryFrame)
     }
 
     /// 高亮词在画布上的矩形。跨行时只取它落在的第一行——药丸本来就不该跨行。
@@ -376,18 +387,9 @@ public final class TextRenderer: @unchecked Sendable {
         }
     }
 
-    static func color(_ palette: TextSegment.Palette, lightBackground: Bool) -> NSColor {
-        let rgb = TextSegment.Palette.rgb(palette, lightBackground: lightBackground)
+    static func color(_ palette: TextSegment.Palette) -> NSColor {
+        let rgb = palette.rgb
         return NSColor(srgbRed: rgb.0, green: rgb.1, blue: rgb.2, alpha: 1)
     }
 }
 
-extension TextSegment.Palette {
-    /// `auto` 按画布背景亮度在墨黑与白之间选；其余是固定色。
-    /// 注意这是按**背景**判的，不是按录屏内容——逐帧读回像素来判亮度会把播放拖垮。
-    /// 压在画面上的文字靠预设自带的阴影或底板保证可读，不靠这里换色。
-    public static func rgb(_ palette: Self, lightBackground: Bool) -> (Double, Double, Double) {
-        guard palette == .auto else { return palette.rgb }
-        return lightBackground ? Self.ink.rgb : Self.white.rgb
-    }
-}

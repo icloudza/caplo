@@ -3,10 +3,11 @@ import CaploDesignSystem
 import EditingCore
 import RenderKit
 
-/// 画布上的文字编辑层：画出当前时刻的文字框，拖框体挪位置、拖四角等比改字号。
+/// 画布上的文字编辑层：画出当前时刻的文字框，拖框体挪位置、拖四角等比改字号、拖左右边放宽承载文字的区域。
 ///
-/// 折行宽度（`maxWidth`）不放在画布上：它一改就可能多一行少一行，横着拖会把高度也带着变
-/// （实测两行拉成一行，框高 100 点当场掉到 50 点、整块还往上跳）。那一项在「排版 → 最大宽度」的卡尺里调。
+/// 左右边拖的是折行宽度（`maxWidth`）：字号一点不动，只是这一块能多装几个字。
+/// 它一改就可能多一行少一行、框高跟着跳，所以承载区单独画一圈浅虚线，把手落在它的边上而不是文字边上——
+/// 手指按着的那条线始终就是"能放到哪儿"的那条线。数值仍可在「排版 → 文本框宽度」的卡尺里精调。
 ///
 /// 文字定位在输出画面坐标里，所以这里不需要遮罩那套内容坐标的反变换——
 /// 文字盒就是渲染器排版用的那一个，两边共用 `TextRenderer`，画出来的框必然和成片一致。
@@ -31,6 +32,9 @@ final class TextCanvasView: NSView {
         let rect: CGRect
         /// 按下时文字字形的大小，改字号时拿它折算比例。
         let glyph: CGSize
+        /// 按下时的折行宽度与对齐方式，拖左右边时拿它们算。
+        let maxWidth: Double
+        let alignment: TextSegment.Alignment
         var moved = false
     }
     private var drag: Drag?
@@ -57,17 +61,17 @@ final class TextCanvasView: NSView {
     private var active: Bool { model.textEditing && !model.playing && !model.edit.textList.isEmpty }
     private var time: Double { model.skimPosition ?? model.position }
 
-    /// 当前时刻要画的文字框，从下到上。矩形已经换算到本视图坐标。
-    private func visible() -> [(id: UUID, rect: CGRect)] {
+    /// 当前时刻要画的文字框与承载区，从下到上。矩形已经换算到本视图坐标。
+    private func visible() -> [(id: UUID, rect: CGRect, carry: CGRect)] {
         guard let videoRect = canvas?.videoRect, videoRect.width > 1 else { return [] }
         let local = convert(videoRect, from: canvas)
-        let light = SceneRenderer.isLightBackground(model.edit.layout)
         let states = model.edit.activeTexts(at: time)
         return states.compactMap { state in
             // 框住看得见的那一块：带底板的预设（代码、字幕条）底板比文字大一圈，
             // 只框文字的话框会落在底板里面，把手压在底板脸上，看着就是错位。
-            guard let frame = TextRenderer.shared.visibleFrame(for: state, canvas: local.size, lightBackground: light) else { return nil }
-            return (state.id, frame.offsetBy(dx: local.minX, dy: local.minY))
+            guard let frame = TextRenderer.shared.visibleFrame(for: state, canvas: local.size),
+                  let carry = TextRenderer.shared.carryFrame(for: state, canvas: local.size) else { return nil }
+            return (state.id, frame.offsetBy(dx: local.minX, dy: local.minY), carry.offsetBy(dx: local.minX, dy: local.minY))
         }
     }
 
@@ -97,7 +101,7 @@ final class TextCanvasView: NSView {
     private func target(at point: CGPoint) -> (id: UUID, handle: Handle, rect: CGRect)? {
         let items = visible()
         if let selected = model.selectedText, let item = items.first(where: { $0.id == selected }),
-           let handle = TextCanvasMath.handle(at: point, textFrame: item.rect,
+           let handle = TextCanvasMath.handle(at: point, textFrame: item.rect, carryFrame: item.carry,
                                               cornerSize: Self.cornerSize, slop: Self.hitSlop) {
             return (item.id, handle, item.rect)
         }
@@ -129,7 +133,7 @@ final class TextCanvasView: NSView {
         drag = Drag(id: hit.id, handle: hit.handle, origin: point,
                     anchor: CGPoint(x: value.x, y: value.y), size: value.size,
                     pivot: pivot, reach: max(1, hypot(point.x - pivot.x, point.y - pivot.y)),
-                    rect: hit.rect, glyph: hit.rect.size)
+                    rect: hit.rect, glyph: hit.rect.size, maxWidth: value.maxWidth, alignment: value.alignment)
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -150,6 +154,12 @@ final class TextCanvasView: NSView {
                                               box: box.size, canvas: local, inner: innerRect(local), targets: snapTargets(local))
             guides = dragged.guides
             edit.updateText(id: current.id) { $0.x = dragged.anchor.x; $0.y = dragged.anchor.y }
+        case .left, .right:
+            // 只改这一块能放多宽，字号不动；分屏时文字盒就是那一栏，比例天然关在栏内。
+            let widened = TextCanvasMath.widen(maxWidth: current.maxWidth, anchorX: current.anchor.x,
+                                               alignment: current.alignment, handle: current.handle,
+                                               translation: point.x - current.origin.x, boxWidth: box.width)
+            edit.updateText(id: current.id) { $0.maxWidth = widened.maxWidth; $0.x = widened.x }
         case .topLeft, .topRight, .bottomLeft, .bottomRight:
             let next = TextCanvasMath.size(current.size,
                                            distance: hypot(point.x - current.pivot.x, point.y - current.pivot.y),
@@ -194,6 +204,7 @@ final class TextCanvasView: NSView {
     private static func cursor(for handle: Handle) -> NSCursor {
         switch handle {
         case .body: .openHand
+        case .left, .right: .resizeLeftRight
         default: .crosshair
         }
     }
@@ -237,6 +248,22 @@ final class TextCanvasView: NSView {
             CaploNSColor.accent.withAlphaComponent(isSelected ? 1 : 0.5).setStroke()
             path.stroke()
             guard isSelected else { continue }
+            // 承载文字的区域：比文字宽出一截时才单独画一圈更浅的虚线，两者一样宽就省了，免得双线重叠。
+            let carry = TextCanvasMath.handleFrame(item.carry)
+            if abs(carry.minX - rect.minX) > 3 || abs(carry.maxX - rect.maxX) > 3 {
+                let outline = NSBezierPath(rect: carry)
+                outline.lineWidth = 1
+                outline.setLineDash([3, 4], count: 2, phase: 0)
+                CaploNSColor.accent.withAlphaComponent(0.45).setStroke()
+                outline.stroke()
+            }
+            // 左右两条竖把手落在承载区的边上：按着的那条线就是"能放到哪儿"的那条线。
+            for x in [carry.minX, carry.maxX] {
+                let bar = CGRect(x: x - 2.5, y: carry.midY - 9, width: 5, height: 18)
+                let shape = NSBezierPath(roundedRect: bar, xRadius: 2.5, yRadius: 2.5)
+                CaploNSColor.accent.setFill(); shape.fill()
+                NSColor.white.withAlphaComponent(0.9).setStroke(); shape.lineWidth = 1.5; shape.stroke()
+            }
             // 四角是实心圆（等比改字号），与自定义布局里的把手同一套语言。
             for point in [CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY),
                           CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY)] {

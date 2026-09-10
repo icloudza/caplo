@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import CaploDesignSystem
 import EditingCore
@@ -25,7 +26,8 @@ struct TextPanel: View {
         PanelSection("预设", info: "预设只是一组排版与动画的初值，套用之后每一项都还能单独改。") {
             let current = model.selectedText.flatMap { model.edit.text(id: $0) }
             let matched = current.flatMap { TextPreset.matching($0) }
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: CaploMetrics.Spacing.xs), GridItem(.flexible(), spacing: CaploMetrics.Spacing.xs)],
+            // 一行三个、格子矮一点：八个预设两行多就能看完，不占面板一大截。
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: CaploMetrics.Spacing.xs), count: 3),
                       spacing: CaploMetrics.Spacing.xs) {
                 ForEach(TextPreset.allCases) { preset in
                     PresetTile(preset: preset, selected: matched == preset) { apply(preset) }
@@ -69,12 +71,11 @@ struct TextPanel: View {
             .padding(.horizontal, 6).padding(.vertical, 4)
             .background(CaploColor.surfaceRaised, in: RoundedRectangle(cornerRadius: CaploMetrics.Radius.control, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: CaploMetrics.Radius.control, style: .continuous).strokeBorder(CaploColor.separator, lineWidth: 1))
-        // 标题单独占一行：四个中文选项的分段控件本身就要 227 点，标题挤在同一行会被压成两行竖排。
+        // 标题单独占一行：四个中文选项挤在标题同一行会被压成两行竖排。
         VStack(alignment: .leading, spacing: CaploMetrics.Spacing.xs) {
             Text("版式").font(CaploFont.body).foregroundStyle(CaploColor.textPrimary)
-            Picker("版式", selection: layoutBinding(id)) {
-                ForEach(TextSegment.Layout.allCases, id: \.self) { Text($0.title).tag($0) }
-            }.labelsHidden().pickerStyle(.segmented).environment(\.colorScheme, .dark)
+            SegmentedBar(TextSegment.Layout.allCases, selection: layoutBinding(id)) { $0.title }
+                .accessibilityLabel("版式")
         }
         // 卡段的版式定死在全屏：那段定格是按"整幅画面都被文字盖住"插进成片的。
         .disabled(value.holdClipID != nil)
@@ -126,7 +127,7 @@ struct TextPanel: View {
             EditorSlider(model: model, title: "字间距", value: binding(id, \.tracking), range: -2...20, decimals: 1, defaultValue: 0, detents: [0])
             EditorSlider(model: model, title: "水平位置", value: binding(id, \.x), range: 0...1, suffix: "%", percentage: true, detents: [0.5])
             EditorSlider(model: model, title: "垂直位置", value: binding(id, \.y), range: 0...1, suffix: "%", percentage: true, detents: [0.5])
-            EditorSlider(model: model, title: "文本框宽度", value: binding(id, \.maxWidth), range: 0.2...1, suffix: "%", percentage: true, defaultValue: 0.8)
+            EditorSlider(model: model, title: "文本框宽度", value: binding(id, \.maxWidth), range: TextSegment.maxWidthRange, suffix: "%", percentage: true, defaultValue: 0.8)
         }
         PanelSection("外观", expanded: $appearanceExpanded) {
             SwatchRow(title: "文字颜色", selection: paletteBinding(id, \.color))
@@ -137,7 +138,6 @@ struct TextPanel: View {
                 EditorSlider(model: model, title: "背景不透明度", value: binding(id, \.plateOpacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 0.55)
                 EditorSlider(model: model, title: "内边距", value: binding(id, \.platePadding), range: 0...48, decimals: 0, defaultValue: 16)
                 EditorSlider(model: model, title: "背景圆角", value: binding(id, \.plateRadius), range: 0...32, decimals: 0, defaultValue: 8)
-                Toggle("铺满整行", isOn: boolBinding(id, \.plateFull)).toggleStyle(StudioToggleStyle())
             }
             Toggle("阴影", isOn: boolBinding(id, \.shadow)).toggleStyle(StudioToggleStyle())
             if value.shadow {
@@ -212,7 +212,7 @@ struct TextPanel: View {
         Binding(get: { model.edit.text(id: id)?.holdClipID != nil }, set: { model.setHoldCard(id, enabled: $0) })
     }
     private func paletteBinding(_ id: UUID, _ key: WritableKeyPath<TextSegment, TextSegment.Palette>) -> Binding<TextSegment.Palette> {
-        Binding(get: { model.edit.text(id: id)?[keyPath: key] ?? .auto }, set: { value in
+        Binding(get: { model.edit.text(id: id)?[keyPath: key] ?? .white }, set: { value in
             model.commit { $0.updateText(id: id) { $0[keyPath: key] = value } }
         })
     }
@@ -231,15 +231,15 @@ private struct PresetTile: View {
             VStack(spacing: 2) {
                 Text(preset.sample)
                     // 样例文的大小按预设字号在 26…160 之间线性铺开，格子之间一眼看得出层级差别。
-                    .font(.system(size: 9 + min(1, max(0, (sample.size - 26) / 134)) * 13,
+                    .font(.system(size: 8 + min(1, max(0, (sample.size - 26) / 134)) * 9,
                                   weight: Font.Weight.from(sample.weight),
                                   design: sample.family.design))
                     .lineLimit(1).minimumScaleFactor(0.5)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 Text(preset.name).font(CaploFont.caption).foregroundStyle(CaploColor.textSecondary)
             }
-            .padding(.vertical, 6).padding(.horizontal, 4)
-            .frame(height: 62)
+            .padding(.vertical, 5).padding(.horizontal, 4)
+            .frame(height: 48)
             .frame(maxWidth: .infinity)
             .background(selected ? CaploColor.accentSoft : CaploColor.surfaceRaised.opacity(hovered ? 1 : 0.8))
             .clipShape(RoundedRectangle(cornerRadius: CaploMetrics.Radius.control, style: .continuous))
@@ -252,43 +252,65 @@ private struct PresetTile: View {
     }
 }
 
-/// 八格色板。
+/// 七格预设加一个自定义色。自定义格点开就是系统调色板（色轮 / 色卡 / 吸管都在里面）。
 private struct SwatchRow: View {
     let title: String
     @Binding var selection: TextSegment.Palette
+    /// 上次调过的自定义色：切到预设再切回来，不用重新调一遍。
+    @State private var remembered = Color.white
 
     var body: some View {
         VStack(alignment: .leading, spacing: CaploMetrics.Spacing.xs) {
             Text(title).font(CaploFont.caption).foregroundStyle(CaploColor.textSecondary)
             HStack(spacing: CaploMetrics.Spacing.xs) {
-                ForEach(TextSegment.Palette.allCases, id: \.self) { palette in
+                ForEach(TextSegment.Palette.presets, id: \.self) { palette in
                     Button { selection = palette } label: {
-                        swatch(palette)
+                        Self.color(palette)
                             .frame(width: 22, height: 22)
                             .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                .strokeBorder(selection == palette ? CaploColor.accent : CaploColor.separator,
-                                              lineWidth: selection == palette ? 2 : 1))
+                            .overlay(ring(selected: selection == palette, radius: 5))
                     }
                     .buttonStyle(.plain)
                     .help(palette.title)
                 }
+                // 自定义格：点开系统调色板（色轮 / 色卡 / 吸管都在里面）。
+                // 原生色井比色板大一圈、形状也不一样，裁到 22 点只留中间那块纯色，和预设格并排才齐。
+                // 没在用自定义色时盖一层色轮，一眼看出这格是"自己调"，不会和"白"那格撞脸。
+                ColorPicker(selection: custom, supportsOpacity: false) { EmptyView() }
+                    .labelsHidden()
+                    .frame(width: 22, height: 22)
+                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .overlay {
+                        if !selection.isCustom {
+                            AngularGradient(colors: [.red, .yellow, .green, .cyan, .blue, .purple, .red], center: .center)
+                                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .overlay(ring(selected: selection.isCustom, radius: 5).allowsHitTesting(false))
+                    .help("自定义颜色")
+                    .accessibilityLabel("自定义颜色")
             }
         }
     }
 
-    @ViewBuilder private func swatch(_ palette: TextSegment.Palette) -> some View {
-        if palette == .auto {
-            // 「自动」画成半黑半白的斜分格，一眼看出它会按背景选色。
-            ZStack {
-                LinearGradient(stops: [.init(color: .white, location: 0.5), .init(color: Color(red: 0.086, green: 0.086, blue: 0.102), location: 0.5)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                Text("A").font(.system(size: 10, weight: .bold)).foregroundStyle(CaploColor.textSecondary)
-            }
-        } else {
-            let rgb = palette.rgb
-            Color(red: rgb.0, green: rgb.1, blue: rgb.2)
-        }
+    private var custom: Binding<Color> {
+        Binding(get: { selection.isCustom ? Self.color(selection) : remembered },
+                set: { value in
+                    remembered = value
+                    let rgb = NSColor(value).usingColorSpace(.sRGB) ?? .white
+                    selection = TextSegment.Palette(red: rgb.redComponent, green: rgb.greenComponent, blue: rgb.blueComponent)
+                })
+    }
+
+    private func ring(selected: Bool, radius: Double) -> some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .strokeBorder(selected ? CaploColor.accent : CaploColor.separator, lineWidth: selected ? 2 : 1)
+    }
+
+    private static func color(_ palette: TextSegment.Palette) -> Color {
+        let rgb = palette.rgb
+        return Color(red: rgb.0, green: rgb.1, blue: rgb.2)
     }
 }
 

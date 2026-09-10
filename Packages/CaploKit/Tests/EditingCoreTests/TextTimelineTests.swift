@@ -146,3 +146,60 @@ private func edit(clips: [(Double, Double)]) -> VideoEdit {
     #expect(!StageTransform(paddingScale: 0).isIdentity)
     #expect(StageTransform.blend(StageTransform(paddingScale: 0), progress: 0).isIdentity)
 }
+
+@Test func slideEntranceReachesFullOpacityEarlyButKeepsMovingToTheEnd() {
+    // 「快显慢移」：白字压在浅色画面上时，半透明的中间态看着是一片灰，所以透明度前置，位移照旧走满。
+    var label = TextSegment(start: 0, duration: 4, text: "产品演示")
+    label.enterKind = .slideUp; label.enterDuration = 1; label.exitKind = .none; label.exitDuration = 0
+    func state(_ t: Double) -> TextAnimationState { label.animation(elapsed: t) }
+    // 起点仍然从全透明开始，不是硬切。
+    #expect(state(0).alpha < 0.001 && abs(state(0).offset - TextSegment.slide) < 0.000001)
+    // 用户截到的那几帧：原本 30% 处只有 16% 不透明度，现在接近一半，45% 处已经全实。
+    #expect(state(0.30).alpha > 0.44 && state(0.30).alpha < 0.5)
+    #expect(state(0.45).alpha > 0.999)
+    // 透明度到位之后位移还没走完，入场时长仍然是有意义的。
+    #expect(state(0.45).offset > 0.02 && state(0.70).offset > 0.005)
+    #expect(state(0.999).offset < 0.0005)
+    // 全程单调不回头。
+    var previous = -1.0
+    for step in 0...100 {
+        let value = state(Double(step) / 100)
+        #expect(value.alpha >= previous - 0.000001, "透明度在 \(step)% 处回落了")
+        previous = value.alpha
+    }
+    // 下滑是同一条曲线，只是位移反向。
+    label.enterKind = .slideDown
+    #expect(abs(state(0.30).alpha - 0.457) < 0.01 && state(0.30).offset < 0)
+}
+
+@Test func legacyAutoTextColorLandsOnWhatItUsedToRender() throws {
+    // 「自动」当年按画布背景亮度在墨黑与白之间选。删掉它之后，旧工程按同一条规则落成固定色，画面不变。
+    func decoded(background: CanvasBackground) throws -> VideoEdit {
+        var value = VideoEdit(duration: 4)
+        value.layout.background = background
+        var text = TextSegment(start: 0, duration: 2, text: "标题")
+        text.color = TextSegment.Palette(rawValue: "auto")
+        text.plateColor = TextSegment.Palette(rawValue: "auto")
+        value.addText(text)
+        var style = CaptionStyle(); style.color = TextSegment.Palette(rawValue: "auto")
+        value.captionStyle = style
+        var reloaded = try JSONDecoder().decode(VideoEdit.self, from: JSONEncoder().encode(value))
+        // 存进文件的一直是一个字符串，换成结构体之后也没变。
+        #expect(reloaded.textList[0].color.rawValue == "auto")
+        reloaded.resolveLegacyAutoTextColors()
+        return reloaded
+    }
+    // 深色背景当年取白。
+    let dark = try decoded(background: .iris)
+    #expect(dark.textList[0].color == .white && dark.textList[0].plateColor == .white)
+    #expect(dark.captionStyle?.color == .white)
+    // 浅色背景当年取墨黑。
+    let light = try decoded(background: .solidWhite)
+    #expect(light.textList[0].color == .ink)
+    // 已经是固定色或自定义色的不动。
+    var kept = VideoEdit(duration: 2)
+    var text = TextSegment(start: 0, duration: 1, text: "标题")
+    text.color = TextSegment.Palette(red: 1, green: 0, blue: 0)
+    kept.addText(text); kept.resolveLegacyAutoTextColors()
+    #expect(kept.textList[0].color.rawValue == "#FF0000")
+}

@@ -3,6 +3,7 @@ import SwiftUI
 /// 组件画廊：离屏渲染用于评审令牌与控件的各种状态，不进入产品界面。
 public struct DesignSystemGallery: View {
     @State private var chip = "16:9"
+    @State private var segment = "左分屏"
     @State private var swatch: String? = "violet"
     @State private var slider = 40.0
     @State private var slider2 = 0.0
@@ -36,6 +37,7 @@ public struct DesignSystemGallery: View {
             PanelContainer("画面布局") {
                 PanelSection("画面比例") {
                     ChipGroup(["原始", "16:9", "1:1", "4:3", "9:16"], selection: $chip) { $0 }
+                    SegmentedBar(["叠加", "全屏", "左分屏", "右分屏"], selection: $segment) { $0 }
                     SelectField(value: "抖音 · 竖屏 9:16", placeholder: "按平台选择…", accessibilityName: "平台比例", sections: [
                         SelectField.Section("横屏", items: [
                             SelectField.Item(id: "youtube", title: "YouTube · 横屏 16:9") {},
@@ -44,8 +46,8 @@ public struct DesignSystemGallery: View {
                         SelectField.Section("竖屏", items: [SelectField.Item(id: "douyin", title: "抖音 · 竖屏 9:16", checked: true) {}]),
                     ])
                 }
-                PanelSection("样式", info: "留白与内边距均相对画布短边") {
-                    LabeledCaliper("留白", value: $slider, configuration: CaliperConfiguration(track: .scroll, range: 0...100, step: 1, major: 10, mid: 5, pxPerUnit: 6, defaultValue: 40))
+                PanelSection("样式", info: "边距与内边距均相对画布短边") {
+                    LabeledCaliper("边距", value: $slider, configuration: CaliperConfiguration(track: .scroll, range: 0...100, step: 1, major: 10, mid: 5, pxPerUnit: 6, defaultValue: 40))
                     LabeledSlider("内边距", value: $slider2, in: 0...100, defaultValue: 0)
                     Toggle(isOn: $toggleOn) { SettingLabel("阴影", systemImage: "square.3.layers.3d") }.toggleStyle(StudioToggleStyle())
                     Toggle(isOn: $toggleOff) { SettingLabel("固定聚焦区域", systemImage: "pin") }.toggleStyle(StudioToggleStyle()).disabled(true)

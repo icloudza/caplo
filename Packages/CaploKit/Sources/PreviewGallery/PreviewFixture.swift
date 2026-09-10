@@ -113,6 +113,10 @@ enum PreviewFixture {
             edit.pointer?.bounce = 0.2; edit.pointer?.sway = 0.3; edit.pointer?.motionBlur = 0.2
         }
         _ = edit.split(at: 4); _ = edit.split(at: 9)
+        // 放一段文字：文字面板要有选中的一段才显示排版与外观那一串参数，离屏快照才看得到色板。
+        var title = TextPreset.title.segment(start: 1, duration: 3)
+        title.text = "产品演示"; title.timelineStart = 1
+        edit.addText(title)
         try EditStorage.save(edit, in: url, document: document)
         return url
     }

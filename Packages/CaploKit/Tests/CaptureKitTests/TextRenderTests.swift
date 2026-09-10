@@ -52,7 +52,7 @@ private func state(_ segment: TextSegment, alpha: Double = 1, scale: Double = 1,
     let renderer = TextRenderer()
     var relative: [CGRect] = []
     for size in [CGSize(width: 1280, height: 720), CGSize(width: 1920, height: 1080), CGSize(width: 3840, height: 2160)] {
-        let frame = try #require(renderer.textFrame(for: state(segment), canvas: size, lightBackground: false))
+        let frame = try #require(renderer.textFrame(for: state(segment), canvas: size))
         relative.append(CGRect(x: frame.minX / size.width, y: frame.minY / size.height,
                                width: frame.width / size.width, height: frame.height / size.height))
     }
@@ -73,9 +73,9 @@ private func state(_ segment: TextSegment, alpha: Double = 1, scale: Double = 1,
     var segment = TextSegment(start: 0, duration: 3, text: "分屏文字")
     segment.size = 60; segment.shadow = false
     segment.layout = .splitLeft
-    let left = try #require(renderer.textFrame(for: state(segment), canvas: size, lightBackground: false))
+    let left = try #require(renderer.textFrame(for: state(segment), canvas: size))
     segment.layout = .splitRight
-    let right = try #require(renderer.textFrame(for: state(segment), canvas: size, lightBackground: false))
+    let right = try #require(renderer.textFrame(for: state(segment), canvas: size))
     #expect(left.midX < size.width / 2, "左分屏时文字应当在左栏，实际 \(left)")
     #expect(right.midX > size.width / 2, "右分屏时文字应当在右栏，实际 \(right)")
     #expect(abs(left.width - right.width) < 1 && abs(left.midY - right.midY) < 1)
@@ -92,13 +92,13 @@ private func state(_ segment: TextSegment, alpha: Double = 1, scale: Double = 1,
     let sliding = TextState(id: segment.id, segment: segment,
                             animation: TextAnimationState(alpha: 1, offset: 0.05, scale: 1, reveal: 1),
                             revealedCount: segment.text.count)
-    let atRest = try #require(renderer.visibleFrame(for: settled, canvas: size, lightBackground: false))
-    let moved = try #require(renderer.visibleFrame(for: sliding, canvas: size, lightBackground: false))
+    let atRest = try #require(renderer.visibleFrame(for: settled, canvas: size))
+    let moved = try #require(renderer.visibleFrame(for: sliding, canvas: size))
     // 位移就是 -offset × 画面高度，横向与尺寸都不变。
     #expect(abs(moved.minY - (atRest.minY - 0.05 * size.height)) < 0.5, "框没跟着上滑：\(atRest) → \(moved)")
     #expect(abs(moved.minX - atRest.minX) < 0.5 && abs(moved.width - atRest.width) < 0.5)
     // 与真正画出来的像素对齐：框套住画面里所有不透明的像素，四周只多出底板留白之内的余量。
-    let drawn = try #require(shot(renderer.image(for: sliding, canvas: size, lightBackground: false), size: size).box)
+    let drawn = try #require(shot(renderer.image(for: sliding, canvas: size), size: size).box)
     // 位图坐标自上而下，换算回画布坐标再比。
     let flipped = CGRect(x: drawn.minX, y: size.height - drawn.maxY, width: drawn.width, height: drawn.height)
     #expect(moved.insetBy(dx: -2, dy: -2).contains(flipped), "框 \(moved) 没盖住画出来的 \(flipped)")
@@ -106,7 +106,7 @@ private func state(_ segment: TextSegment, alpha: Double = 1, scale: Double = 1,
     let popped = TextState(id: segment.id, segment: segment,
                            animation: TextAnimationState(alpha: 1, offset: 0, scale: 1.5, reveal: 1),
                            revealedCount: segment.text.count)
-    let big = try #require(renderer.visibleFrame(for: popped, canvas: size, lightBackground: false))
+    let big = try #require(renderer.visibleFrame(for: popped, canvas: size))
     #expect(abs(big.width - atRest.width * 1.5) < 0.5 && abs(big.midX - atRest.midX) < 0.5)
 }
 
@@ -117,8 +117,8 @@ private func state(_ segment: TextSegment, alpha: Double = 1, scale: Double = 1,
     let renderer = TextRenderer()
     var segment = TextPreset.code.segment(start: 0, duration: 3)
     segment.text = "npm run build"; segment.shadow = false
-    let text = try #require(renderer.textFrame(for: state(segment), canvas: size, lightBackground: false))
-    let visible = try #require(renderer.visibleFrame(for: state(segment), canvas: size, lightBackground: false))
+    let text = try #require(renderer.textFrame(for: state(segment), canvas: size))
+    let visible = try #require(renderer.visibleFrame(for: state(segment), canvas: size))
     // 底板四周各留 platePadding（按 1080 参考高度换算），所以正好宽出两倍留白，且完整套住文字。
     let padding = segment.platePadding * size.height / 1080
     #expect(visible.contains(text))
@@ -128,8 +128,8 @@ private func state(_ segment: TextSegment, alpha: Double = 1, scale: Double = 1,
     // 没有底板的预设两者就是同一个框。
     var plain = TextPreset.title.segment(start: 0, duration: 3)
     plain.text = "产品演示"
-    #expect(renderer.visibleFrame(for: state(plain), canvas: size, lightBackground: false)
-            == renderer.textFrame(for: state(plain), canvas: size, lightBackground: false))
+    #expect(renderer.visibleFrame(for: state(plain), canvas: size)
+            == renderer.textFrame(for: state(plain), canvas: size))
 }
 
 @Test func anchorAndAlignmentPlaceTheTextWhereTheyPromise() throws {
@@ -140,15 +140,15 @@ private func state(_ segment: TextSegment, alpha: Double = 1, scale: Double = 1,
     let box = TextRenderer.box(for: segment, canvas: size)
     // 左对齐：锚点是文字块的左边缘。
     segment.alignment = .leading
-    let leading = try #require(renderer.textFrame(for: state(segment), canvas: size, lightBackground: false))
+    let leading = try #require(renderer.textFrame(for: state(segment), canvas: size))
     #expect(abs(leading.minX - (box.minX + 0.25 * box.width)) < 1)
     // 居中：锚点是中线。
     segment.alignment = .center
-    let centered = try #require(renderer.textFrame(for: state(segment), canvas: size, lightBackground: false))
+    let centered = try #require(renderer.textFrame(for: state(segment), canvas: size))
     #expect(abs(centered.midX - (box.minX + 0.25 * box.width)) < 1)
     // 右对齐：锚点是右边缘。
     segment.alignment = .trailing
-    let trailing = try #require(renderer.textFrame(for: state(segment), canvas: size, lightBackground: false))
+    let trailing = try #require(renderer.textFrame(for: state(segment), canvas: size))
     #expect(abs(trailing.maxX - (box.minX + 0.25 * box.width)) < 1)
     // y 恒为整块文字的垂直中心（画布是左下原点，锚点从上往下量）。
     #expect(abs(centered.midY - (box.maxY - 0.3 * box.height)) < 1)
@@ -159,20 +159,20 @@ private func state(_ segment: TextSegment, alpha: Double = 1, scale: Double = 1,
     let renderer = TextRenderer()
     var segment = TextSegment(start: 0, duration: 3, text: "上滑进场")
     segment.size = 48; segment.shadow = false; segment.color = .white
-    let still = shot(renderer.image(for: state(segment), canvas: size, lightBackground: false), size: size)
+    let still = shot(renderer.image(for: state(segment), canvas: size), size: size)
     let stillBox = try #require(still.box)
     // 位移 0.06 画面高：包围盒整体上移，形状不变。
-    let moved = shot(renderer.image(for: state(segment, offset: 0.06), canvas: size, lightBackground: false), size: size)
+    let moved = shot(renderer.image(for: state(segment, offset: 0.06), canvas: size), size: size)
     let movedBox = try #require(moved.box)
     #expect(abs(movedBox.width - stillBox.width) <= 2 && abs(movedBox.height - stillBox.height) <= 2, "位移不该改变排版")
     // offset 为正表示向下；位图行序自上而下，所以 minY 变大。
     #expect(abs((movedBox.minY - stillBox.minY) - 0.06 * size.height) < 2, "位移量是 \(movedBox.minY - stillBox.minY)")
     // 半透明：覆盖面积不变，但没有一个像素是全不透明的。
-    let faded = shot(renderer.image(for: state(segment, alpha: 0.4), canvas: size, lightBackground: false), size: size)
+    let faded = shot(renderer.image(for: state(segment, alpha: 0.4), canvas: size), size: size)
     #expect(faded.coverage > still.coverage / 2)
     #expect((0..<(size.width * size.height).intValue).allSatisfy { Int(faded.bytes[$0 * 4 + 3]) < 130 }, "淡入没有真的降低不透明度")
     // 放大：包围盒变大，中心不动。
-    let bigger = try #require(shot(renderer.image(for: state(segment, scale: 1.5), canvas: size, lightBackground: false), size: size).box)
+    let bigger = try #require(shot(renderer.image(for: state(segment, scale: 1.5), canvas: size), size: size).box)
     #expect(bigger.width > stillBox.width * 1.3 && abs(bigger.midX - stillBox.midX) < 2)
 }
 
@@ -181,8 +181,8 @@ private func state(_ segment: TextSegment, alpha: Double = 1, scale: Double = 1,
     let renderer = TextRenderer()
     var segment = TextPreset.typewriter.segment(start: 0, duration: 4)
     segment.text = "npm run build"; segment.alignment = .leading
-    let full = shot(renderer.image(for: state(segment), canvas: size, lightBackground: false), size: size)
-    let half = shot(renderer.image(for: state(segment, revealed: 6), canvas: size, lightBackground: false), size: size)
+    let full = shot(renderer.image(for: state(segment), canvas: size), size: size)
+    let half = shot(renderer.image(for: state(segment, revealed: 6), canvas: size), size: size)
     let fullBox = try #require(full.box), halfBox = try #require(half.box)
     #expect(half.coverage < full.coverage / 2 + full.coverage / 8, "揭到一半却画了 \(half.coverage) / \(full.coverage) 的像素")
     #expect(half.coverage > 0)
@@ -198,37 +198,43 @@ private func state(_ segment: TextSegment, alpha: Double = 1, scale: Double = 1,
     let renderer = TextRenderer()
     var segment = TextPreset.lowerThird.segment(start: 0, duration: 3)
     segment.text = "字幕条"
-    let withPlate = shot(renderer.image(for: state(segment), canvas: size, lightBackground: false), size: size)
+    let withPlate = shot(renderer.image(for: state(segment), canvas: size), size: size)
     segment.plate = false
-    let without = shot(renderer.image(for: state(segment), canvas: size, lightBackground: false), size: size)
+    let without = shot(renderer.image(for: state(segment), canvas: size), size: size)
     #expect(withPlate.coverage > without.coverage * 3, "底板没画出来")
-    // 底板铺满整行时横贯整个文字盒。
-    segment.plate = true; segment.plateFull = true
-    let full = try #require(shot(renderer.image(for: state(segment), canvas: size, lightBackground: false), size: size).box)
-    let box = TextRenderer.box(for: segment, canvas: size)
-    #expect(abs(full.width - box.width) < 4, "铺满整行的底板宽 \(full.width)，文字盒宽 \(box.width)")
+    // 底板永远只包着文字加内边距，不横贯整行。
+    segment.plate = true
+    let plate = try #require(shot(renderer.image(for: state(segment), canvas: size), size: size).box)
+    let text = try #require(renderer.textFrame(for: state(segment), canvas: size))
+    let padding = segment.platePadding * size.height / 1080
+    #expect(abs(plate.width - (text.width + 2 * padding)) < 4, "底板宽 \(plate.width)，文字宽 \(text.width)")
+    #expect(plate.width < TextRenderer.box(for: segment, canvas: size).width - 4, "底板横贯了整行")
 }
 
-@Test func autoColorFollowsTheCanvasBackground() {
-    var layout = CanvasLayout()
-    layout.background = .graphite
-    #expect(!SceneRenderer.isLightBackground(layout))
-    #expect(TextRenderer.color(.auto, lightBackground: false).brightnessComponent > 0.9)
-    #expect(TextRenderer.color(.auto, lightBackground: true).brightnessComponent < 0.2)
-    // 自定义背景图亮度未知，按深色处理，白字加阴影在任何图上都读得出来。
-    layout.backgroundImage = "Backgrounds/x.jpg"
-    #expect(!SceneRenderer.isLightBackground(layout))
+@Test func presetAndCustomColorsRenderExactlyWhatWasChosen() {
+    // 预设格取固定色，自定义格取自己的 #RRGGBB，没有任何一处再按背景改字色。
+    #expect(TextRenderer.color(.white).brightnessComponent > 0.9)
+    #expect(TextRenderer.color(.ink).brightnessComponent < 0.2)
+    let custom = TextSegment.Palette(red: 0.2, green: 0.6, blue: 1)
+    #expect(custom.rawValue == "#3399FF" && custom.isCustom && custom.isValid)
+    let drawn = TextRenderer.color(custom).usingColorSpace(.sRGB)
+    #expect(abs((drawn?.redComponent ?? 0) - 0.2) < 0.01 && abs((drawn?.blueComponent ?? 0) - 1) < 0.01)
+    // 分量越界先钳再转，不会生成非法的十六进制。
+    #expect(TextSegment.Palette(red: -1, green: 2, blue: 0.5).rawValue == "#00FF80")
+    // 认不出来的值（旧工程残留的 auto）当白画，不至于什么都画不出来。
+    #expect(TextRenderer.color(TextSegment.Palette(rawValue: "auto")).brightnessComponent > 0.9)
+    #expect(!TextSegment.Palette(rawValue: "auto").isValid && !TextSegment.Palette(rawValue: "#ZZZ").isCustom)
 }
 
 @Test func emptyOrInvisibleTextDrawsNothing() {
     let size = CGSize(width: 640, height: 360)
     let renderer = TextRenderer()
     var segment = TextSegment(start: 0, duration: 3, text: "")
-    #expect(renderer.image(for: state(segment), canvas: size, lightBackground: false) == nil)
+    #expect(renderer.image(for: state(segment), canvas: size) == nil)
     segment.text = "看不见"
-    #expect(renderer.image(for: state(segment, alpha: 0), canvas: size, lightBackground: false) == nil)
+    #expect(renderer.image(for: state(segment, alpha: 0), canvas: size) == nil)
     segment.opacity = 0
-    #expect(renderer.image(for: state(segment), canvas: size, lightBackground: false) == nil)
+    #expect(renderer.image(for: state(segment), canvas: size) == nil)
 }
 
 @Test func sceneRendererDrawsTextAboveEverythingAndIgnoresTheSceneZoom() throws {

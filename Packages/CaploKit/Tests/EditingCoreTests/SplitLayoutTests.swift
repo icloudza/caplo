@@ -210,7 +210,7 @@ private func text(_ layout: TextSegment.Layout, ratio: Double = 0.5, gap: Double
         stripped.x = value.x; stripped.y = value.y; stripped.maxWidth = value.maxWidth
         stripped.color = value.color; stripped.opacity = value.opacity
         stripped.plate = value.plate; stripped.plateColor = value.plateColor; stripped.plateOpacity = value.plateOpacity
-        stripped.platePadding = value.platePadding; stripped.plateRadius = value.plateRadius; stripped.plateFull = value.plateFull
+        stripped.platePadding = value.platePadding; stripped.plateRadius = value.plateRadius
         stripped.shadow = value.shadow; stripped.shadowOpacity = value.shadowOpacity
         stripped.shadowBlur = value.shadowBlur; stripped.shadowOffset = value.shadowOffset
         stripped.enterKind = value.enterKind; stripped.enterDuration = value.enterDuration

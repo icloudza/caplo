@@ -3,10 +3,17 @@ import EditingCore
 
 /// 调用方在编辑会话全程持有工程租约；旧版仅音量的 edits.json 在首次成功保存前保留备份。
 public enum EditStorage {
-    public static func load(in url: URL, document: ProjectDocument) throws -> VideoEdit {
+    /// `wallpaper`：当前桌面壁纸文件，只在**新建**这份编辑数据时用作默认背景。
+    /// 取壁纸要碰 `NSScreen`，得在主线程上问，所以由调用方取好传进来（`DesktopWallpaper.currentURL()`）。
+    public static func load(in url: URL, document: ProjectDocument, wallpaper: URL? = nil) throws -> VideoEdit {
         let path = url.appendingPathComponent("edits.json")
         guard FileManager.default.fileExists(atPath: path.path) else {
             var edit = VideoEdit(duration: document.duration)
+            // 默认背景就是这台机器此刻的桌面壁纸：录屏摆在自己的桌面上最自然。
+            // 读不到、写不进都不算错——退回渐变即可，不能让新工程因此打不开。
+            if let wallpaper, let imported = try? DesktopWallpaper.importWallpaper(wallpaper, into: url) {
+                edit.layout.backgroundImage = imported
+            }
             if document.segments.contains(where: { $0.files[.camera] != nil }) { edit.camera = CameraLayout() }
             if document.capture?.pointerEnabled == true {
                 edit.pointer = .recommended
@@ -37,6 +44,7 @@ public enum EditStorage {
             }
         }
         // 旧工程可能留下超出录制画面的效果尾巴，先收紧范围再验证，原文件仍保留到成功保存。
+        edit.resolveLegacyAutoTextColors()
         edit.constrainTimelineFocuses()
         edit.normalizeTimelineRows()
         try edit.validate(sourceDuration: document.duration)

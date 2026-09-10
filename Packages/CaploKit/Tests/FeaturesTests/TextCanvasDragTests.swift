@@ -1,5 +1,6 @@
 import CoreGraphics
 import Testing
+import EditingCore
 @testable import Features
 
 /// 画布上拖文字：与「自定义布局」同一套吸附——贴近画布中线 / 边 / 留白边 / 画面块就吸上去并画参考线。
@@ -54,12 +55,12 @@ struct TextCanvasDragTests {
             (.bottomRight, CGPoint(x: frame.maxX, y: frame.minY)),
         ]
         for (expected, point) in cases {
-            let hit = TextCanvasMath.handle(at: point, textFrame: rect, cornerSize: 12, slop: 5)
+            let hit = TextCanvasMath.handle(at: point, textFrame: rect, carryFrame: rect, cornerSize: 12, slop: 5)
             #expect(hit == expected, "点在 \(expected) 把手正中，判成了 \(String(describing: hit))")
         }
         // 框正中是拖块体，框外一大截什么都不是。
-        #expect(TextCanvasMath.handle(at: CGPoint(x: rect.midX, y: rect.midY), textFrame: rect, cornerSize: 12, slop: 5) == .body)
-        #expect(TextCanvasMath.handle(at: CGPoint(x: rect.maxX + 200, y: rect.midY), textFrame: rect, cornerSize: 12, slop: 5) == nil)
+        #expect(TextCanvasMath.handle(at: CGPoint(x: rect.midX, y: rect.midY), textFrame: rect, carryFrame: rect, cornerSize: 12, slop: 5) == .body)
+        #expect(TextCanvasMath.handle(at: CGPoint(x: rect.maxX + 200, y: rect.midY), textFrame: rect, carryFrame: rect, cornerSize: 12, slop: 5) == nil)
     }
 
     /// 抓住某个角拉，不动点是对角——同样按把手那一圈算。
@@ -92,5 +93,55 @@ struct TextCanvasDragTests {
         let far = TextCanvasMath.drag(anchor: CGPoint(x: 0.5, y: 0.5), rect: rect, translation: CGSize(width: 9000, height: -9000),
                                       box: box, canvas: canvas, inner: inner, targets: [])
         #expect(far.anchor.x == 1.2 && far.anchor.y == 1.2)
+    }
+
+    @Test func draggingASideWidensTheCarryingAreaWithoutTouchingTheFontSize() {
+        // 抓右边往右拖：承载宽度变大，左缘钉住不动（居中对齐时靠锚点右移半个变化量补偿）。
+        let widened = TextCanvasMath.widen(maxWidth: 0.4, anchorX: 0.5, alignment: .center, handle: .right,
+                                           translation: 100, boxWidth: 1000)
+        #expect(abs(widened.maxWidth - 0.5) < 0.000001 && abs(widened.x - 0.55) < 0.000001)
+        // 抓左边往左拖同样是变宽，锚点往左挪半个变化量，右缘钉住。
+        let leftward = TextCanvasMath.widen(maxWidth: 0.4, anchorX: 0.5, alignment: .center, handle: .left,
+                                            translation: -100, boxWidth: 1000)
+        #expect(abs(leftward.maxWidth - 0.5) < 0.000001 && abs(leftward.x - 0.45) < 0.000001)
+        // 靠左对齐：拖右边左缘本来就不动，锚点一动不动；拖左边才补偿一整个变化量。
+        #expect(TextCanvasMath.widen(maxWidth: 0.4, anchorX: 0.3, alignment: .leading, handle: .right,
+                                     translation: 100, boxWidth: 1000).x == 0.3)
+        let leadingLeft = TextCanvasMath.widen(maxWidth: 0.4, anchorX: 0.3, alignment: .leading, handle: .left,
+                                               translation: -100, boxWidth: 1000)
+        #expect(abs(leadingLeft.x - 0.2) < 0.000001)
+        // 靠右对齐是镜像：拖左边锚点不动，拖右边补偿一整个变化量。
+        #expect(TextCanvasMath.widen(maxWidth: 0.4, anchorX: 0.7, alignment: .trailing, handle: .left,
+                                     translation: -100, boxWidth: 1000).x == 0.7)
+        // 上限就是文字盒本身，分屏时那一栏就是文字盒，所以永远越不出这一栏；
+        // 拖到头之后锚点也停住，不会继续往一边爬。
+        let clamped = TextCanvasMath.widen(maxWidth: 0.9, anchorX: 0.5, alignment: .center, handle: .right,
+                                           translation: 900, boxWidth: 1000)
+        #expect(clamped.maxWidth == 1 && abs(clamped.x - 0.55) < 0.000001)
+        let floored = TextCanvasMath.widen(maxWidth: 0.25, anchorX: 0.5, alignment: .center, handle: .right,
+                                           translation: -900, boxWidth: 1000)
+        #expect(floored.maxWidth == TextSegment.maxWidthRange.lowerBound)
+        // 字号那一路完全不参与：拖边不经过 size(...)，这里确认两条路互不相干。
+        #expect(TextCanvasMath.widen(maxWidth: 0.4, anchorX: 0.5, alignment: .center, handle: .body,
+                                     translation: 100, boxWidth: 1000).maxWidth == 0.4)
+    }
+
+    @Test func sideHandlesSitOnTheCarryingEdgesAndCornersWinWhenTheyOverlap() {
+        let text = CGRect(x: 400, y: 240, width: 200, height: 60)
+        let carry = CGRect(x: 300, y: 240, width: 400, height: 60)
+        func hit(_ x: CGFloat, _ y: CGFloat) -> TextCanvasMath.Handle? {
+            TextCanvasMath.handle(at: CGPoint(x: x, y: y), textFrame: text, carryFrame: carry, cornerSize: 12, slop: 5)
+        }
+        let frame = TextCanvasMath.handleFrame(carry)
+        #expect(hit(frame.minX, frame.midY) == .left)
+        #expect(hit(frame.maxX, frame.midY) == .right)
+        // 承载区之外、文字框之外，什么都不是。
+        #expect(hit(frame.minX - 40, frame.midY) == nil)
+        // 文字框里仍然是挪位置，不会被宽出去的承载区抢走。
+        #expect(hit(text.midX, text.midY) == .body)
+        // 承载区与文字框一样宽时，角上那一点归四角，不归拉宽。
+        let corner = TextCanvasMath.handleFrame(text)
+        #expect(TextCanvasMath.handle(at: CGPoint(x: corner.minX, y: corner.maxY), textFrame: text, carryFrame: text,
+                                      cornerSize: 12, slop: 5) == .topLeft)
     }
 }

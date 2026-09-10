@@ -21,26 +21,69 @@ public struct TextSegment: Codable, Equatable, Sendable, Identifiable {
     public enum Animation: String, Codable, CaseIterable, Sendable { case none, fade, slideUp, slideDown, pop, type }
     public enum Family: String, Codable, CaseIterable, Sendable { case system, sans, serif, rounded, mono }
     public enum Alignment: String, Codable, CaseIterable, Sendable { case leading, center, trailing }
-    /// 八格色板。`auto` 按画面背景亮度在黑白之间选，其余是固定色。
-    public enum Palette: String, Codable, CaseIterable, Sendable {
-        case auto, white, ink, mist, sky, mint, amber, rose
-        /// 0…1 的 sRGB 分量；`auto` 没有固定值，返回白。
+    /// 文字色：七个预设格加自定义色。预设存名字，自定义存 `#RRGGBB`，工程文件里都是一个字符串。
+    /// 早先还有个「自动」——按**画布背景**亮度在黑白之间选。它判的是背景，不是文字实际压着的画面，
+    /// 边距为 0 时背景根本露不出来，于是白字压在浅色录屏上只剩一团投影。已删除，旧工程见
+    /// `VideoEdit.resolveLegacyAutoTextColors()`。
+    public struct Palette: RawRepresentable, Codable, Hashable, Sendable {
+        public let rawValue: String
+        public init(rawValue: String) { self.rawValue = rawValue }
+
+        public static let white = Palette(rawValue: "white")
+        public static let ink = Palette(rawValue: "ink")
+        public static let mist = Palette(rawValue: "mist")
+        public static let sky = Palette(rawValue: "sky")
+        public static let mint = Palette(rawValue: "mint")
+        public static let amber = Palette(rawValue: "amber")
+        public static let rose = Palette(rawValue: "rose")
+        /// 面板上固定的七格，顺序即展示顺序。
+        public static let presets: [Palette] = [.white, .ink, .mist, .sky, .mint, .amber, .rose]
+
+        /// 自定义色。分量按 0…1 收进 `#RRGGBB`。
+        public init(red: Double, green: Double, blue: Double) {
+            func byte(_ value: Double) -> Int { Int((min(1, max(0, value.isFinite ? value : 0)) * 255).rounded()) }
+            rawValue = String(format: "#%02X%02X%02X", byte(red), byte(green), byte(blue))
+        }
+
+        public var isCustom: Bool { Self.components(rawValue) != nil }
+        /// 认得出来的色才算数：七个预设名或一个合法的 `#RRGGBB`。
+        public var isValid: Bool { isCustom || Self.presets.contains(self) }
+
+        /// 0…1 的 sRGB 分量。认不出来的（含旧工程残留的 `auto`）一律当白，不至于画不出东西。
         public var rgb: (Double, Double, Double) {
-            switch self {
-            case .auto, .white: (1, 1, 1)
-            case .ink: (0.086, 0.086, 0.102)
-            case .mist: (0.910, 0.902, 0.933)
-            case .sky: (0.675, 0.812, 1)
-            case .mint: (0.596, 0.925, 0.816)
-            case .amber: (1, 0.816, 0.541)
-            case .rose: (1, 0.522, 0.545)
+            if let custom = Self.components(rawValue) { return custom }
+            switch rawValue {
+            case "ink": return (0.086, 0.086, 0.102)
+            case "mist": return (0.910, 0.902, 0.933)
+            case "sky": return (0.675, 0.812, 1)
+            case "mint": return (0.596, 0.925, 0.816)
+            case "amber": return (1, 0.816, 0.541)
+            case "rose": return (1, 0.522, 0.545)
+            default: return (1, 1, 1)
             }
         }
+
         public var title: String {
-            switch self {
-            case .auto: "自动"; case .white: "白"; case .ink: "墨"; case .mist: "雾"
-            case .sky: "天蓝"; case .mint: "薄荷"; case .amber: "琥珀"; case .rose: "玫瑰"
+            switch rawValue {
+            case "white": "白"; case "ink": "墨"; case "mist": "雾"; case "sky": "天蓝"
+            case "mint": "薄荷"; case "amber": "琥珀"; case "rose": "玫瑰"
+            default: isCustom ? rawValue : "白"
             }
+        }
+
+        /// 工程文件里存的一直是一个字符串，换成结构体之后也不能变。
+        public init(from decoder: Decoder) throws {
+            rawValue = try decoder.singleValueContainer().decode(String.self)
+        }
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            try container.encode(rawValue)
+        }
+
+        private static func components(_ value: String) -> (Double, Double, Double)? {
+            guard value.count == 7, value.hasPrefix("#"),
+                  let number = Int(value.dropFirst(), radix: 16) else { return nil }
+            return (Double((number >> 16) & 0xFF) / 255, Double((number >> 8) & 0xFF) / 255, Double(number & 0xFF) / 255)
         }
     }
 
@@ -81,7 +124,7 @@ public struct TextSegment: Codable, Equatable, Sendable, Identifiable {
     public var maxWidth: Double = 0.8
 
     // MARK: 外观
-    public var color: Palette = .auto
+    public var color: Palette = .white
     public var opacity: Double = 1
     public var plate = false
     public var plateColor: Palette = .ink
@@ -89,7 +132,6 @@ public struct TextSegment: Codable, Equatable, Sendable, Identifiable {
     public var platePadding: Double = 16
     public var plateRadius: Double = 8
     /// 底板横贯整个文字盒（字幕条常用），而不是只包住文字。
-    public var plateFull = false
     public var shadow = false
     public var shadowOpacity: Double = 0.45
     public var shadowBlur: Double = 18
@@ -107,6 +149,9 @@ public struct TextSegment: Codable, Equatable, Sendable, Identifiable {
 
     public static let sizeRange: ClosedRange<Double> = 12...240
     public static let weightRange: ClosedRange<Double> = 300...900
+    /// 承载文字的宽度占文字盒的比例。上限 1 是关键：分屏时文字盒就是那一栏，
+    /// 存成比例它就永远越不出这一栏，换版式也不用重算。
+    public static let maxWidthRange: ClosedRange<Double> = 0.2...1
     /// 上滑 / 下滑的位移量，占画面高度的比例。
     public static let slide: Double = 0.06
     /// 一段文字最多这么多字符；再多就不是"文字层"而是字幕了。
@@ -125,7 +170,7 @@ public struct TextSegment: Codable, Equatable, Sendable, Identifiable {
     private enum CodingKeys: String, CodingKey {
         case id, start, duration, timelineStart, text, preset, layout, layoutTransition, splitGap, splitRatio, holdClipID
         case size, weight, family, alignment, lineHeight, tracking, x, y, maxWidth
-        case color, opacity, plate, plateColor, plateOpacity, platePadding, plateRadius, plateFull
+        case color, opacity, plate, plateColor, plateOpacity, platePadding, plateRadius
         case shadow, shadowOpacity, shadowBlur, shadowOffset
         case enterKind, enterDuration, exitKind, exitDuration, enabled, title
     }
@@ -155,14 +200,13 @@ public struct TextSegment: Codable, Equatable, Sendable, Identifiable {
         x = try value(.x, 0.5)
         y = try value(.y, 0.5)
         maxWidth = try value(.maxWidth, 0.8)
-        color = try value(.color, Palette.auto)
+        color = try value(.color, Palette.white)
         opacity = try value(.opacity, 1)
         plate = try value(.plate, false)
         plateColor = try value(.plateColor, Palette.ink)
         plateOpacity = try value(.plateOpacity, 0.55)
         platePadding = try value(.platePadding, 16)
         plateRadius = try value(.plateRadius, 8)
-        plateFull = try value(.plateFull, false)
         shadow = try value(.shadow, false)
         shadowOpacity = try value(.shadowOpacity, 0.45)
         shadowBlur = try value(.shadowBlur, 18)
@@ -265,6 +309,11 @@ extension TextSegment {
         return TextAnimationState()
     }
 
+    /// 「快显慢移」：透明度在入场的前三分之一就走完，剩下的时间只走位移。
+    /// 整块文字位图（字形连同阴影）是被统一乘以透明度的，所以半透明的中间态既没有终态的白、
+    /// 也没有阴影托底——压在浅色画面上就是一片灰。把这段中间态压到两三帧，灰就看不出来了。
+    static func frontLoaded(_ eased: Double) -> Double { min(1, eased * 2.8) }
+
     static func enterState(_ kind: Animation, progress: Double) -> TextAnimationState {
         let t = min(1, max(0, progress))
         switch kind {
@@ -272,10 +321,10 @@ extension TextSegment {
         case .fade: return TextAnimationState(alpha: SceneEvaluator.smootherstep(t))
         case .slideUp:
             let eased = SceneEvaluator.smootherstep(t)
-            return TextAnimationState(alpha: eased, offset: (1 - eased) * TextSegment.slide)
+            return TextAnimationState(alpha: Self.frontLoaded(eased), offset: (1 - eased) * TextSegment.slide)
         case .slideDown:
             let eased = SceneEvaluator.smootherstep(t)
-            return TextAnimationState(alpha: eased, offset: -(1 - eased) * TextSegment.slide)
+            return TextAnimationState(alpha: Self.frontLoaded(eased), offset: -(1 - eased) * TextSegment.slide)
         case .pop:
             // 回弹峰值约 1.0999，缩放峰值 ≈ 1.028：看得见但不夸张。
             return TextAnimationState(alpha: min(1, t * 2.2), scale: 0.72 + 0.28 * Self.outBack(t))
@@ -528,7 +577,7 @@ public enum TextPreset: String, CaseIterable, Sendable, Identifiable {
         result.x = sample.x; result.y = sample.y; result.maxWidth = sample.maxWidth
         result.color = sample.color; result.opacity = sample.opacity
         result.plate = sample.plate; result.plateColor = sample.plateColor; result.plateOpacity = sample.plateOpacity
-        result.platePadding = sample.platePadding; result.plateRadius = sample.plateRadius; result.plateFull = sample.plateFull
+        result.platePadding = sample.platePadding; result.plateRadius = sample.plateRadius
         result.shadow = sample.shadow; result.shadowOpacity = sample.shadowOpacity
         result.shadowBlur = sample.shadowBlur; result.shadowOffset = sample.shadowOffset
         result.enterKind = sample.enterKind; result.enterDuration = sample.enterDuration

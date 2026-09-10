@@ -404,7 +404,6 @@ public enum SceneRenderer {
     /// 否则标题会被推出画外。字幕在下、文字层在上。都没有时原样返回，一次滤镜都不建。
     static func withText(_ image: CIImage, edit: VideoEdit, time: Double, size: CGSize, spans: [TextSpan]) -> CIImage {
         guard time.isFinite, !edit.textList.isEmpty || !edit.captionList.isEmpty else { return image }
-        let light = isLightBackground(edit.layout)
         var result = image
         let style = edit.captionStyleOrDefault
         // 只投影播放头附近这一段：一条 25 分钟的录音可能有四百句，逐帧全量投影会把播放拖垮。
@@ -420,13 +419,13 @@ public enum SceneRenderer {
                                        pillColor: style.highlightColor, progress: caption.wordProgress, pill: pill)
             }
             if let layer = TextRenderer.shared.image(for: caption.renderState(style: style), canvas: size,
-                                                     lightBackground: light, highlight: style.highlight == .none ? nil : highlight) {
+                                                     highlight: style.highlight == .none ? nil : highlight) {
                 result = layer.composited(over: result)
             }
         }
         if !edit.textList.isEmpty {
             for state in edit.activeTexts(at: time, spans: spans) {
-                guard let layer = TextRenderer.shared.image(for: state, canvas: size, lightBackground: light) else { continue }
+                guard let layer = TextRenderer.shared.image(for: state, canvas: size) else { continue }
                 result = layer.composited(over: result)
             }
         }
@@ -434,17 +433,6 @@ public enum SceneRenderer {
     }
 
     /// 画布背景是不是浅色；"自动"文字色据此在墨黑与白之间选。
-    public static func isLightBackground(_ layout: CanvasLayout) -> Bool {
-        // 自定义背景图的亮度未知，按深色处理（白字加阴影在任何图上都读得出来）。
-        guard layout.backgroundImage == nil else { return false }
-        let colors = layout.background.colors
-        func luma(_ color: (red: Double, green: Double, blue: Double)) -> Double {
-            0.2126 * color.red + 0.7152 * color.green + 0.0722 * color.blue
-        }
-        return (luma((colors.start.red, colors.start.green, colors.start.blue))
-                + luma((colors.end.red, colors.end.green, colors.end.blue))) / 2 > 0.62
-    }
-
     /// 当前帧生效的区域遮罩已经盖上的录制画面。没有遮罩时原样返回，一次滤镜都不建。
     /// 只查询播放头附近这一小段区间的投影，长工程也不必每帧扫描全部剪辑。
     static func masked(_ image: CIImage, edit: VideoEdit, time: Double, timeline: TimelineIndex?) -> CIImage {
@@ -519,7 +507,11 @@ public enum SceneRenderer {
             let transform = CGAffineTransform(translationX: -image.extent.midX, y: -image.extent.midY)
                 .concatenating(CGAffineTransform(scaleX: scale, y: scale))
                 .concatenating(CGAffineTransform(translationX: size.width / 2, y: size.height / 2))
-            return image.transformed(by: transform).cropped(to: bounds)
+            let filled = image.transformed(by: transform)
+            let blur = max(0, min(100, layout.backgroundBlur)) * size.width / 960 * 0.5
+            guard blur > 0.05 else { return filled.cropped(to: bounds) }
+            // 先把边缘向外延伸再糊：不然四周会被透明像素拉淡，露出一圈灰边。
+            return filled.clampedToExtent().applyingGaussianBlur(sigma: blur).cropped(to: bounds)
         }
         let colors = palette(layout.background)
         let gradient = CIFilter.linearGradient()

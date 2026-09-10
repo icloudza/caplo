@@ -64,6 +64,8 @@ struct PreviewGallery {
         if CommandLine.arguments.contains("--components") {
             try await render(DesignSystemGallery(), name: "components-light", size: CGSize(width: 1100, height: 760), scheme: .light, output: output)
             try await render(DesignSystemGallery(), name: "components-dark", size: CGSize(width: 1100, height: 760), scheme: .dark, output: output)
+            // 分段选择单独出一张：画廊整页离屏位图里面板材质不出，看不清它。
+            try await render(SegmentedBarSample(), name: "segmented-bar", size: CGSize(width: 300, height: 120), scheme: .dark, output: output)
             return
         }
         if CommandLine.arguments.contains("--onboarding") {
@@ -115,6 +117,10 @@ struct PreviewGallery {
                 try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path), initialTab: "人像"), name: "editor-camera", size: CGSize(width: 1360, height: 860), scheme: .light, output: output)
                 try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path), initialTab: "人像"), name: "editor-camera-dark", size: CGSize(width: 1360, height: 860), scheme: .dark, output: output)
             }
+            // 排版与外观默认收起，展开它们快照里才有色板与字体这一串参数。
+            UserDefaults.standard.set(true, forKey: "editor.text.typographyExpanded")
+            UserDefaults.standard.set(true, forKey: "editor.text.appearanceExpanded")
+            try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path), time: 2.5, initialTab: "文字"), name: "editor-text", size: CGSize(width: 1360, height: 860), scheme: .dark, output: output)
             try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path), initialTab: "裁剪"), name: "editor-crop", size: CGSize(width: 1360, height: 860), scheme: .dark, output: output)
             try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path), initialTab: "片段"), name: "editor-clip", size: CGSize(width: 1360, height: 860), scheme: .dark, output: output)
             if argument == "--pointer-demo" {
@@ -149,5 +155,20 @@ struct PreviewGallery {
 
     enum PreviewError: Error {
         case renderFailed(String)
+    }
+}
+
+
+/// 深色底上的分段选择样例：默认选中第三项，供离屏核对外观。
+private struct SegmentedBarSample: View {
+    @State private var selection = "左分屏"
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("版式").font(CaploFont.body).foregroundStyle(CaploColor.textPrimary)
+            SegmentedBar(["叠加", "全屏", "左分屏", "右分屏"], selection: $selection) { $0 }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(CaploColor.surfaceOpaquePanel)
     }
 }

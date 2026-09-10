@@ -186,7 +186,7 @@ final class VideoEditorModel {
         guard lease == nil, !closed, !Task.isCancelled else { return }
         do {
             lease = try ProjectLease(url: entry.url)
-            edit = try EditStorage.load(in: entry.url, document: entry.document)
+            edit = try EditStorage.load(in: entry.url, document: entry.document, wallpaper: DesktopWallpaper.currentURL())
             edit.prepareLayerEditing(camera: entry.document.segments.contains { $0.files[.camera] != nil }, system: audioTracks.contains(.system), microphone: audioTracks.contains(.microphone))
             selectedClip = edit.clips.first?.id
             selectedClipIDs = Set(edit.clips.prefix(1).map(\.id))

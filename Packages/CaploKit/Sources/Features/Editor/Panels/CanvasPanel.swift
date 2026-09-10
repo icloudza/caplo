@@ -25,6 +25,9 @@ struct CanvasPanel: View {
     /// 最近一次从平台下拉选中的格式；只用于显示，工程里只保存比例。
     @State private var platform: String?
     @State private var library = BackgroundLibrary.shared
+    /// 「自定义」那一格当前的颜色。种子用 Cap 新建渐变的默认色，改过之后这一整场编辑都记着。
+    @State private var customGradient = CanvasBackground(start: (red: 0.278, green: 0.522, blue: 1),
+                                                        end: (red: 1, green: 0.278, blue: 0.400))
     /// 最近一次从图库选中的壁纸键；工程里只保存复制进去的图片路径。
     @State private var chosenBackdrop: String?
     @State private var importingBackdrop: String?
@@ -44,8 +47,15 @@ struct CanvasPanel: View {
             ChipGroup(BackgroundKind.allCases, selection: $kind) { $0.rawValue }
             switch kind {
             case .gradient:
-                BackgroundSwatches(options: CanvasBackground.gradients, selected: model.edit.layout.backgroundImage == nil ? model.edit.layout.background : nil) { value in
+                // 最后一格是自定义渐变：种子取 Cap 新建渐变时的那一对色，选中后下面露出调色卡。
+                BackgroundSwatches(options: CanvasBackground.gradients + [customGradient],
+                                   selected: model.edit.layout.backgroundImage == nil ? model.edit.layout.background : nil) { value in
+                    if value.isCustom { customGradient = value }
                     model.commit { $0.layout.background = value; $0.layout.backgroundImage = nil }
+                }
+                if model.edit.layout.backgroundImage == nil, model.edit.layout.background.isCustom, !model.edit.layout.background.isSolid {
+                    GradientEnds(background: Binding(get: { model.edit.layout.background },
+                                                     set: { value in customGradient = value; model.commit { $0.layout.background = value } }))
                 }
             case .solid:
                 BackgroundSwatches(options: CanvasBackground.solids, selected: model.edit.layout.backgroundImage == nil ? model.edit.layout.background : nil) { value in
@@ -53,6 +63,12 @@ struct CanvasPanel: View {
                 }
             case .image:
                 imageControls
+            }
+            // 只有真的在用图片时才给模糊：渐变与纯色糊了还是原样，摆个滑块出来纯属误导。
+            if model.edit.layout.backgroundImage != nil {
+                EditorSlider(model: model, title: "背景模糊", value: Binding(get: { model.edit.layout.backgroundBlur },
+                                                                        set: { model.edit.layout.backgroundBlur = $0 }),
+                             range: 0...100, decimals: 0, defaultValue: 0)
             }
         }
         PanelSection("样式") {
@@ -249,19 +265,52 @@ struct BackdropTile: View {
     }
 }
 
-/// 色板：数值来自 `CanvasBackground.colors`，与渲染器一致。
+/// 色板：数值来自 `CanvasBackground.colors`，与渲染器一致。最后一格是「自定义」，选中它下面会露出起点 / 终点两个色井。
 struct BackgroundSwatches: View {
     let options: [CanvasBackground]
     let selected: CanvasBackground?
     let choose: (CanvasBackground) -> Void
     var body: some View {
         SwatchGrid(options.map { value in
-            Swatch(id: value.rawValue, name: value.rawValue, colors: [
+            Swatch(id: value.rawValue, name: value.isCustom ? "自定义" : value.rawValue, colors: [
                 Color(red: value.colors.start.red, green: value.colors.start.green, blue: value.colors.start.blue),
                 Color(red: value.colors.end.red, green: value.colors.end.green, blue: value.colors.end.blue),
             ])
         }, selection: Binding(get: { selected?.rawValue }, set: { _ in }), columns: 8) { swatch in
-            if let value = CanvasBackground(rawValue: swatch.id) { choose(value) }
+            choose(CanvasBackground(rawValue: swatch.id))
+        }
+    }
+}
+
+/// 渐变调色卡：起点与终点两个色井，改哪个都立刻写回自定义渐变。
+struct GradientEnds: View {
+    @Binding var background: CanvasBackground
+    var body: some View {
+        HStack(spacing: CaploMetrics.Spacing.m) {
+            well("起点", \.start)
+            well("终点", \.end)
+            Spacer(minLength: 0)
+            Text(background.rawValue).font(CaploFont.caption).foregroundStyle(CaploColor.textSecondary)
+        }
+    }
+
+    private func well(_ title: String, _ key: KeyPath<(start: (red: Double, green: Double, blue: Double), end: (red: Double, green: Double, blue: Double)), (red: Double, green: Double, blue: Double)>) -> some View {
+        let value = background.colors[keyPath: key]
+        return HStack(spacing: CaploMetrics.Spacing.xs) {
+            Text(title).font(CaploFont.caption).foregroundStyle(CaploColor.textSecondary)
+            ColorPicker(selection: Binding<Color>(get: { Color(red: value.red, green: value.green, blue: value.blue) },
+                                          set: { picked in
+                                              let rgb = NSColor(picked).usingColorSpace(.sRGB) ?? .white
+                                              let next = (red: Double(rgb.redComponent), green: Double(rgb.greenComponent), blue: Double(rgb.blueComponent))
+                                              let ends = background.colors
+                                              background = CanvasBackground(start: key == \.start ? next : ends.start,
+                                                                            end: key == \.end ? next : ends.end)
+                                          }), supportsOpacity: false) { EmptyView() }
+                .labelsHidden()
+                .frame(width: 22, height: 22)
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(CaploColor.separator))
+                .accessibilityLabel(title)
         }
     }
 }

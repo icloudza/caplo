@@ -45,50 +45,113 @@ public enum CanvasRatio: String, CaseIterable, Codable, Sendable {
     }
 }
 
-/// 背景色板：渐变由两个端点色构成，纯色两端相同。名称即持久化值，新增项只能追加。
-/// 默认的"鸢尾"（名字保留以兼容旧工程）2026-09-09 改为深靛到钴蓝，白色窗口压上去对比最强。
-public enum CanvasBackground: String, CaseIterable, Codable, Sendable {
-    case iris = "鸢尾"
-    case ocean = "海盐"
-    case peach = "蜜桃"
-    case graphite = "石墨"
-    case dusk = "薄暮"
-    case forest = "森林"
-    case amber = "琥珀"
-    case midnight = "极夜"
-    case solidWhite = "纯白"
-    case solidLightGray = "浅灰"
-    case solidDarkGray = "深灰"
-    case solidBlack = "纯黑"
-    case solidViolet = "紫"
-    case solidIndigo = "靛蓝"
-    case solidTeal = "青"
-    case solidCoral = "珊瑚"
+/// 背景：预设名，或自定义色。名称即持久化值，**预设只能追加、不能改名**——
+/// 认不出的名字退回默认档（见 `CanvasLayout` 的解码），删一档就是让存过它的工程悄悄换个背景。
+/// 2026-09-11 渐变的色标整体换成 Cap（CapSoftware/Cap）编辑器那套预设，去掉首尾两档、其余按它的顺序排。
+/// 自定义色存成 `#RRGGBB`（纯色）或 `#RRGGBB-#RRGGBB`（渐变），面板最后那格「自定义」写的就是它。
+public struct CanvasBackground: RawRepresentable, Codable, Hashable, Sendable {
+    public let rawValue: String
+    public init(rawValue: String) { self.rawValue = rawValue }
 
-    public var isSolid: Bool { rawValue.hasPrefix("纯") || [.solidLightGray, .solidDarkGray, .solidViolet, .solidIndigo, .solidTeal, .solidCoral].contains(self) }
-    public static var gradients: [CanvasBackground] { allCases.filter { !$0.isSolid } }
-    public static var solids: [CanvasBackground] { allCases.filter(\.isSolid) }
+    public static let shoal = CanvasBackground(rawValue: "浅滩")
+    public static let neon = CanvasBackground(rawValue: "霓虹")
+    public static let iris = CanvasBackground(rawValue: "鸢尾")
+    public static let dusk = CanvasBackground(rawValue: "薄暮")
+    public static let plum = CanvasBackground(rawValue: "紫焰")
+    public static let spark = CanvasBackground(rawValue: "火花")
+    public static let lava = CanvasBackground(rawValue: "熔岩")
+    public static let cyber = CanvasBackground(rawValue: "赛博")
+    public static let jade = CanvasBackground(rawValue: "翡翠")
+    public static let peach = CanvasBackground(rawValue: "蜜桃")
+    public static let graphite = CanvasBackground(rawValue: "石墨")
+    public static let ocean = CanvasBackground(rawValue: "海盐")
+    public static let midnight = CanvasBackground(rawValue: "极夜")
+    public static let amber = CanvasBackground(rawValue: "琥珀")
+    public static let volt = CanvasBackground(rawValue: "电光")
+    public static let sunrise = CanvasBackground(rawValue: "日出")
+    /// 只为旧工程保留：面板上已经撤掉，存过它的工程照旧画得出来。
+    public static let forest = CanvasBackground(rawValue: "森林")
+    public static let solidWhite = CanvasBackground(rawValue: "纯白")
+    public static let solidLightGray = CanvasBackground(rawValue: "浅灰")
+    public static let solidDarkGray = CanvasBackground(rawValue: "深灰")
+    public static let solidBlack = CanvasBackground(rawValue: "纯黑")
+    public static let solidViolet = CanvasBackground(rawValue: "紫")
+    public static let solidIndigo = CanvasBackground(rawValue: "靛蓝")
+    public static let solidTeal = CanvasBackground(rawValue: "青")
+    public static let solidCoral = CanvasBackground(rawValue: "珊瑚")
+
+    /// 面板上的渐变档与顺序。
+    public static let gradients: [CanvasBackground] = [.shoal, .neon, .iris, .dusk, .plum, .spark, .lava, .cyber, .jade, .peach, .graphite, .ocean, .midnight, .amber, .volt, .sunrise]
+    /// 面板上的纯色档。
+    public static let solids: [CanvasBackground] = [.solidWhite, .solidLightGray, .solidDarkGray, .solidBlack, .solidViolet, .solidIndigo, .solidTeal, .solidCoral]
+
+    /// 自定义色：两端相同就是纯色，不同就是渐变。
+    public init(start: (red: Double, green: Double, blue: Double), end: (red: Double, green: Double, blue: Double)) {
+        let from = Self.hex(start), to = Self.hex(end)
+        rawValue = from == to ? from : from + "-" + to
+    }
+
+    /// 用户自己调的颜色，不是预设档。
+    public var isCustom: Bool { Self.parse(rawValue) != nil }
+    /// 两端同色即纯色；预设的纯色档与自定义单色都算。
+    public var isSolid: Bool { let value = colors; return value.start == value.end }
 
     /// sRGB 端点色；渲染器与色板共用同一张表，保证预览、导出与面板一致。
     public var colors: (start: (red: Double, green: Double, blue: Double), end: (red: Double, green: Double, blue: Double)) {
-        switch self {
-        case .iris: ((0.06, 0.12, 0.29), (0.18, 0.44, 0.88))
-        case .ocean: ((0.12, 0.48, 0.65), (0.64, 0.90, 0.85))
-        case .peach: ((0.95, 0.49, 0.42), (1, 0.85, 0.64))
-        case .graphite: ((0.12, 0.14, 0.18), (0.35, 0.38, 0.44))
-        case .dusk: ((0.17, 0.12, 0.35), (0.86, 0.45, 0.48))
-        case .forest: ((0.09, 0.32, 0.26), (0.55, 0.80, 0.55))
-        case .amber: ((0.82, 0.42, 0.10), (1.0, 0.82, 0.35))
-        case .midnight: ((0.05, 0.07, 0.15), (0.14, 0.25, 0.48))
-        case .solidWhite: ((1, 1, 1), (1, 1, 1))
-        case .solidLightGray: ((0.90, 0.90, 0.92), (0.90, 0.90, 0.92))
-        case .solidDarkGray: ((0.20, 0.20, 0.23), (0.20, 0.20, 0.23))
-        case .solidBlack: ((0.02, 0.02, 0.03), (0.02, 0.02, 0.03))
-        case .solidViolet: ((0.42, 0.39, 0.94), (0.42, 0.39, 0.94))
-        case .solidIndigo: ((0.18, 0.22, 0.55), (0.18, 0.22, 0.55))
-        case .solidTeal: ((0.10, 0.60, 0.62), (0.10, 0.60, 0.62))
-        case .solidCoral: ((0.96, 0.45, 0.40), (0.96, 0.45, 0.40))
+        if let custom = Self.parse(rawValue) { return custom }
+        switch rawValue {
+        case "浅滩": return ((0.133, 0.757, 0.765), (0.992, 0.733, 0.176))
+        case "霓虹": return ((0.114, 0.992, 0.984), (0.765, 0.114, 0.992))
+        case "鸢尾": return ((0.271, 0.408, 0.863), (0.690, 0.416, 0.702))
+        case "薄暮": return ((0.416, 0.510, 0.984), (0.988, 0.361, 0.490))
+        case "紫焰": return ((0.514, 0.227, 0.706), (0.992, 0.114, 0.114))
+        case "火花": return ((0.976, 0.831, 0.137), (1.000, 0.306, 0.314))
+        case "熔岩": return ((1.000, 0.369, 0.000), (1.000, 0.165, 0.408))
+        case "赛博": return ((1.000, 0.000, 0.588), (0.000, 0.800, 1.000))
+        case "翡翠": return ((0.000, 0.949, 0.376), (0.020, 0.459, 0.902))
+        case "蜜桃": return ((0.933, 0.804, 0.639), (0.937, 0.384, 0.624))
+        case "石墨": return ((0.173, 0.243, 0.314), (0.204, 0.596, 0.859))
+        case "海盐": return ((0.659, 0.937, 1.000), (0.933, 0.804, 0.639))
+        case "极夜": return ((0.290, 0.000, 0.878), (0.561, 0.000, 1.000))
+        case "琥珀": return ((0.988, 0.290, 0.102), (0.969, 0.718, 0.200))
+        case "电光": return ((0.000, 1.000, 1.000), (1.000, 0.078, 0.576))
+        case "日出": return ((1.000, 0.498, 0.000), (1.000, 1.000, 0.000))
+        case "森林": return ((0.059, 0.204, 0.263), (0.204, 0.910, 0.620))
+        case "纯白": return ((1.000, 1.000, 1.000), (1.000, 1.000, 1.000))
+        case "浅灰": return ((0.902, 0.902, 0.922), (0.902, 0.902, 0.922))
+        case "深灰": return ((0.200, 0.200, 0.231), (0.200, 0.200, 0.231))
+        case "纯黑": return ((0.020, 0.020, 0.031), (0.020, 0.020, 0.031))
+        case "紫": return ((0.420, 0.388, 0.941), (0.420, 0.388, 0.941))
+        case "靛蓝": return ((0.180, 0.220, 0.549), (0.180, 0.220, 0.549))
+        case "青": return ((0.102, 0.600, 0.620), (0.102, 0.600, 0.620))
+        case "珊瑚": return ((0.961, 0.451, 0.400), (0.961, 0.451, 0.400))
+        // 认不出的名字按默认档画，绝不返回一片黑让用户以为画面坏了。
+        default: return Self.iris.colors
         }
+    }
+
+    /// 工程文件里存的一直是一个字符串，换成结构体之后也不能变。
+    public init(from decoder: Decoder) throws {
+        rawValue = try decoder.singleValueContainer().decode(String.self)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    private static func hex(_ color: (red: Double, green: Double, blue: Double)) -> String {
+        func byte(_ value: Double) -> Int { Int((min(1, max(0, value.isFinite ? value : 0)) * 255).rounded()) }
+        return String(format: "#%02X%02X%02X", byte(color.red), byte(color.green), byte(color.blue))
+    }
+    private static func component(_ text: Substring) -> (red: Double, green: Double, blue: Double)? {
+        guard text.count == 7, text.hasPrefix("#"), let number = Int(text.dropFirst(), radix: 16) else { return nil }
+        return (Double((number >> 16) & 0xFF) / 255, Double((number >> 8) & 0xFF) / 255, Double(number & 0xFF) / 255)
+    }
+    private static func parse(_ value: String) -> (start: (red: Double, green: Double, blue: Double), end: (red: Double, green: Double, blue: Double))? {
+        let parts = value.split(separator: "-", omittingEmptySubsequences: false)
+        if parts.count == 1, let single = component(parts[0]) { return (single, single) }
+        guard parts.count == 2, let from = component(parts[0]), let to = component(parts[1]) else { return nil }
+        return (from, to)
     }
 }
 
@@ -140,7 +203,9 @@ public struct CanvasLayout: Equatable, Codable, Sendable {
     public var backgroundImage: String?
     public var padding: Double = 0
     public var cornerRadius: Double = 12
-    public var shadow: Bool = true
+    /// 背景图的模糊程度 0…100（相对 960 点宽等比换算）。只对图片有意义：渐变糊了还是同一片渐变。
+    public var backgroundBlur: Double = 0
+    public var shadow: Bool = false
     /// 阴影参数以 960 点宽画布为参考：不透明度 0…1，柔和度（模糊 σ）与向下距离单位为点。
     public var shadowOpacity: Double = Self.defaultShadowOpacity
     public var shadowBlur: Double = Self.defaultShadowBlur
@@ -162,23 +227,36 @@ public struct CanvasLayout: Equatable, Codable, Sendable {
 
     public init() {}
 
+    /// 画布背景整体偏亮吗。只用于把旧工程里的「自动」文字色落成固定色——
+    /// 它当年就是按这个判的，照原样落一遍，老工程的画面才不会变。
+    public var isLightBackground: Bool {
+        guard backgroundImage == nil else { return false }
+        let colors = background.colors
+        func luma(_ color: (red: Double, green: Double, blue: Double)) -> Double {
+            0.2126 * color.red + 0.7152 * color.green + 0.0722 * color.blue
+        }
+        return (luma(colors.start) + luma(colors.end)) / 2 > 0.62
+    }
+
     public var effectiveCrop: CropRect? {
         guard let crop, crop.isValid, !crop.isFull else { return nil }
         return crop
     }
 
     private enum CodingKeys: String, CodingKey {
-        case ratio, background, backgroundImage, padding, cornerRadius, shadow, shadowOpacity, shadowBlur, shadowOffset, crop, fixedFocusFrame, screenScale, screenOffsetX, screenOffsetY
+        case ratio, background, backgroundImage, backgroundBlur, padding, cornerRadius, shadow, shadowOpacity, shadowBlur, shadowOffset, crop, fixedFocusFrame, screenScale, screenOffsetX, screenOffsetY
     }
 
     /// 旧工程没有阴影参数，按默认值解码，像素与之前完全一致。
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         ratio = try container.decode(CanvasRatio.self, forKey: .ratio)
-        background = try container.decode(CanvasBackground.self, forKey: .background)
+        // 认不出的背景名（改过名、或工程来自更新的版本）退回默认那一档，不能让一个名字把整份工程判死。
+        background = (try? container.decode(CanvasBackground.self, forKey: .background)) ?? .iris
         backgroundImage = try container.decodeIfPresent(String.self, forKey: .backgroundImage)
         padding = try container.decode(Double.self, forKey: .padding)
         cornerRadius = try container.decode(Double.self, forKey: .cornerRadius)
+        backgroundBlur = try container.decodeIfPresent(Double.self, forKey: .backgroundBlur) ?? 0
         shadow = try container.decode(Bool.self, forKey: .shadow)
         shadowOpacity = try container.decodeIfPresent(Double.self, forKey: .shadowOpacity) ?? Self.defaultShadowOpacity
         shadowBlur = try container.decodeIfPresent(Double.self, forKey: .shadowBlur) ?? Self.defaultShadowBlur
@@ -197,6 +275,7 @@ public struct CanvasLayout: Equatable, Codable, Sendable {
         try container.encodeIfPresent(backgroundImage, forKey: .backgroundImage)
         try container.encode(padding, forKey: .padding)
         try container.encode(cornerRadius, forKey: .cornerRadius)
+        try container.encode(backgroundBlur, forKey: .backgroundBlur)
         try container.encode(shadow, forKey: .shadow)
         try container.encode(shadowOpacity, forKey: .shadowOpacity)
         try container.encode(shadowBlur, forKey: .shadowBlur)

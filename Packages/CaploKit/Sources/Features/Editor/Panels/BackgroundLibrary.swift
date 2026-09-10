@@ -24,7 +24,7 @@ final class BackgroundLibrary {
     private var pending: Set<String> = []
     private var scanned = false
     nonisolated static let thumbnailSize = CGSize(width: 256, height: 144)
-    nonisolated static let maximumEdge = 3840
+    nonisolated static let maximumEdge = DesktopWallpaper.maximumEdge
 
     /// 本机壁纸目录：系统自带的全尺寸 HEIC，以及"壁纸"设置下载到用户目录的全尺寸资源。
     static var systemDirectories: [URL] {
@@ -110,28 +110,16 @@ final class BackgroundLibrary {
     }
 
     /// 本机壁纸：解码时直接缩到不超过 3840 宽，动态壁纸取第一张（浅色）。
+    /// 与新工程默认背景走同一份实现（`DesktopWallpaper`），两处不会一处改了另一处忘了。
     nonisolated static func importSystemWallpaper(_ url: URL, into project: URL) throws -> String {
-        guard let image = decode(url, maximumPixelSize: maximumEdge) else { throw ProjectError.invalid("无法读取这张壁纸。") }
-        return try importImage(image, into: project)
+        try DesktopWallpaper.importWallpaper(url, into: project)
     }
 
     nonisolated static func decode(_ url: URL, maximumPixelSize: Int) -> CGImage? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize,
-        ]
-        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        DesktopWallpaper.decode(url, maximumPixelSize: maximumPixelSize)
     }
 
     nonisolated static func importImage(_ image: CGImage, into project: URL) throws -> String {
-        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("caplo-backdrop-\(UUID().uuidString).heic")
-        defer { try? FileManager.default.removeItem(at: temporary) }
-        guard let destination = CGImageDestinationCreateWithURL(temporary as CFURL, UTType.heic.identifier as CFString, 1, nil) else { throw ProjectError.invalid("无法写入壁纸。") }
-        CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
-        guard CGImageDestinationFinalize(destination) else { throw ProjectError.invalid("无法写入壁纸。") }
-        return try ProjectStorage.importBackground(from: temporary, into: project)
+        try DesktopWallpaper.importImage(image, into: project)
     }
 }

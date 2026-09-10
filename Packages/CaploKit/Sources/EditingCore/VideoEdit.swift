@@ -577,6 +577,20 @@ extension VideoEdit {
     /// 开发期间存成 7 / 8 / 9 的工程仍然读得进来，在这里落回 6。
     ///
     /// `layered` 为真表示这次操作把工程升到了图层模型。
+    /// 旧工程里的「自动」文字色落成固定色：当年它就是按画布背景亮度在墨黑与白之间选的，
+    /// 照同一条规则落一遍，老工程打开后画面与以前一模一样。删掉「自动」之后只在读取时跑一次。
+    public mutating func resolveLegacyAutoTextColors() {
+        let resolved: TextSegment.Palette = layout.isLightBackground ? .ink : .white
+        func fix(_ palette: inout TextSegment.Palette) { if palette.rawValue == "auto" { palette = resolved } }
+        for index in textList.indices {
+            fix(&textList[index].color); fix(&textList[index].plateColor)
+        }
+        if var style = captionStyle {
+            fix(&style.color); fix(&style.highlightColor); fix(&style.plateColor)
+            captionStyle = style
+        }
+    }
+
     public mutating func normalizeSchemaVersion(layered: Bool = false) {
         schemaVersion = layered ? Self.writtenSchemaVersion : min(max(schemaVersion, 5), Self.writtenSchemaVersion)
     }
