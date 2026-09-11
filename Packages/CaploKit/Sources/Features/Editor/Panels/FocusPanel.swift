@@ -47,9 +47,9 @@ struct FocusPanel: View {
             EditorSlider(model: model, title: "默认缩放倍率", value: styleBinding(\.baseScale), range: 1...3, suffix: "×", detents: [1.5, 2, 2.5])
             EditorSlider(model: model, title: "拉远延迟", value: styleBinding(\.idleTimeout), range: 0.5...5)
             EditorSlider(model: model, title: "合并间隔", value: styleBinding(\.mergeGap), range: 0...2)
-            EditorSlider(model: model, title: "前瞻时长", value: optionalStyleBinding(\.prediction, fallback: 0.16), range: 0...0.4)
+            EditorSlider(model: model, title: "提前对准", value: optionalStyleBinding(\.prediction, fallback: 0.21), range: 0...0.4)
             EditorSlider(model: model, title: "跟随平滑度", value: optionalStyleBinding(\.panResponse, fallback: 0.55), range: 0.15...1.5)
-            EditorSlider(model: model, title: "安全区", value: styleBinding(\.safeZone), range: 0.2...0.9)
+            EditorSlider(model: model, title: "安全区", value: optionalStyleBinding(\.clusterWidth, fallback: 0.5), range: 0.2...0.9)
             Button(generating ? "正在生成…" : "重新生成自动镜头") {
                 generating = true
                 Task { await model.regenerateFocus(); generating = false }

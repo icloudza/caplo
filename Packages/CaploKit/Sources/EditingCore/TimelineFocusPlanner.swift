@@ -24,7 +24,6 @@ private struct TimelineFocusPlanner {
     private static let epsilon = 0.000_000_1
     private static let maximumSamples = 500_000
     private static let maximumUnits = 16_000
-    private static let maximumWindows = 16_000
     private static let maximumPath = 190_000
     private static let maximumSimulationSeconds = 1800.0
 
@@ -36,18 +35,12 @@ private struct TimelineFocusPlanner {
         let sourceLower: Double
         let holding: Bool
     }
-    private struct Window {
-        let start: Double
-        let end: Double
-        let samples: Range<Int>
-    }
     private struct Unit {
         enum Kind { case motion, fixed, hold }
         let start: Double
         let end: Double
         let kind: Kind
         let samples: [PointerSample]
-        let windows: [Window]
         let reusePrevious: Bool
         let initial: PointerSample?
     }
@@ -118,7 +111,7 @@ private struct TimelineFocusPlanner {
         let runs = visibleRuns(start: start, end: end, target: focus.targetClipID)
         guard !runs.isEmpty, runs.count <= Self.maximumUnits else { return staticResult() }
         guard let units = units(for: runs, start: start, end: end) else { return staticResult() }
-        let activeLength = units.reduce(0.0) { value, unit in value + unit.windows.reduce(0.0) { $0 + $1.end - $1.start } }
+        let activeLength = units.reduce(0.0) { $0 + ($1.kind == .motion ? $1.end - $1.start : 0) }
         // 极长且持续有动作的素材降低预编译采样密度；预测时长按比例缩放，绝不窥看更远的源事件。
         let timeScale = min(1, Self.maximumSimulationSeconds / max(1, activeLength))
         var output: [FocusKeyframe] = [], last = fallback
@@ -135,18 +128,12 @@ private struct TimelineFocusPlanner {
                 let position = unit.reusePrevious ? last : unit.initial.map { AutoFocus.clamp(CGPoint(x: $0.x, y: $0.y), scale: focus.scale) } ?? fallback
                 append(unit.start, position); append(unit.end, position); last = position
             case .motion:
-                let lead = min(focus.easeIn ?? style.easeIn, focus.duration / 2) * 0.6
-                var position = unit.reusePrevious ? last : initialPosition(samples: unit.samples, start: unit.start, fallback: fallback, scale: focus.scale, lead: lead)
-                append(unit.start, position)
-                var currentTime = unit.start
-                for window in unit.windows {
-                    if window.start > currentTime { append(window.start, position) }
-                    let planned = plan(window, samples: unit.samples, initial: position, scale: focus.scale, timeScale: timeScale)
-                    for frame in planned {
-                        append(min(window.end, max(window.start, window.start + frame.time / timeScale)), CGPoint(x: frame.x, y: frame.y))
-                    }
-                    if let frame = planned.last { position = CGPoint(x: frame.x, y: frame.y) }
-                    currentTime = window.end
+                // 整段连续录制一起建簇、一根弹簧走到底；接续上一段就从上一段停的位置出发，否则起手预对准第一个簇。
+                let planned = plan(unit, initial: unit.reusePrevious ? last : nil, scale: focus.scale, timeScale: timeScale)
+                var position = unit.reusePrevious ? last : fallback
+                for frame in planned {
+                    position = CGPoint(x: frame.x, y: frame.y)
+                    append(min(unit.end, max(unit.start, unit.start + frame.time / timeScale)), position)
                 }
                 append(unit.end, position); last = position
             }
@@ -197,20 +184,18 @@ private struct TimelineFocusPlanner {
     }
 
     private func units(for runs: [Run], start: Double, end: Double) -> [Unit]? {
-        var result: [Unit] = [], cursor = start, mappedCount = 0, windowCount = 0
+        var result: [Unit] = [], cursor = start, mappedCount = 0
         var previous: Run?
         func appendZone(_ values: [PointerSample], start: Double, end: Double, resuming: Bool) {
             guard end > start else { return }
-            let activity = activityWindows(values, start: start, end: end)
-            windowCount += activity.count
-            result.append(Unit(start: start, end: end, kind: values.isEmpty ? .fixed : .motion, samples: values, windows: activity, reusePrevious: resuming, initial: nil))
+            result.append(Unit(start: start, end: end, kind: values.isEmpty ? .fixed : .motion, samples: values, reusePrevious: resuming, initial: nil))
         }
         for run in runs {
-            if run.start > cursor { result.append(Unit(start: cursor, end: run.start, kind: .fixed, samples: [], windows: [], reusePrevious: false, initial: nil)) }
+            if run.start > cursor { result.append(Unit(start: cursor, end: run.start, kind: .fixed, samples: [], reusePrevious: false, initial: nil)) }
             let context = precedingSample(for: run)
             if run.holding {
                 let continuous = previous.map { abs($0.end - run.start) < Self.epsilon && abs($0.sourceEnd - run.sourceStart) < Self.epsilon } ?? false
-                result.append(Unit(start: run.start, end: run.end, kind: .hold, samples: [], windows: [], reusePrevious: continuous, initial: context?.kind == .exit ? nil : context))
+                result.append(Unit(start: run.start, end: run.end, kind: .hold, samples: [], reusePrevious: continuous, initial: context?.kind == .exit ? nil : context))
             } else {
                 let first = lowerBound(run.sourceStart), last = lowerBound(run.sourceEnd)
                 mappedCount += last - first
@@ -234,22 +219,22 @@ private struct TimelineFocusPlanner {
                         if outside {
                             let waited = sample.time > zoneStart
                             if waited {
-                                result.append(Unit(start: zoneStart, end: sample.time, kind: .hold, samples: [], windows: [], reusePrevious: holdsPrevious, initial: nil))
+                                result.append(Unit(start: zoneStart, end: sample.time, kind: .hold, samples: [], reusePrevious: holdsPrevious, initial: nil))
                             }
                             zoneStart = sample.time; outside = false; resuming = holdsPrevious || waited
                         }
                         zone.append(sample)
                     }
-                    guard result.count <= Self.maximumUnits, windowCount <= Self.maximumWindows else { return nil }
+                    guard result.count <= Self.maximumUnits else { return nil }
                 }
                 if outside {
-                    result.append(Unit(start: zoneStart, end: run.end, kind: .hold, samples: [], windows: [], reusePrevious: holdsPrevious, initial: nil))
+                    result.append(Unit(start: zoneStart, end: run.end, kind: .hold, samples: [], reusePrevious: holdsPrevious, initial: nil))
                 } else { appendZone(zone, start: zoneStart, end: run.end, resuming: resuming) }
             }
             cursor = run.end; previous = run
-            guard result.count <= Self.maximumUnits, windowCount <= Self.maximumWindows else { return nil }
+            guard result.count <= Self.maximumUnits else { return nil }
         }
-        if cursor < end { result.append(Unit(start: cursor, end: end, kind: .fixed, samples: [], windows: [], reusePrevious: false, initial: nil)) }
+        if cursor < end { result.append(Unit(start: cursor, end: end, kind: .fixed, samples: [], reusePrevious: false, initial: nil)) }
         return result
     }
 
@@ -259,45 +244,18 @@ private struct TimelineFocusPlanner {
         return samples[index]
     }
 
-    private func activityWindows(_ values: [PointerSample], start: Double, end: Double) -> [Window] {
-        guard !values.isEmpty else { return [] }
-        let prediction = min(0.4, max(0, style.prediction ?? 0.16))
-        let settling = max(2, min(6, (style.panResponse ?? 0.55) * 6))
-        var result: [Window] = [], first = 0
-        for index in 1...values.count {
-            if index == values.count || values[index].time - values[index - 1].time > settling + prediction {
-                result.append(Window(start: max(start, values[first].time - prediction), end: min(end, values[index - 1].time + settling), samples: first..<index))
-                first = index
-            }
+    /// 一整段连续录制的相机路径。时间压缩 `timeScale` 时弹簧与提前对准按同一比例换算，真实时间里的表现不变。
+    /// 起手 0.4 秒内有点击就直接对准那个点击（推近落点就是点击处）；接续上一段时从上一段停的位置出发。
+    private func plan(_ unit: Unit, initial: CGPoint?, scale: Double, timeScale: Double) -> [FocusKeyframe] {
+        let mapped = unit.samples.map { sample in
+            var copy = sample; copy.time = (sample.time - unit.start) * timeScale; return copy
         }
-        return result
-    }
-
-    /// 镜头起点的相机位置：0.4 秒内有点击就用点击；没有点击（手动讲解镜头）则做起点预判——
-    /// 取推近完成六成时指针会在的位置（`lead` 秒后），推近落点就是指针所在，而不是按下那一刻的旧位置。
-    private func initialPosition(samples: [PointerSample], start: Double, fallback: CGPoint, scale: Double, lead: Double) -> CGPoint {
-        let nearby = samples.prefix { $0.time <= start + 0.4 }
-        if let click = nearby.first(where: { $0.kind == .click }) { return AutoFocus.clamp(CGPoint(x: click.x, y: click.y), scale: scale) }
-        if lead > 0, let ahead = PointerSpeedProbe(samples: samples).position(at: start + lead) { return AutoFocus.clamp(ahead, scale: scale) }
-        guard let first = nearby.first else { return fallback }
-        return AutoFocus.clamp(CGPoint(x: first.x, y: first.y), scale: scale)
-    }
-
-    private func plan(_ window: Window, samples: [PointerSample], initial: CGPoint, scale: Double, timeScale: Double) -> [FocusKeyframe] {
-        let mapped = samples[window.samples].map { sample in
-            var copy = sample; copy.time = (sample.time - window.start) * timeScale; return copy
-        }
-        if mapped.allSatisfy({ abs($0.x - initial.x) < 0.000_001 && abs($0.y - initial.y) < 0.000_001 }) {
-            return [FocusKeyframe(time: 0, x: initial.x, y: initial.y, scale: scale, move: 0)]
-        }
-        // 初始化种子不产生虚假的点击保持；真正的未来点击只在其预测窗口内参与跟随。
-        let seed = PointerSample(time: -1, x: initial.x, y: initial.y, kind: .click)
-        let clicks = [seed] + mapped.filter { $0.kind == .click }
         var settings = style
-        settings.prediction = (style.prediction ?? 0.16) * timeScale
+        settings.prediction = SmartFollowPlanner.lead(style: style) * timeScale
         settings.panResponse = (style.panResponse ?? 0.55) * timeScale
-        settings.easeOut = 0
-        return SmartFollowPlanner.path(samples: mapped, clicks: clicks, start: 0, end: (window.end - window.start) * timeScale, scale: scale, style: settings)
+        let aimAt = initial == nil ? mapped.first { $0.kind == .click && $0.time <= 0.4 * timeScale }?.time : nil
+        return SmartFollowPlanner.path(samples: mapped, start: 0, end: (unit.end - unit.start) * timeScale, scale: scale,
+                                       style: settings, initial: initial, aimAt: aimAt, freezeTail: 0)
     }
 
     private func lowerBound(_ time: Double) -> Int {

@@ -69,8 +69,10 @@ private func maxStep(_ edit: VideoEdit, from: Double, to: Double, rate: Double =
     edit.focuses = AutoFocus.generate(events: events, duration: 10)
     let shot = try! #require(edit.focuses.first)
     #expect((shot.path?.count ?? 0) >= 2)
-    let before = SceneEvaluator.focus(edit: edit, time: 1.6), after = SceneEvaluator.focus(edit: edit, time: 3.4)
-    #expect(after.x > before.x + 0.1)
+    // 推近时点击在视口里；光标停到右缘后取景框跟过去贴边。
+    let before = SceneEvaluator.focus(edit: edit, time: 1.2), after = SceneEvaluator.focus(edit: edit, time: 3.4)
+    #expect(abs(0.5 - before.x) < 0.5 / before.scale * 0.6 && after.x > before.x + 0.05)
+    #expect(abs(after.x - (1 - 0.5 / after.scale)) < 0.001)
     for time in stride(from: shot.start, through: shot.start + shot.duration, by: 0.05) {
         let state = SceneEvaluator.focus(edit: edit, time: time)
         #expect(state.x >= 0.5 / state.scale - 0.0001 && state.x <= 1 - 0.5 / state.scale + 0.0001)
@@ -110,21 +112,22 @@ private func maxStep(_ edit: VideoEdit, from: Double, to: Double, rate: Double =
     #expect(throws: EditError.self) { try edit.validate(sourceDuration: 4) }
 }
 
-@Test func latestFollowPreviewsRecordedMotionAndNeverRestartsAtTargets() throws {
+@Test func leadAimsEarlierAndTheSpringStaysContinuous() throws {
     var events = [PointerSample(time: 1, x: 0.5, y: 0.5, kind: .click)]
     events += moves(from: CGPoint(x: 0.5, y: 0.5), to: CGPoint(x: 0.9, y: 0.5), start: 1.2, end: 2.2)
     events += moves(from: CGPoint(x: 0.9, y: 0.5), to: CGPoint(x: 0.2, y: 0.5), start: 2.2, end: 3.5)
     events.append(PointerSample(time: 3.5, x: 0.2, y: 0.5, kind: .click))
-    var noPrediction = AutoFocusStyle(); noPrediction.prediction = 0
-    var withPrediction = noPrediction; withPrediction.prediction = 0.25
-    let plain = try #require(AutoFocus.generate(events: events, duration: 6, style: noPrediction).first)
-    let predictive = try #require(AutoFocus.generate(events: events, duration: 6, style: withPrediction).first)
-    #expect(predictive.sampledPath == true)
-    let t = 1.9 - predictive.start
-    #expect(predictive.camera(at: t).x > plain.camera(at: t).x)
-    let samples = (0..<500).map { predictive.camera(at: Double($0) / 120).x }
+    var noLead = AutoFocusStyle(); noLead.prediction = 0
+    var withLead = noLead; withLead.prediction = 0.25
+    let plain = try #require(AutoFocus.generate(events: events, duration: 6, style: noLead).first)
+    let early = try #require(AutoFocus.generate(events: events, duration: 6, style: withLead).first)
+    #expect(early.sampledPath == true)
+    // 提前对准：光标向右走的途中，提前换簇的相机在同一时刻更靠右。
+    let t = 1.9 - early.start
+    #expect(early.camera(at: t).x > plain.camera(at: t).x)
+    // 弹簧没有限速，但一条连续曲线：速度有限，相邻帧位移不会跳。
+    let samples = (0..<500).map { early.camera(at: Double($0) / 120).x }
     let speeds = zip(samples, samples.dropFirst()).map { ($1 - $0) * 120 }
-    #expect(speeds.allSatisfy { abs($0) <= 0.81 })
-    let changes = zip(speeds, speeds.dropFirst()).map { abs($1 - $0) }
-    #expect((changes.max() ?? 0) < 0.15)
+    #expect(speeds.allSatisfy { $0.isFinite && abs($0) < 3 })
+    #expect(zip(samples, samples.dropFirst()).allSatisfy { abs($1 - $0) < 0.03 })
 }

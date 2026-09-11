@@ -1,163 +1,179 @@
 import Foundation
 import CoreGraphics
 
-/// 智能跟随：提交目标安全区、点击保持与临界阻尼跟随；距离自适应的目标平滑消除阈值跳变。
-/// 录后可读到未来真实事件，因此前瞻采用已记录位置，避免速度外推在转弯时预测到错误方向。
+/// 智能跟随（2026-09-11 起按 Cap 的骨架重写，公式与 scratchpad 的 focus-compare.html 逐行对应）。
 ///
-/// 无点击的讲解镜头（手动添加、只跟指针）也走这里，为此的几处细化：
-/// 1. 光标离开安全区时只把它带回内区（`innerZone`），而不是整轴回中，阅读扫视时相机几乎不动；
-/// 2. 前瞻由弹簧本身推导：临界阻尼弹簧追动目标的稳态滞后恰好是 2 / ω，用它作前瞻下限把滞后精确抵消，
-///    "平滑响应"滑块一动前瞻自动跟；指针移动越快再多看一点（读的是真实未来）；档位切换时前瞻经一阶低通，不跳变；
-/// 3. 光标已在视口之外时放宽加速度与限速追赶，追回来即恢复，上限随偏出距离连续变化，没有台阶；
-/// 4. 点击提前 0.35 秒对准落点、按住拖动期间弹簧更硬（拖拽档），三档之间速度连续；
-/// 5. 目标始终落在可达带内，相机撞到画面边界时像撞墙一样停住（等价于把取景中心参数化成 0…1 的行进比例），
-///    不再需要"提前减速"这类事后补丁。
+/// 1. **目标由点击簇决定**：这一段里所有指针移动（点击也是移动）按时间顺序贪心装进包围盒，盒子不超过视口的
+///    `clusterWidth` 宽、其 1.4 倍高；相机目标是盒子中心，指针不出盒子目标就不换。一串相近的点击就是一个盒子，
+///    相机一次都不动——这就是"邻近连点导致过度跟随"的解。旧版把每次点击都当成新目标，离当前目标超过 3.5% 画面宽就换。
+/// 2. **走位交给一根解析求解的弹簧**：Cap 默认刚度 200、阻尼 40、质量 2.25（ω₀ ≈ 9.43、ζ ≈ 0.94），每 8 毫秒换一次目标，
+///    速度一直保留，没有加速度与速度上限。旧版的加速度上限 3 让相机挪四分之一画面要 0.8 秒，弹簧 0.35 秒就到。
+///    「跟随平滑度」换算成 ω₀ 的倍数，0.55 正好落在 Cap 的默认值上。
+/// 3. **取景中心参数化成 0…1 的行进比例**，天然出不了画面；靠边 `edgeSnap` 以内的目标直接把取景框贴到边上。
+///
+/// 离线规划知道全部未来，所以比 Cap 多两样：
+/// 4. **提前对准**：每次换簇提前 `lead` 秒（默认 2/ω₀，即弹簧追动目标的稳态滞后）把目标换过去，相机到位时指针刚好也到。
+///    Cap 只在倍率还是 1 的起手时预对准。「提前对准」滑块拖到 0 就是 Cap 原样。
+/// 5. **跳过过路簇**：没有点击、停留不到 `passThrough` 秒的簇只是路过，时间并给下一个簇，相机径直去终点。
 enum SmartFollowPlanner {
-    /// 点击到松开之间的区间：拖拽期间弹簧切到更硬的档位。
-    static func dragIntervals(clicks: [PointerSample], samples: [PointerSample]) -> [ClosedRange<Double>] {
-        var result: [ClosedRange<Double>] = []
-        for click in clicks where click.time >= 0 {
-            let end: Double
-            if let release = samples.first(where: { ($0.kind == .release || $0.kind == .exit) && $0.time > click.time }) { end = release.time }
-            else if let lastDrag = samples.last(where: { $0.kind == .drag && $0.time > click.time }) { end = lastDrag.time + 0.1 }
-            else { continue }
-            if end - click.time > 0.12 { result.append(click.time...end) }
-        }
-        return result
+    /// Cap 的默认弹簧：stiffness 200、damping 40、mass 2.25。
+    static let capOmega0 = (200.0 / 2.25).squareRoot()
+    static let capZeta = 40.0 / (2 * (200.0 * 2.25).squareRoot())
+    /// 靠边这么大比例以内的目标直接贴边（Cap 的 edge_snap_ratio 默认值）。
+    static let edgeSnap = 0.25
+    /// 过路簇的判定：无点击且占用（到下一个簇开始为止）短于此。
+    static let passThrough = 0.25
+    /// 弹簧步长（125 Hz，与 Cap 相同）。
+    static let step = 0.008
+
+    struct Cluster: Equatable {
+        var minX: Double, maxX: Double, minY: Double, maxY: Double
+        /// 簇内首末事件的时间；`start` 会被"跳过过路簇"和"起手对准"改早。
+        var start: Double, last: Double
+        var clicked: Bool
+        var center: CGPoint { CGPoint(x: (minX + maxX) / 2, y: (minY + maxY) / 2) }
     }
 
-    static func path(samples: [PointerSample], clicks: [PointerSample], start: Double, end: Double, scale: Double, style: AutoFocusStyle) -> [FocusKeyframe] {
-        guard let first = clicks.first, end > start else { return [] }
-        let initial = AutoFocus.clamp(CGPoint(x: first.x, y: first.y), scale: scale)
-        var position = initial, committed = initial, filtered = initial, velocity = CGPoint.zero
-        var frames = [FocusKeyframe(time: 0, x: initial.x, y: initial.y, scale: scale, move: 0)]
-        var sampleIndex = 0, clickIndex = 0, dragIndex = 0
-        let prediction = min(0.4, max(0, style.prediction ?? 0.16))
+    static func omega0(style: AutoFocusStyle) -> Double {
         let response = min(1.5, max(0.15, style.panResponse ?? 0.55))
-        let dt = 1.0 / 120, length = end - start
-        let steps = Int(ceil(length / dt))
+        return capOmega0 * (0.55 / response)
+    }
+    static func lead(style: AutoFocusStyle) -> Double {
+        min(0.4, max(0, style.prediction ?? 2 / omega0(style: style)))
+    }
+    static func clusterSize(style: AutoFocusStyle, scale: Double) -> (width: Double, height: Double) {
+        let ratio = min(0.9, max(0.2, style.clusterWidth ?? 0.5))
+        return (ratio / max(1, scale), min(0.95, ratio * 1.4) / max(1, scale))
+    }
+
+    /// 贪心包围盒 + 跳过过路簇。离屏（exit）样本不参与。
+    static func clusters(samples: [PointerSample], start: Double, end: Double, scale: Double, style: AutoFocusStyle) -> [Cluster] {
+        let box = clusterSize(style: style, scale: scale)
+        var result: [Cluster] = []
+        var current: Cluster?
+        for sample in samples where sample.kind != .exit && sample.time >= start && sample.time <= end {
+            if var cluster = current {
+                let width = max(cluster.maxX, sample.x) - min(cluster.minX, sample.x)
+                let height = max(cluster.maxY, sample.y) - min(cluster.minY, sample.y)
+                if width <= box.width && height <= box.height {
+                    cluster.minX = min(cluster.minX, sample.x); cluster.maxX = max(cluster.maxX, sample.x)
+                    cluster.minY = min(cluster.minY, sample.y); cluster.maxY = max(cluster.maxY, sample.y)
+                    cluster.last = sample.time
+                    if sample.kind == .click { cluster.clicked = true }
+                    current = cluster
+                    continue
+                }
+                result.append(cluster)
+            }
+            current = Cluster(minX: sample.x, maxX: sample.x, minY: sample.y, maxY: sample.y,
+                              start: sample.time, last: sample.time, clicked: sample.kind == .click)
+        }
+        if let current { result.append(current) }
+        // 过路簇：把它的时间并给下一个簇，相机不再朝路上的位置起步。占用时长按"到下一个簇开始"算——
+        // 一个孤零零的样本（指针停着没动）占用的是整段静止，不是过路。
+        guard passThrough > 0, result.count > 1 else { return result }
+        var kept: [Cluster] = []
+        var carriedStart: Double?
+        for (index, cluster) in result.enumerated() {
+            var cluster = cluster
+            if let carriedStart { cluster.start = carriedStart }
+            if index + 1 < result.count, !cluster.clicked, result[index + 1].start - cluster.start < passThrough {
+                carriedStart = cluster.start
+                continue
+            }
+            carriedStart = nil
+            kept.append(cluster)
+        }
+        return kept
+    }
+
+    /// 相机路径（画面归一化坐标，时间从 0 起）。
+    /// - `initial`：接续上一段时相机已经在的位置，弹簧从这里出发；为 nil 时起手就对准第一个目标（Cap 的预对准）。
+    /// - `aimAt`：起手要对准的时刻（自动镜头传首次点击）；这之前的簇是走向落点的路，并进落点那个簇。
+    /// - `freezeTail`：末尾这么多秒不再换目标（拉远期间目标冻结，与 Cap 的 held_center 相同）。
+    static func path(samples: [PointerSample], start: Double, end: Double, scale: Double, style: AutoFocusStyle,
+                     initial: CGPoint? = nil, aimAt: Double? = nil, freezeTail: Double = 0) -> [FocusKeyframe] {
+        guard end > start, scale.isFinite else { return [] }
+        let amount = max(1, scale), margin = 0.5 / amount, travel = 1 - 2 * margin
+        var clusters = clusters(samples: samples, start: start, end: end, scale: amount, style: style)
+        if let aimAt, let index = clusters.firstIndex(where: { $0.start <= aimAt && aimAt <= $0.last })
+            ?? clusters.lastIndex(where: { $0.start <= aimAt }), index > 0 {
+            clusters[index].start = clusters[0].start
+            clusters.removeFirst(index)
+        }
+        let omega0 = omega0(style: style), zeta = capZeta, lead = lead(style: style)
+        func toTravel(_ value: Double) -> Double { travel > 0.000001 ? min(1, max(0, (value - margin) / travel)) : 0.5 }
+        func toScreen(_ value: Double) -> Double { margin + min(1, max(0, value)) * travel }
+        func snap(_ value: Double) -> Double {
+            let low = edgeSnap, high = 1 - edgeSnap
+            guard edgeSnap > 0, high > low else { return min(1, max(0, value)) }
+            return min(1, max(0, (value - low) / (high - low)))
+        }
+        let fallback = initial.map { CGPoint(x: toTravel($0.x), y: toTravel($0.y)) } ?? CGPoint(x: 0.5, y: 0.5)
+        func target(at time: Double) -> CGPoint {
+            guard let cluster = clusters.last(where: { $0.start - lead <= time }) ?? clusters.first else { return fallback }
+            let focus = cluster.center
+            return CGPoint(x: snap(min(1, max(0, focus.x))), y: snap(min(1, max(0, focus.y))))
+        }
+
+        let length = end - start
+        let steps = max(1, Int(ceil(length / step)))
         let outputStride = max(4, Int(ceil(Double(steps) / 190_000)))
-        var lastTarget = initial
-        let speedProbe = PointerSpeedProbe(samples: samples)
-        let drags = dragIntervals(clicks: clicks, samples: samples)
-        let baseOmega = 6 / response
-        // 前瞻的一阶低通：约 0.13 秒时间常数，弹簧档位切换时前瞻量平滑过渡而不是跳变。
-        let leadSmoothing = 1 - exp(-dt / 0.13)
-        var lookahead = max(prediction, 2 / baseOmega)
-        // 点击提前对准：落点在 0.35 秒内就把目标换成点击处，相机先到、点击后到。
-        let clickLead = max(prediction, 0.35)
-        for step in 1...steps {
-            let local = min(length, Double(step) * dt), time = start + local
-            while dragIndex < drags.count && drags[dragIndex].upperBound < time { dragIndex += 1 }
-            let dragging = dragIndex < drags.count && drags[dragIndex].contains(time)
-            while clickIndex + 1 < clicks.count && clicks[clickIndex + 1].time - clickLead <= time { clickIndex += 1 }
-            let click = clicks[clickIndex]
-            let holding = time >= click.time - clickLead && time <= click.time + 0.4
-            // 弹簧档位：点击附近略硬，拖拽期间更硬；ω 变了，滞后补偿也跟着变。
-            let profile = dragging ? 1.4 : holding ? 1.15 : 1.0
-            let omega = baseOmega * profile
-            // 前瞻 = 弹簧滞后补偿（2 / ω）与用户前瞻取大，再按指针速度多看一点：每 1 画面宽 / 秒多 0.12 秒，最多再多 0.28 秒。
-            let wantedLookahead = min(0.4, max(prediction, 2 / omega) + min(0.28, speedProbe.speed(at: time) * 0.12))
-            lookahead += (wantedLookahead - lookahead) * leadSmoothing
-            let future = min(end, time + lookahead)
-            while sampleIndex + 1 < samples.count && samples[sampleIndex + 1].time <= future { sampleIndex += 1 }
-            var cursor: CGPoint?
-            if sampleIndex < samples.count {
-                let a = samples[sampleIndex]
-                if a.kind != .exit, a.time <= future {
-                    var p = CGPoint(x: a.x, y: a.y)
-                    if sampleIndex + 1 < samples.count {
-                        let b = samples[sampleIndex + 1], span = b.time - a.time
-                        if b.kind != .exit, span > 0, span < 0.2 {
-                            let weight = min(1, max(0, (future - a.time) / span))
-                            p.x += (b.x - a.x) * weight; p.y += (b.y - a.y) * weight
-                        }
-                    }
-                    cursor = p
+        var position = initial.map { CGPoint(x: toTravel($0.x), y: toTravel($0.y)) } ?? target(at: start)
+        var velocity = CGPoint.zero
+        var frozen: CGPoint?
+        var frames = [FocusKeyframe(time: 0, x: toScreen(position.x), y: toScreen(position.y), scale: scale, move: 0)]
+        var pending: FocusKeyframe?
+        for index in 1...steps {
+            let local = min(length, Double(index) * step), time = start + local
+            let goal: CGPoint
+            if local >= length - freezeTail { goal = frozen ?? target(at: time); frozen = goal } else { goal = target(at: time) }
+            spring(&position, &velocity, toward: goal, dt: step, omega0: omega0, zeta: zeta)
+            position.x = min(1, max(0, position.x)); position.y = min(1, max(0, position.y))
+            let frame = FocusKeyframe(time: local, x: toScreen(position.x), y: toScreen(position.y), scale: scale, move: 0)
+            if index % outputStride == 0 || index == steps {
+                if let last = frames.last, abs(frame.x - last.x) < 0.000_001, abs(frame.y - last.y) < 0.000_001, index != steps {
+                    // 静止阶段不存密集帧，只记住最后一帧：一动起来先补上它，插值才不会把静止拉成缓慢漂移。
+                    pending = frame
+                } else {
+                    if let held = pending { frames.append(held); pending = nil }
+                    frames.append(frame)
                 }
-            }
-            if local < length - style.easeOut {
-                if holding {
-                    let target = AutoFocus.clamp(CGPoint(x: click.x, y: click.y), scale: scale)
-                    if hypot(target.x - committed.x, target.y - committed.y) > 0.035 { committed = target }
-                } else if let cursor {
-                    // 只对离开安全区的那个轴回中，且只回到内区边缘：移动量最小，阅读扫视时相机基本不动。
-                    let safeRatio = min(0.95, max(0.2, style.safeZone))
-                    let safeHalf = 0.5 / scale * safeRatio
-                    let innerHalf = 0.5 / scale * min(safeRatio * 0.95, max(0, style.innerZone))
-                    if abs(cursor.x - committed.x) > safeHalf { committed.x = cursor.x - (cursor.x > committed.x ? innerHalf : -innerHalf) }
-                    if abs(cursor.y - committed.y) > safeHalf { committed.y = cursor.y - (cursor.y > committed.y ? innerHalf : -innerHalf) }
-                    committed = AutoFocus.clamp(committed, scale: scale)
-                }
-                // 自适应指数平滑，按内容时间而非播放器帧率校正。
-                let distance = hypot(committed.x - filtered.x, committed.y - filtered.y)
-                let base = 0.08 + 0.24 * min(1, distance / 0.25)
-                let factor = 1 - pow(1 - base, dt / (1.0 / 60))
-                filtered.x += (committed.x - filtered.x) * factor
-                filtered.y += (committed.y - filtered.y) * factor
-                lastTarget = filtered
-            }
-            // 弹簧运动：速度保留，目标改变不会重启 ease-in。
-            let ax = omega * omega * (lastTarget.x - position.x) - 2 * omega * velocity.x
-            let ay = omega * omega * (lastTarget.y - position.y) - 2 * omega * velocity.y
-            // 追赶：光标（前瞻后的位置）已在视口之外时放宽加速度与限速，偏出越多放得越开，追回来即恢复。
-            // 加速度上限随档位平方放宽（弹簧刚度也是 ω²），拖拽档另放宽限速；否则更硬的弹簧会被上限抹平，档位形同虚设。
-            var maxAcceleration = 3.0 * profile * profile, maxVelocity = 0.8 * (dragging ? 1.4 : 1)
-            if let cursor {
-                let half = CGFloat(0.5 / scale) * 0.9
-                let outside = max(abs(cursor.x - position.x) - half, abs(cursor.y - position.y) - half)
-                if outside > 0 {
-                    maxAcceleration += min(9, Double(outside) * 40)
-                    maxVelocity += min(1.4, Double(outside) * 10)
-                }
-            }
-            velocity.x += min(maxAcceleration, max(-maxAcceleration, ax)) * dt
-            velocity.y += min(maxAcceleration, max(-maxAcceleration, ay)) * dt
-            velocity.x = min(maxVelocity, max(-maxVelocity, velocity.x))
-            velocity.y = min(maxVelocity, max(-maxVelocity, velocity.y))
-            position.x += velocity.x * dt; position.y += velocity.y * dt
-            // 画面边界是墙：目标本来就在可达带内，临界阻尼不会过冲，只有追赶阶段偶尔撞上；撞上就停在墙上并吃掉朝外的速度。
-            let margin = CGFloat(0.5 / scale)   // 明确为 CGFloat：旧编译器下 Double 与 CGFloat 混算会报 "*" 歧义
-            if position.x < margin { position.x = margin; velocity.x = max(0, velocity.x) }
-            if position.x > 1 - margin { position.x = 1 - margin; velocity.x = min(0, velocity.x) }
-            if position.y < margin { position.y = margin; velocity.y = max(0, velocity.y) }
-            if position.y > 1 - margin { position.y = 1 - margin; velocity.y = min(0, velocity.y) }
-            if step % outputStride == 0 || step == steps {
-                frames.append(FocusKeyframe(time: local, x: position.x, y: position.y, scale: scale, move: 0))
             }
         }
-        // 真正静止的镜头无需保存密集轨迹；动态镜头保留采样速度，求值时二分插值。
-        if frames.allSatisfy({ hypot($0.x - initial.x, $0.y - initial.y) < 0.001 }) { return [frames[0]] }
+        // 真正静止的镜头无需保存轨迹。
+        if frames.allSatisfy({ abs($0.x - frames[0].x) < 0.001 && abs($0.y - frames[0].y) < 0.001 }) { return [frames[0]] }
         return frames
     }
-}
 
+    // MARK: 弹簧（Cap spring_mass_damper.rs 的解析解）
 
-/// 指针瞬时速度（画面宽 / 秒）：取某时刻与其后 0.05 秒两点的真实位移；离屏或没有样本时视为静止。
-struct PointerSpeedProbe {
-    private let samples: [PointerSample]
-    init(samples: [PointerSample]) { self.samples = samples }
-
-    func speed(at time: Double) -> Double {
-        guard let a = position(at: time), let b = position(at: time + 0.05) else { return 0 }
-        return hypot(b.x - a.x, b.y - a.y) / 0.05
+    static func spring(_ position: inout CGPoint, _ velocity: inout CGPoint, toward target: CGPoint, dt: Double, omega0: Double, zeta: Double) {
+        let (dx, vx) = solve(displacement: position.x - target.x, velocity: velocity.x, t: dt, omega0: omega0, zeta: zeta)
+        let (dy, vy) = solve(displacement: position.y - target.y, velocity: velocity.y, t: dt, omega0: omega0, zeta: zeta)
+        position = CGPoint(x: target.x + dx, y: target.y + dy)
+        velocity = CGPoint(x: vx, y: vy)
+        if hypot(dx, dy) < 0.000_01, hypot(vx, vy) < 0.000_1 { position = target; velocity = .zero }
     }
 
-    /// 相邻两个移动样本之间线性插值；跨越 exit 或相隔太久（> 0.2 秒）不插值。
-    func position(at time: Double) -> CGPoint? {
-        guard !samples.isEmpty else { return nil }
-        var low = 0, high = samples.count
-        while low < high { let middle = (low + high) / 2; if samples[middle].time <= time { low = middle + 1 } else { high = middle } }
-        guard low > 0 else { return nil }
-        let a = samples[low - 1]
-        guard a.kind != .exit else { return nil }
-        if low < samples.count {
-            let b = samples[low], span = b.time - a.time
-            if b.kind != .exit, span > 0, span < 0.2 {
-                let weight = min(1, max(0, (time - a.time) / span))
-                return CGPoint(x: a.x + (b.x - a.x) * weight, y: a.y + (b.y - a.y) * weight)
-            }
+    /// 一维弹簧-质量-阻尼在 t 秒后的位移与速度：欠阻尼 / 过阻尼 / 临界三种解析解。
+    static func solve(displacement: Double, velocity: Double, t: Double, omega0: Double, zeta: Double) -> (Double, Double) {
+        let epsilon = 0.01
+        if zeta < 1 - epsilon {
+            let omegaD = omega0 * (1 - zeta * zeta).squareRoot()
+            let decay = exp(-zeta * omega0 * t), cosine = cos(omegaD * t), sine = sin(omegaD * t)
+            let a = displacement, b = (velocity + displacement * zeta * omega0) / max(omegaD, 0.0001)
+            return (decay * (a * cosine + b * sine),
+                    decay * ((b * omegaD - a * zeta * omega0) * cosine - (a * omegaD + b * zeta * omega0) * sine))
         }
-        return CGPoint(x: a.x, y: a.y)
+        if zeta > 1 + epsilon {
+            let root = (zeta * zeta - 1).squareRoot()
+            let s1 = -omega0 * (zeta - root), s2 = -omega0 * (zeta + root), denominator = s1 - s2
+            let c1 = (velocity - displacement * s2) / denominator, c2 = displacement - c1
+            let e1 = exp(s1 * t), e2 = exp(s2 * t)
+            return (c1 * e1 + c2 * e2, c1 * s1 * e1 + c2 * s2 * e2)
+        }
+        let decay = exp(-omega0 * t), a = displacement, b = velocity + displacement * omega0
+        return (decay * (a + b * t), decay * (b - omega0 * (a + b * t)))
     }
 }

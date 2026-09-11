@@ -4,7 +4,7 @@ import Testing
 @testable import EditingCore
 
 /// 无点击的手动讲解镜头：推近到指针所在并跟随；相邻镜头直接平移衔接；重叠镜头分层混合无跳变；
-/// 快速横跨追得上、原地抖动不动、离开安全区只回到内区、起点落在指针将要到的位置。
+/// 快速横跨追得上、原地抖动不动、离开盒子后对准新盒子的中心、起点落在指针接下来那一段的中心。
 private func moves(from a: CGPoint, to b: CGPoint, start: Double, end: Double, rate: Double = 60) -> [PointerSample] {
     stride(from: start, through: end, by: 1 / rate).map { time in
         let progress = (time - start) / max(0.0001, end - start)
@@ -17,6 +17,18 @@ private func manualShot(start: Double, duration: Double, scale: Double = 1.8, x:
     var shot = FocusSegment(start: start, duration: duration, x: x, y: y, scale: scale)
     shot.timelineStart = start; shot.followsTimeline = follows; shot.easeIn = 0.6; shot.easeOut = 0.7
     return shot
+}
+/// 相邻两个移动样本之间线性插值的指针位置。
+private func pointer(in samples: [PointerSample], at time: Double) -> CGPoint? {
+    var low = 0, high = samples.count
+    while low < high { let m = (low + high) / 2; if samples[m].time <= time { low = m + 1 } else { high = m } }
+    guard low > 0 else { return nil }
+    let a = samples[low - 1]
+    guard low < samples.count else { return CGPoint(x: a.x, y: a.y) }
+    let b = samples[low], span = b.time - a.time
+    guard span > 0, span < 0.2 else { return CGPoint(x: a.x, y: a.y) }
+    let w = max(0, min(1, (time - a.time) / span))
+    return CGPoint(x: a.x + (b.x - a.x) * w, y: a.y + (b.y - a.y) * w)
 }
 private func maxStep(_ edit: VideoEdit, from: Double, to: Double, rate: Double = 240) -> (position: Double, scale: Double) {
     var previous = SceneEvaluator.focus(edit: edit, time: from)
@@ -37,8 +49,8 @@ private func maxStep(_ edit: VideoEdit, from: Double, to: Double, rate: Double =
     let shot = try! #require(resolved.focuses.first)
     #expect(shot.sampledPath == true && (shot.path?.count ?? 0) > 2)
     let settled = SceneEvaluator.focus(edit: resolved, time: 2.8)
-    // 推近落在指针附近，而不是画面中心。
-    #expect(abs(settled.x - 0.42) < 0.05 && abs(settled.y - max(0.3, 0.5 / settled.scale)) < 0.05)
+    // 推近落在指针附近（第一个簇的中心，离指针不超过半个盒子），而不是画面中心。
+    #expect(abs(settled.x - 0.42) < 0.5 / 1.8 * 0.5 + 0.01 && abs(settled.y - max(0.3, 0.5 / settled.scale)) < 0.06)
     let later = SceneEvaluator.focus(edit: resolved, time: 8.5)
     #expect(later.x > settled.x + 0.12)
     #expect(maxStep(resolved, from: 2, to: 9).position < 0.006)
@@ -85,10 +97,9 @@ private func maxStep(_ edit: VideoEdit, from: Double, to: Double, rate: Double =
         + hold(CGPoint(x: 0.85, y: 0.5), start: 4.25, end: 8) + moves(from: CGPoint(x: 0.85, y: 0.5), to: CGPoint(x: 0.15, y: 0.85), start: 8, end: 8.3) + hold(CGPoint(x: 0.15, y: 0.85), start: 8.3, end: 16)
     let resolved = edit.resolvingTimelineFocus(events: events)
     var outside = 0.0
-    let probe = PointerSpeedProbe(samples: events)
     for time in stride(from: 1.7, through: 13.0, by: 1.0 / 120) {
         let state = SceneEvaluator.focus(edit: resolved, time: time)
-        guard let pointer = probe.position(at: time) else { continue }
+        guard let pointer = pointer(in: events, at: time) else { continue }
         let half = 0.5 / state.scale
         if abs(pointer.x - state.x) > half || abs(pointer.y - state.y) > half { outside += 1.0 / 120 }
     }
@@ -113,16 +124,19 @@ private func maxStep(_ edit: VideoEdit, from: Double, to: Double, rate: Double =
     #expect(travel < 0.03)
 }
 
-@Test func leavingTheSafeZoneRecentersOnlyToTheInnerZone() {
+@Test func leavingTheBoxAimsAtTheNewClusterAndSmallWanderingDoesNot() {
     var edit = VideoEdit(duration: 12)
     edit.focuses = [manualShot(start: 1, duration: 10)]
     let events = hold(CGPoint(x: 0.5, y: 0.5), start: 0, end: 3) + moves(from: CGPoint(x: 0.5, y: 0.5), to: CGPoint(x: 0.85, y: 0.5), start: 3, end: 3.6) + hold(CGPoint(x: 0.85, y: 0.5), start: 3.6, end: 12)
     let resolved = edit.resolvingTimelineFocus(events: events)
+    // 出发前相机在第一个簇的中心附近（离 0.5 不超过半个盒子）；光标停到 0.85（靠边 25% 以内）之后取景框贴到右缘，光标在框内。
+    #expect(abs(SceneEvaluator.focus(edit: resolved, time: 2.5).x - 0.5) < 0.5 / 1.8 * 0.5 + 0.01)
     let settled = SceneEvaluator.focus(edit: resolved, time: 7)
-    // 光标停在 0.85：相机只把它带回内区边缘（0.85 − 0.5 / 1.8 × 0.42 ≈ 0.733），不整轴回中到 0.85。
-    let expected = 0.85 - 0.5 / 1.8 * 0.42
-    #expect(abs(settled.x - expected) < 0.03)
-    #expect(settled.x < 0.8)
+    #expect(abs(settled.x - (1 - 0.5 / 1.8)) < 0.001 && abs(0.85 - settled.x) < 0.5 / 1.8)
+    // 在盒子里晃（视口一半以内）：目标不换、相机不动。
+    let wander = hold(CGPoint(x: 0.5, y: 0.5), start: 0, end: 3) + moves(from: CGPoint(x: 0.5, y: 0.5), to: CGPoint(x: 0.6, y: 0.55), start: 3, end: 3.4) + hold(CGPoint(x: 0.6, y: 0.55), start: 3.4, end: 12)
+    let still = edit.resolvingTimelineFocus(events: wander)
+    #expect(abs(SceneEvaluator.focus(edit: still, time: 7).x - SceneEvaluator.focus(edit: still, time: 2.5).x) < 0.001)
 }
 
 @Test func manualShotStartsWhereThePointerIsAboutToBe() {
@@ -131,7 +145,7 @@ private func maxStep(_ edit: VideoEdit, from: Double, to: Double, rate: Double =
     let events = hold(CGPoint(x: 0.2, y: 0.5), start: 0, end: 2) + moves(from: CGPoint(x: 0.2, y: 0.5), to: CGPoint(x: 0.6, y: 0.5), start: 2, end: 3) + hold(CGPoint(x: 0.6, y: 0.5), start: 3, end: 10)
     let resolved = edit.resolvingTimelineFocus(events: events)
     let shot = try! #require(resolved.focuses.first)
-    // 推近完成六成处（2 + 0.36 秒）指针在 0.344；起点取它而不是按下那一刻的 0.2。
+    // 起点对准指针接下来那一段（第一个簇）的中心，而不是按下那一刻的 0.2。
     let initial = shot.camera(at: 0)
-    #expect(abs(initial.x - 0.344) < 0.03)
+    #expect(initial.x > 0.3 && initial.x < 0.42, "起点 \(initial.x)")
 }
