@@ -473,13 +473,13 @@ extension WindowLifecycleTests {
         let harness = TimelinePointerHarness(model: model, zoom: 1)
         defer { harness.close() }
         let head = TimelineViewportView.timeOrigin
-        // 镜头行（第 0 行，y = 48）里 3.3 → 3.9 秒的空白：按下定位、拖动不建镜头也不弹确认。
+        // 镜头行（第 0 行，y = 48）里 3.3 → 3.9 秒的空白：按下定位并取消选中、拖动不建镜头也不弹确认。
         try harness.mouse(.leftMouseDown, x: head + 3.3 * 120, y: 48)
         #expect(abs(model.position - 3.3) < 0.02)
         try harness.mouse(.leftMouseDragged, x: head + 3.9 * 120, y: 48)
         try harness.mouse(.leftMouseUp, x: head + 3.9 * 120, y: 48)
         #expect(model.edit.focuses.count == 1 && model.pendingFocus == nil)
-        #expect(model.selectedFocus == existing)
+        #expect(model.selectedFocus == nil, "点空白应当取消选中（之前选中的是 \(existing)）")
         // 所有行下方的空白同样只定位。
         let belowRows = 28 + Double(model.edit.timelineRows.count) * 42 + 20
         try harness.mouse(.leftMouseDown, x: head + 0.5 * 120, y: belowRows)

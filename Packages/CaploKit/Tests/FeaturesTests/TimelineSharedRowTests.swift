@@ -319,9 +319,10 @@ private final class SharedTimelineHarness {
 
 
 extension WindowLifecycleTests {
-    /// 点行内空白只挪播放头，**不选中**任何块；行头（轨道图标那一列）照旧选中并可整行拖。
-    /// 一行现在装的是整条轨，"点空白就选中这一行的第一块"会选到八竿子打不着的东西。
-    @Test func clickingEmptySpaceInARowOnlySeeksAndKeepsTheSelection() async throws {
+    /// 点行内空白挪播放头并**取消选中**（2026-09-14 起）；行头（轨道图标那一列）照旧选中并可整行拖。
+    /// 一行现在装的是整条轨，"点空白就选中这一行的第一块"会选到八竿子打不着的东西；
+    /// 而选中之后没有一处能取消，面板就一直卡在那一块上。
+    @Test func clickingEmptySpaceInARowSeeksAndClearsTheSelection() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let model = try await makeEmptyClickModel(root: root)
@@ -330,7 +331,7 @@ extension WindowLifecycleTests {
         let harness = EmptyClickHarness(model: model)
         defer { harness.close() }
 
-        // 先选中第一块，作为"点空白之后不该变"的参照。
+        // 先选中第一块，再点空白，选中应当被清掉。
         let origin = TimelineViewportView.timeOrigin
         try harness.mouse(.leftMouseDown, x: origin + 20, y: 49)
         try harness.mouse(.leftMouseUp, x: origin + 20, y: 49)
@@ -341,15 +342,21 @@ extension WindowLifecycleTests {
         let gap = origin + 1.0 * 60
         try harness.mouse(.leftMouseDown, x: gap, y: 49)
         try harness.mouse(.leftMouseUp, x: gap, y: 49)
-        #expect(model.selectedClip == ids[0], "点空白把选中换成了别的块")
+        #expect(model.selectedClip == nil && model.selectedClipIDs.isEmpty, "点空白没有取消选中")
         #expect(abs(model.position - 1.0) < 0.05, "点空白没有把播放头挪过去（现在在 \(model.position)）")
         #expect(model.edit == before, "点空白改动了工程")
         #expect(!model.history.canUndo)
 
-        // 所有行下方的大片空白同样只定位。
-        try harness.mouse(.leftMouseDown, x: origin + 1.6 * 60, y: 230)
-        try harness.mouse(.leftMouseUp, x: origin + 1.6 * 60, y: 230)
+        // 所有行下方的大片空白同样定位并取消选中。
+        try harness.mouse(.leftMouseDown, x: origin + 20, y: 49)
+        try harness.mouse(.leftMouseUp, x: origin + 20, y: 49)
         #expect(model.selectedClip == ids[0])
+        // 旧写法点在 y = 230，落在导航条那一带、根本没进轨道区，断言"选中不变"因此空转。
+        let belowRows = 28 + Double(model.edit.timelineRows.count) * 42 + 12
+        try harness.mouse(.leftMouseDown, x: origin + 1.6 * 60, y: belowRows)
+        try harness.mouse(.leftMouseUp, x: origin + 1.6 * 60, y: belowRows)
+        #expect(model.selectedClip == nil, "点所有行下方的空白没有取消选中")
+        #expect(abs(model.position - 1.6) < 0.05, "点行下空白没有定位（现在在 \(model.position)）")
 
         // 行头仍然选中这一行并允许整行拖动。
         try harness.mouse(.leftMouseDown, x: 20, y: 49)
@@ -397,7 +404,7 @@ private final class EmptyClickHarness {
         self.model = model
         viewport = TimelineViewport(); viewport.zoom = 0; viewport.snapping = false
         view = TimelineViewportView(model: model, viewport: viewport)
-        view.frame = CGRect(x: 0, y: 0, width: 900, height: 260)
+        view.frame = CGRect(x: 0, y: 0, width: 900, height: 400)
         window = NSWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.contentView = view
         sync()

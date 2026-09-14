@@ -1007,6 +1007,15 @@ final class TimelineViewportView: NSView {
         else if let role = block.role { model.selectedMedia = role; model.selectedMediaID = block.id }
         else { model.selectedFocus = block.id }
     }
+    /// 点空白取消选中：模型里所有类别一起清，面板随之回到"没有选中"的提示。
+    private func deselect() {
+        guard model.selectedClip != nil || !model.selectedClipIDs.isEmpty || model.selectedFocus != nil
+                || model.selectedMask != nil || model.selectedText != nil || model.selectedCaption != nil
+                || model.selectedMediaID != nil else { return }
+        model.clearSelection()
+        model.selectedClip = nil; model.selectedClipIDs = []
+        needsDisplay = true
+    }
     /// 底色与描边已经在行里按类别攒成一条路径画过了（见 drawTimelineContents），这里只画块里的内容。
     private func drawBlock(_ block: Block, row: Int) {
         let rect = blockRect(block, row: row)
@@ -1067,10 +1076,10 @@ final class TimelineViewportView: NSView {
         guard trackArea.contains(point) else { return }
         let number = Int((point.y - 28 + verticalOffset) / rowHeight)
         if point.x >= headerWidth, point.x < timeOrigin { return }
-        // 所有行下方的空白：按下只定位；新建聚焦只走右键菜单。
+        // 所有行下方的空白：按下只定位并取消选中；新建聚焦只走右键菜单。
         guard rows.indices.contains(number), let first = rows[number].first else {
             guard point.x >= timeOrigin, number >= rows.count else { return }
-            retainedExtent = 0; model.seek(time(point.x))
+            retainedExtent = 0; model.seek(time(point.x)); deselect()
             return
         }
         let hit = hitBlock(at: point, row: number)
@@ -1083,10 +1092,10 @@ final class TimelineViewportView: NSView {
             drag = Drag(kind: .reorder(block.id), origin: point, snapshot: edit, timeline: index, scale: scale, offset: offset, rowIDs: rows.map { $0.map(\.id) }, snapEdges: [])
             return
         }
-        // 行内空白处：只把播放头挪过来，**不选中**任何块。
+        // 行内空白处：把播放头挪过来，并取消当前选中——点空白就是"我不要选它了"。
         // 一行上现在可能同时有画面、卡段、镜头，"点空白就选中这一行的第一块"会选到八竿子打不着的东西。
         guard let hit else {
-            retainedExtent = 0; model.seek(time(point.x))
+            retainedExtent = 0; model.seek(time(point.x)); deselect()
             return
         }
         let block = hit.0
