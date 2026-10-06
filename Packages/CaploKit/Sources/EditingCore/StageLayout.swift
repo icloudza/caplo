@@ -263,18 +263,28 @@ extension VideoEdit {
         return card.id
     }
 
-    /// 删掉一段卡段：定格片段一起删，后面的一切前移同样的时长。
+    /// 卡段在人像轨上的那一帧定格：插入时与画面定格同起点，`holdSource` 指向冻结自的人像片段。
+    /// 删卡段、改时长、撤掉插入时长都要带上它——只动画面轨的话，删掉后人像轨上留下一段静止画面
+    /// 叠在正常人像上，拉长后人像在卡段尾部断一截。用户自己挪开过的定格不再认领。
+    func holdCameraIndex(for frozen: VideoClip) -> Int? {
+        guard let values = cameraClips else { return nil }
+        let start = frozen.timelineStart ?? 0
+        return values.firstIndex { $0.holdSource != nil && abs(($0.timelineStart ?? -1) - start) < 0.001 }
+    }
+
+    /// 删掉一段卡段：画面与人像的定格片段一起删，后面的一切前移同样的时长。
     public mutating func removeHoldCard(textID: UUID) {
         guard let card = text(id: textID), let clipID = card.holdClipID,
               let frozen = clips.first(where: { $0.id == clipID }) else { return }
         let point = frozen.timelineStart ?? 0, length = frozen.duration
+        if let still = holdCameraIndex(for: frozen) { cameraClips?.remove(at: still) }
         clips.removeAll { $0.id == clipID }
         removeText(id: textID)
         rippleTimeline(from: point + length, by: -length)
         normalizeTimelineRows()
     }
 
-    /// 改卡段时长：定格片段与文字一起变，后面的一切跟着挪。
+    /// 改卡段时长：画面与人像的定格片段、文字一起变，后面的一切跟着挪。
     public mutating func setHoldCardDuration(textID: UUID, duration wanted: Double) {
         guard let card = text(id: textID), let clipID = card.holdClipID,
               let number = clips.firstIndex(where: { $0.id == clipID }) else { return }
@@ -283,6 +293,11 @@ extension VideoEdit {
         let delta = length - old
         guard abs(delta) > 0.0001 else { return }
         let end = (clips[number].timelineStart ?? 0) + old
+        if let still = holdCameraIndex(for: clips[number]), var values = cameraClips {
+            values[still].duration = length
+            values[still].mediaDuration = min(length, values[still].mediaDuration ?? length)
+            cameraClips = values
+        }
         clips[number].duration = length
         clips[number].mediaDuration = min(length, clips[number].mediaDuration ?? length)
         updateText(id: textID) { $0.duration = length }
@@ -442,6 +457,7 @@ extension VideoEdit {
         var kept = value
         kept.holdClipID = nil
         let point = frozen.timelineStart ?? 0, length = frozen.duration
+        if let still = holdCameraIndex(for: frozen) { cameraClips?.remove(at: still) }
         clips.removeAll { $0.id == clipID }
         updateText(id: textID) { $0 = kept }
         rippleTimeline(from: point + length, by: -length)

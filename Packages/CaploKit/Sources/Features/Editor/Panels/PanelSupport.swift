@@ -33,6 +33,82 @@ struct EditorSlider: View {
     }
 }
 
+/// 卡尺之外的四种参数控件，按参数性质分工（2026-10-06 起）：
+/// - 卡尺：尺寸、倍率、像素这类要看刻度、要感觉"放大了多少"的量。
+/// - `EditorStepper`：秒。范围小、要精确到一步，点一下走 0.05 秒比对准细刻度省事。
+/// - `EditorFill`：比例 / 强度 / 不透明度 / 音量。看填充长短就知道大概，一行一个参数。
+/// - `EditorDial`：角度。
+/// - `EditorRegion`：二维位置与区域，在按画面比例画的底板上直接拖。
+/// 拖动、步进、重置都包在模型的交互事务里，和卡尺一样只记一步撤销。
+struct EditorStepper: View {
+    let model: VideoEditorModel
+    let title: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    var step = 0.05
+    var defaultValue: Double? = nil
+
+    var body: some View {
+        let decimals = step < 0.05 ? 2 : (step < 0.1 ? 2 : 1)
+        ValueStepper(title, value: $value, in: range, step: step, defaultValue: defaultValue,
+                     format: { String(format: "%.\(decimals)f 秒", $0) },
+                     onEditingChanged: { active in if active { model.beginInteraction() } else { model.endInteraction() } })
+    }
+}
+
+struct EditorFill: View {
+    let model: VideoEditorModel
+    let title: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    var suffix = ""
+    var percentage = false
+    var decimals = 2
+    var defaultValue: Double? = nil
+    var detents: [Double] = []
+
+    var body: some View {
+        FillSlider(title, value: $value, in: range, defaultValue: defaultValue, detents: detents,
+                   format: { String(format: percentage ? "%.0f" : "%.\(decimals)f", $0 * (percentage ? 100 : 1)) + suffix },
+                   onEditingChanged: { active in if active { model.beginInteraction() } else { model.endInteraction() } })
+    }
+}
+
+struct EditorDial: View {
+    let model: VideoEditorModel
+    let title: String
+    @Binding var value: Double
+    var defaultValue = 0.0
+
+    var body: some View {
+        AngleDial(title, value: $value, defaultValue: defaultValue,
+                  onEditingChanged: { active in if active { model.beginInteraction() } else { model.endInteraction() } })
+    }
+}
+
+struct EditorRegion: View {
+    let model: VideoEditorModel
+    let title: String
+    let shape: RegionPad.Shape
+    let aspect: Double
+    @Binding var region: CGRect
+    var defaultRegion: CGRect? = nil
+    let readout: (CGRect) -> String
+
+    var body: some View {
+        RegionPad(title, shape: shape, aspect: aspect, region: $region, defaultRegion: defaultRegion, readout: readout,
+                  onEditingChanged: { active in if active { model.beginInteraction() } else { model.endInteraction() } })
+    }
+
+    /// 读数："水平 50% · 垂直 50%"（点 / 取景框中心）或"宽 30% · 高 20%"（框）。
+    static func positionReadout(_ point: CGPoint) -> String {
+        String(format: "水平 %.0f%% · 垂直 %.0f%%", point.x * 100, point.y * 100)
+    }
+    static func sizeReadout(_ rect: CGRect) -> String {
+        String(format: "宽 %.0f%% · 高 %.0f%%", rect.width * 100, rect.height * 100)
+    }
+}
+
 /// 编辑器面板里四类参数的卡尺预设。刻度间隔取主刻度的十分之一，中刻度取一半，像素太密时组件自己放粗。
 /// 阻尼按手感分档：整数量最沉（0.35），倍率 0.32，滚动小数 0.28，固定轨道的百分比 / 短程小数轻一些（0.2）。
 extension CaliperConfiguration {

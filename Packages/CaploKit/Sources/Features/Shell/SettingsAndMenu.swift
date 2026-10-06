@@ -55,6 +55,8 @@ public final class RecordingAppDelegate: NSObject, NSApplicationDelegate {
     public func applicationDidFinishLaunching(_ notification: Notification) {
         // 产品只有深色玻璃一套主题：系统弹窗、菜单与文件面板也统一按深色外观呈现。
         NSApp.appearance = NSAppearance(named: .darkAqua)
+        // 上次运行借走系统默认输入（语音处理单元只认默认输入）却没来得及还的话，先改回去，再起试听。
+        MicrophoneDefaultInput.restoreIfLeftBehind()
         RecordingPresentation.shared.observe()
         CameraPreviewCoordinator.startObserving()
         NSApp.setActivationPolicy(.regular)

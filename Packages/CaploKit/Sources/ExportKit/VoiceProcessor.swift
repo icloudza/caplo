@@ -3,7 +3,7 @@ import AVFoundation
 import EditingCore
 import ProjectKit
 
-/// 麦克风离线语音处理：以系统声音轨为参考消除扬声器串进麦克风的回声（频域分块自适应滤波，两遍收敛），
+/// 麦克风离线语音处理：以系统声音轨为参考消除扬声器串进麦克风的回声（频域分块自适应滤波，三遍收敛），
 /// 再用短时谱增益压残余回声与底噪。全部在编辑器里离线完成，处理一次写成 CAF 放进工程，预览与导出共用；
 /// 录制下来的原始麦克风文件不动，关掉开关就回到原始声音。
 public enum VoiceProcessor {
@@ -42,12 +42,26 @@ public enum VoiceProcessor {
                 let shift = Int(((segment.offset(for: .microphone) - segment.offset(for: .systemAudio)) * sampleRate).rounded())
                 reference = aligned(system, shift: shift, count: microphone.count)
             }
+            try Task.checkCancellation()
             let processed = process(microphone: microphone, reference: reference, sampleRate: sampleRate)
             try Task.checkCancellation()
             try write(processed, to: outURL)
             progress(Double(index + 1) / Double(pending.count))
         }
+        removeStaleOutputs(project: project)
         if pending.isEmpty { progress(1) }
+    }
+
+    /// 清掉旧算法版本的产物和中途被打断留下的临时文件。旧版本文件名对不上当前版本，永远不会再被读到，只占空间。
+    static func removeStaleOutputs(project: URL) {
+        let media = project.appendingPathComponent("Media")
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: media.path) else { return }
+        let current = "-microphone-vp\(version).caf"
+        for name in names {
+            let stale = name.hasPrefix(".") && name.hasSuffix(".partial.caf")
+                || (name.range(of: #"-microphone-vp\d+\.caf$"#, options: .regularExpression) != nil && !name.hasSuffix(current))
+            if stale { try? FileManager.default.removeItem(at: media.appendingPathComponent(name)) }
+        }
     }
 
     /// 参考数组按 `shift` 平移到目标序号（正值表示参考比麦克风晚开始），不足补零。
@@ -202,9 +216,15 @@ public enum VoiceProcessor {
               let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(max(1, samples.count))) else { throw ProjectError.invalid("无法建立声音缓冲。") }
         buffer.frameLength = AVAudioFrameCount(samples.count)
         samples.withUnsafeBufferPointer { source in buffer.floatChannelData!.pointee.update(from: source.baseAddress!, count: samples.count) }
-        try? FileManager.default.removeItem(at: url)
-        let file = try AVAudioFile(forWriting: url, settings: format.settings, commonFormat: .pcmFormatFloat32, interleaved: false)
-        try file.write(from: buffer)
+        // 先写到同目录的隐藏临时文件，写完关闭后再原子改名。产物是否存在就是"处理过没有"的唯一判据，
+        // 直接写正式文件名的话，中途被取消或崩溃留下的半截文件下次会被当成处理好的结果。
+        let temporary = url.deletingLastPathComponent().appendingPathComponent(".\(url.deletingPathExtension().lastPathComponent)-\(UUID().uuidString).partial.caf")
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        try {
+            let file = try AVAudioFile(forWriting: temporary, settings: format.settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+            try file.write(from: buffer)
+        }()   // 出了这个作用域 AVAudioFile 释放并关闭文件，之后才能改名。
+        guard rename(temporary.path, url.path) == 0 else { throw ProjectError.invalid("无法保存处理后的声音：\(String(cString: strerror(errno)))") }
     }
 }
 

@@ -122,8 +122,7 @@ final class TextCanvasView: NSView {
         let point = convert(event.locationInWindow, from: nil)
         guard active, let hit = target(at: point) else { return }
         if model.selectedText != hit.id {
-            model.selectedText = hit.id; model.selectedFocus = nil; model.selectedMask = nil
-            model.selectedMedia = nil; model.selectedMediaID = nil
+            model.select(.text(hit.id))
             needsDisplay = true
             if hit.handle == .body { return }
         }

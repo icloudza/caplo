@@ -48,16 +48,13 @@ struct TimelineToolbar: View {
                 .buttonStyle(StudioIconButtonStyle(active: viewport.snapping))
                 .hoverTip("边界吸附 · 拖动时按 ⌥ 暂时关闭").accessibilityLabel("边界吸附").accessibilityValue(viewport.snapping ? "开" : "关")
             toolbarDivider
-            // 缩放下限 = 适合窗口的那一档，不能缩到整条时间线只占一小截。
-            let minimumZoom = viewport.minimumZoom(for: model.edit.duration)
-            Button { viewport.zoom = max(minimumZoom, viewport.zoom - 0.5) } label: { Image(systemName: "minus") }
-                .buttonStyle(StudioIconButtonStyle(size: .small)).hoverTip("缩小时间线").accessibilityLabel("缩小时间线")
-            CaliperSlider("时间线缩放", value: Binding(get: { viewport.zoom }, set: { viewport.zoom = $0 }),
-                          configuration: CaliperConfiguration(track: .fixed, size: .compact, range: min(minimumZoom, 4)...4, step: 0.5, tickStep: 1, major: 4, mid: 2,
-                                                              detents: [0], magnet: .detents, inertia: false, fade: .off, defaultValue: max(0, min(minimumZoom, 4)), damping: 0.18))
-                .frame(width: 96, height: 26)
-            Button { viewport.zoom = min(4, viewport.zoom + 0.5) } label: { Image(systemName: "plus") }
-                .buttonStyle(StudioIconButtonStyle(size: .small)).hoverTip("放大时间线").accessibilityLabel("放大时间线")
+            // 缩放：图标 + 细滑条（参照 Logic），连续拖动；倍率是 2 的指数，线性拖动即等比缩放。
+            // 下限 = 适合窗口的那一档，不能缩到整条时间线只占一小截；双击滑条回到适合窗口。
+            let minimumZoom = min(viewport.minimumZoom(for: model.edit.duration), 4)
+            ThinSlider("时间线缩放", systemImage: "arrow.left.and.right", value: Binding(get: { viewport.zoom }, set: { viewport.zoom = $0 }),
+                       in: minimumZoom...max(4, minimumZoom + 0.5), onReset: { viewport.fit(duration: model.edit.duration) })
+                .frame(width: 104)
+                .hoverTip("缩放时间线 · 双击适合窗口")
             Button { viewport.fit(duration: model.edit.duration) } label: { Image(systemName: "arrow.left.and.right.square") }
                 .buttonStyle(StudioIconButtonStyle()).hoverTip("缩放到适合窗口").accessibilityLabel("适合窗口")
         }

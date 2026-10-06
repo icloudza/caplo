@@ -107,7 +107,7 @@ final class MaskCanvasView: NSView {
         let point = convert(event.locationInWindow, from: nil)
         guard active, let hit = target(at: point) else { return }
         if model.selectedMask != hit.id {
-            model.selectedMask = hit.id; model.selectedFocus = nil; model.selectedMedia = nil; model.selectedMediaID = nil
+            model.select(.mask(hit.id))
             needsDisplay = true
             // 刚点中的是别的遮罩：这一下只做选中，避免误拖。
             if hit.handle == .body { return }

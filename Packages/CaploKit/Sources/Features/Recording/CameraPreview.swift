@@ -123,7 +123,6 @@ final class CameraPreviewView: NSView {
 @MainActor
 enum CameraPreviewCoordinator {
     private static var observing = false
-    private static var lastVisible: Bool?
 
     static func startObserving() {
         guard !observing else { return }
@@ -143,12 +142,6 @@ enum CameraPreviewCoordinator {
         let screen = StudioWindows.currentRecordBarModel?.targetScreen ?? NSScreen.main ?? NSScreen.screens[0]
         // 录制器借用的正是预览那条采集图，接上后对象相同，画面不断；倒计时期间预览采集图继续显示。
         let feed = (busy && usesCamera ? recording : nil) ?? preview
-        let visible = feed != nil
-        if visible != lastVisible {
-            NSLog("Caplo：画中画%@（录制器%@，%@）", visible ? "显示" : "隐藏", busy ? "忙" : "空闲",
-                  recording != nil ? "录制采集图" : preview != nil ? "预览采集图" : "无采集图")
-            lastVisible = visible
-        }
         if let feed { CameraPreviewSession.show(feed: feed, on: screen) } else { CameraPreviewSession.hide() }
     }
 }

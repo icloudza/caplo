@@ -110,6 +110,9 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
     private var reportedFailure: String?
     private var latestFrame: CMSampleBuffer?
     private var latestCameraFrame: CMSampleBuffer?
+    /// 继续录制时积压已满，等提交降下来再开段：记下应当从哪一刻接着录。
+    /// 等待期间到达的样本没有片段可写，新段从它们之后开始，时间轴上不留空洞。
+    private var resumeFrom: CMTime?
     private var timer: DispatchSourceTimer?
     private var clock: CMClock = CMClockGetHostTimeClock()
 
@@ -182,6 +185,10 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
         dispatchPrecondition(condition: .onQueue(queue))
         guard !stopped, roles.contains(role), sample.isValid, sample.presentationTimeStamp.isNumeric, reportedFailure == nil else { return }
         if role == .screen, latestFrame == nil || sample.presentationTimeStamp > latestFrame!.presentationTimeStamp { latestFrame = sample }
+        if let from = resumeFrom, current == nil, !paused {
+            let end = sample.presentationTimeStamp + (sample.duration.isNumeric ? sample.duration : .zero)
+            if end > from { resumeFrom = end }
+        }
         perform {
             // 任一视频到达下一边界都先换段；不能等屏幕回调，否则先到的摄像头帧会被旧段尾裁掉。
             if role.isVideo, !paused, let segment = current,
@@ -220,6 +227,7 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
     }
 
     private func begin(at time: CMTime) throws {
+        resumeFrom = nil
         let segment = OpenSegment(index: index, start: time)
         index += 1
         for role in roles where role != .camera {
@@ -305,6 +313,9 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
                 queue.async { [self] in
                     pending -= 1
                     if let result { fail(result) }
+                    if let from = resumeFrom, pending < 2, current == nil, !paused, !stopped, reportedFailure == nil {
+                        resumeSegment(at: from)
+                    }
                     group.leave()
                 }
             }
@@ -315,6 +326,7 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
         await withCheckedContinuation { continuation in
             queue.async { [self] in
                 paused = true
+                resumeFrom = nil
                 if let current {
                     current.end = CMTimeMaximum(time, current.start + CMTime(value: 1, timescale: 30))
                     retire(current)
@@ -330,15 +342,22 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
             queue.async { [self] in
                 guard !stopped else { continuation.resume(); return }
                 paused = false
-                if let latestFrame {
-                    perform {
-                        guard pending < 2 else { throw RecordingError.message("片段正在提交，请稍后继续录制。") }
-                        try begin(at: time)
-                        try current?.tracks[.screen]?.append(Self.retime(latestFrame, to: time, frameRate: frameRate), audio: false)
-                    }
-                }
+                // 暂停刚把一段送去提交、前一段还没提交完时，立刻开新段会让积压越过上限。
+                // 这不是故障：先记下继续的时刻，等提交降下来再开段（期间有新画面到达时 ingest 会先开段）。
+                // 以前这里直接报错，整段录制随之结束。
+                if pending >= 2 { resumeFrom = time } else { resumeSegment(at: time) }
                 continuation.resume()
             }
+        }
+    }
+
+    /// 从 `time` 起开新段，并用最后一帧画面垫在段首：静止的屏幕可能很久没有新帧，没有首帧的片段无法解码。
+    private func resumeSegment(at time: CMTime) {
+        resumeFrom = nil
+        guard let latestFrame else { return }
+        perform {
+            try begin(at: time)
+            try current?.tracks[.screen]?.append(Self.retime(latestFrame, to: time, frameRate: frameRate), audio: false)
         }
     }
 

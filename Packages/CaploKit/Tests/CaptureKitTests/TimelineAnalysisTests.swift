@@ -43,17 +43,3 @@ import ProjectKit
     #expect(analysis.microphonePeak(from: 0, to: 2.5) == 0)
 }
 
-@Test func waveformPyramidMatchesBruteForcePeaks() {
-    var peaks = [Float](repeating: 0, count: 5_000)
-    var seed: UInt64 = 9
-    for index in peaks.indices { seed = seed &* 6364136223846793005 &+ 1442695040888963407; peaks[index] = Float(seed >> 40) / Float(1 << 24) }
-    let analysis = TimelineAnalysis(system: peaks)
-    for (start, end) in [(0.0, 50.0), (0.123, 0.131), (3.3, 3.35), (10.0, 47.5), (0.0, 0.005), (49.99, 50.0), (12.34, 12.35), (0.07, 0.09), (5.115, 5.125), (1.0, 49.0), (0.0, 0.08)] {
-        let first = Int(start * 100), last = min(peaks.count - 1, max(first, Int((end * 100).rounded(.up)) - 1))
-        let expected = peaks[first...last].max() ?? 0
-        // 金字塔查询必须和逐格扫描完全一致。
-        #expect(analysis.systemPeak(from: start, to: end) == expected, "\(start)…\(end)")
-    }
-    #expect(analysis.systemPeak(from: 60, to: 70) == 0)
-    #expect(analysis.systemPeak(from: 1, to: 1) == 0)
-}

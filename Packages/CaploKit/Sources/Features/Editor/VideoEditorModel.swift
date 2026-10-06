@@ -81,6 +81,9 @@ final class VideoEditorModel {
 
     /// 打字防抖的定时器。
     @ObservationIgnored private var textCommitTask: Task<Void, Never>?
+    /// 后台存盘队列（打开成功后建立）与已经反映到界面上的最后一次写盘编号。
+    @ObservationIgnored private var saver: EditSaveQueue?
+    @ObservationIgnored private var appliedSave = 0
     /// 遮罩面板打开时为真；画布上的遮罩编辑层只在这段时间接收鼠标，其余时候完全放行。
     var maskEditing = false
     /// 文字面板打开时为真，含义同上。
@@ -123,6 +126,15 @@ final class VideoEditorModel {
     private var interactionChangesVisual = false
     /// 裁剪拖动期间画布显示的是边缘帧而不是播放头帧；交互结束（取消、无变化、松手）后要把画布拉回播放头。
     private var edgePreview: (source: Double, clip: UUID?)?
+    /// 录制画面的宽高比（像素尺寸）；读不到时按 16:9。裁剪、镜头位置、遮罩区域的底板都按它画。
+    var sourceAspect: Double {
+        if let size = entry.document.capture?.pixelSize, size.width > 0, size.height > 0 { return size.width / size.height }
+        return 16.0 / 9
+    }
+    /// 导出帧率：与导出编码同一条规则（跟随录制，4K 封顶 60），菜单文案用它，不另写一个常数。
+    func exportFrameRate(longEdge: Int) -> Int { Int(ExportEncoder.frameRate(recorded: entry.document.frameRate, longEdge: longEdge).rounded()) }
+    /// 拖边裁剪时画布正在显示的源时间（只读，供测试核对）。
+    var edgePreviewSource: Double? { edgePreview?.source }
     /// 指针事件只解析一次；重建播放项不再在主线程重复解 JSON。
     private var pointers: PointerTimeline?
     /// 光标大小滑块的下限：与录制时系统光标同大的倍率；素材未载入或旧工程没有真实光标时按 0.5。
@@ -164,11 +176,14 @@ final class VideoEditorModel {
         let url = entry.url, document = entry.document
         voiceProcessingTask = Task { [weak self] in
             do {
-                try await Task.detached(priority: .userInitiated) {
+                // 处理放到后台任务上，不占主线程；但后台任务不随外层取消，要手动转达，
+                // 否则关掉开关或关掉编辑器之后它还在把整段麦克风跑完。
+                let work = Task.detached(priority: .userInitiated) {
                     try await VoiceProcessor.process(project: url, document: document) { value in
                         Task { @MainActor in self?.voiceProcessingState = .processing(value) }
                     }
-                }.value
+                }
+                try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
                 guard let self, !Task.isCancelled, !self.closed else { return }
                 self.voiceProcessingState = .idle
                 self.commit { $0.audio.voiceProcessing = true }
@@ -192,8 +207,10 @@ final class VideoEditorModel {
             selectedClipIDs = Set(edit.clips.prefix(1).map(\.id))
             ready = true; saveStatus = "已保存"
             VideoEditorSessions.current = self
-            // 初次自动生成镜头也落盘，重新打开时保持相同结果。
-            try EditStorage.save(edit, in: entry.url, document: entry.document)
+            // 初次自动生成镜头也落盘，重新打开时保持相同结果。之后的保存交给后台队列，它记得盘上的版本、不再回读旧文件。
+            var versions: EditStorage.FileVersions?
+            try EditStorage.save(edit, in: entry.url, document: entry.document, onDisk: &versions)
+            saver = EditSaveQueue(url: entry.url, document: entry.document, onDisk: versions)
             installTimeObserver()
             // 播放到结尾自动回到暂停态，播放头停在末尾；再按播放从头开始（togglePlayback 已处理）。
             endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] note in
@@ -271,19 +288,47 @@ final class VideoEditorModel {
         edgePreview = nil
         if loading || rebuilding || player.currentItem == nil { refreshFallbackFrame() } else { requestPlayerSeek() }
     }
-    func retrySave() { save(); if saveStatus == "已保存" { error = nil } }
+    func retrySave() {
+        guard ready else { return }
+        save()
+        if settleSave() { error = nil }
+    }
+    /// 排队写盘，不等结果；结果回到主线程后更新"已保存 / 保存失败"。
     private func save() {
-        guard lease != nil, ready else { return }
-        do { try EditStorage.save(edit, in: entry.url, document: entry.document); saveStatus = "已保存" }
-        catch { saveStatus = "保存失败"; self.error = error.localizedDescription }
+        guard lease != nil, ready, let saver else { return }
+        saver.save(edit) { [weak self] outcome in self?.applySave(outcome) }
+    }
+    /// 等后台存盘队列把已经排上的写盘做完，不额外写入。测试读盘核对"提交确实保存了"之前调用。
+    func settlePendingSaves() { _ = settleSave() }
+    /// 同步等排队的写盘全部落盘并按最后结果更新状态。返回是否保存成功。
+    private func settleSave() -> Bool {
+        guard let saver else { return true }
+        let outcome = saver.flush()
+        applySave(outcome)
+        return outcome.error == nil
+    }
+    private func applySave(_ outcome: EditSaveQueue.Outcome) {
+        // 主线程上排着的旧回调可能晚于 flush 的结果到达：编号不比已反映的新就丢掉，免得把成功又改回失败。
+        guard !closed, outcome.number > appliedSave || outcome.number == 0 else { return }
+        appliedSave = max(appliedSave, outcome.number)
+        if let message = outcome.error { saveStatus = "保存失败"; error = message } else { saveStatus = "已保存" }
     }
     func undo() {
+        settleInteraction()
         guard let previous = history.undo(current: edit) else { return }
         edit = previous; save(); normalizeSelection(); refreshPresentation()
     }
     func redo() {
+        settleInteraction()
         guard let next = history.redo(current: edit) else { return }
         edit = next; save(); normalizeSelection(); refreshPresentation()
+    }
+    /// 撤销 / 重做前先把进行中的交互记成一步：打字防抖还没到点、滑块还按着时直接拿撤销栈顶覆盖，
+    /// 之后防抖到点或松手的 endInteraction 会拿旧快照再记一笔，撤销栈里多出一步"把撤销又撤回去"。
+    /// 先收尾的话，这一下撤销撤掉的正好是刚才那段输入或拖动。
+    private func settleInteraction() {
+        textCommitTask?.cancel(); textCommitTask = nil
+        endInteraction()
     }
     private func normalizeSelection() {
         if let role = selectedMedia, let id = selectedMediaID, !edit.mediaClips(role).contains(where: { $0.id == id }) {
@@ -345,6 +390,22 @@ final class VideoEditorModel {
     /// 重命名时间线上的块；空白恢复默认名称。同一次编辑历史。
     func renameBlock(_ id: UUID, to title: String) {
         commit { $0.renameBlock(id, title: title) }
+    }
+    /// 叠加层与素材块的选中目标。
+    enum Selection { case focus(UUID), mask(UUID), text(UUID), caption(UUID), media(TimelineMedia, UUID) }
+    /// 选中一个叠加层或素材块：其他类别一律清空，删除键删的就是眼前这一个。
+    /// 以前面板出现时的自动选中、画布点选、面板里的删除按钮各自只写自己那一项，别的类别留着旧选中；
+    /// 删除按固定优先级（字幕 → 文字 → 遮罩 → 素材 → 镜头）挑，会删掉一个看不见的东西。
+    /// 画面片段的选中（片段面板用）不在互斥之列，删除时它排在最后。
+    func select(_ target: Selection) {
+        clearSelection()
+        switch target {
+        case .focus(let id): selectedFocus = id
+        case .mask(let id): selectedMask = id
+        case .text(let id): selectedText = id
+        case .caption(let id): selectedCaption = id
+        case .media(let role, let id): selectedMedia = role; selectedMediaID = id
+        }
     }
     /// 清掉所有类别的选中项；换选一个别的东西时先调它，免得两处同时高亮。
     func clearSelection() {
@@ -583,8 +644,11 @@ final class VideoEditorModel {
 
     /// 打字期间只改预览；停手 0.6 秒后把这一整段输入合成一个撤销步骤。
     /// 逐字提交会让撤销栈里全是单字，撤三十次才回到上一句。
-    func scheduleTextCommit() {
+    /// 改动由这里代为执行：交互起点必须拍在第一个字落下**之前**——以前面板先改内容再来登记，
+    /// 起点拍到的是改过第一个字的状态，撤销回不到这段输入之前。
+    func typeText(_ change: (inout VideoEdit) -> Void) {
         beginInteraction()
+        change(&edit)
         textCommitTask?.cancel()
         textCommitTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(600))
@@ -1025,8 +1089,9 @@ final class VideoEditorModel {
     func cancelExport() { exportTask?.cancel() }
     func flush() -> Bool {
         endInteraction()
-        if ready { save(); return saveStatus == "已保存" }
-        return true
+        guard ready else { return true }
+        save()
+        return settleSave()
     }
     @discardableResult func close() -> Bool {
         guard !closed else { return true }

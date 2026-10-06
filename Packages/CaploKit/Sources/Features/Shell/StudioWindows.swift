@@ -100,19 +100,30 @@ public enum StudioWindows {
 
     /// 录制条贴在区域框正下方并水平居中；下方放不下时放到框上方；左右钳在可见区域内。
     static func place(_ window: NSWindow, near region: CGRect, on screen: NSScreen) {
-        let visible = screen.visibleFrame
-        let barHeight = CaploMetrics.floatingBarHeight, panelBottomPadding = CaploMetrics.floatingBarInset
-        // 区域为显示器本地左上角坐标；换算到 AppKit 屏幕坐标。
-        let regionTop = screen.frame.maxY - region.minY
-        let regionBottom = screen.frame.maxY - region.maxY
-        var originY = regionBottom - CaploMetrics.Spacing.m - barHeight - panelBottomPadding
-        if originY < visible.minY { originY = regionTop + CaploMetrics.Spacing.m - panelBottomPadding }
-        originY = min(max(visible.minY, originY), visible.maxY - window.frame.height)
-        var originX = screen.frame.minX + region.midX - window.frame.width / 2
-        originX = min(max(visible.minX, originX), visible.maxX - window.frame.width)
+        let origin = recordBarOrigin(near: region, screenFrame: screen.frame, visible: screen.visibleFrame, panelSize: window.frame.size)
         placingRecordBar = true
-        window.setFrameOrigin(CGPoint(x: originX, y: originY))
+        window.setFrameOrigin(origin)
         placingRecordBar = false
+    }
+
+    /// 录制条面板的位置（AppKit 屏幕坐标）。`region` 是显示器本地左上角坐标下的目标框（区域或目标窗口）。
+    /// 依次尝试：框正下方 → 框正上方 → 都放不下时贴显示器底部（与全屏模式同一位置，程序坞上方）。
+    /// 以前上下都放不下时直接钳进可见区域，几乎占满屏幕的窗口（最大化的浏览器）会让录制条顶到屏幕最上面，
+    /// 正好压住目标窗口的标签栏和地址栏，挡住要点的地方。
+    static func recordBarOrigin(near region: CGRect, screenFrame: CGRect, visible: CGRect, panelSize: CGSize) -> CGPoint {
+        let barHeight = CaploMetrics.floatingBarHeight, padding = CaploMetrics.floatingBarInset
+        // 面板比浮动条多一圈留白：上下各 `padding`，浮动条本身在面板中间。
+        let regionTop = screenFrame.maxY - region.minY
+        let regionBottom = screenFrame.maxY - region.maxY
+        let below = regionBottom - CaploMetrics.Spacing.m - barHeight - padding
+        let above = regionTop + CaploMetrics.Spacing.m - padding
+        let originY: CGFloat
+        if below >= visible.minY { originY = below }
+        else if above + panelSize.height <= visible.maxY { originY = above }
+        else { originY = visible.minY + CaploMetrics.Spacing.xl - padding }
+        var originX = screenFrame.minX + region.midX - panelSize.width / 2
+        originX = min(max(visible.minX, originX), visible.maxX - panelSize.width)
+        return CGPoint(x: originX, y: min(max(visible.minY, originY), visible.maxY - panelSize.height))
     }
 
     /// 区域框移动 / 调整时让已显示的录制条跟随；用户自己拖过录制条后停止跟随。

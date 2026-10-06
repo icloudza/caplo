@@ -1,5 +1,6 @@
 @preconcurrency import AVFoundation
 import CoreImage
+import IOSurface
 import CoreImage.CIFilterBuiltins
 import EditingCore
 
@@ -44,6 +45,9 @@ public final class SceneInstruction: NSObject, AVVideoCompositionInstructionProt
     public let plan: FocusPlan
     /// 这一份是自己重新规划的（false 表示直接沿用了上一份的运镜路径）。测试用它确认复用真的发生了。
     public let replanned: Bool
+    /// 设了裁切时换算到裁切区域的镜头（含整条运镜路径）。指令建立时算一次，逐帧直接用；
+    /// 以前每一帧都把全部镜头连同十几万个关键帧重新换算一遍。没有裁切时为 nil。
+    public let croppedFocuses: [FocusSegment]?
     public init(trackID: CMPersistentTrackID, edit: VideoEdit, cameraTrackID: CMPersistentTrackID? = nil, cameraRanges: [CMTimeRange] = [], screenRoutes: [VideoTrackRange] = [], cameraRoutes: [VideoTrackRange] = [], pointers: PointerTimeline = PointerTimeline(events: []), backgroundImage: CIImage? = nil, reusing previous: SceneInstruction? = nil) {
         self.trackID = trackID
         // 指令建立时一次规划；实时播放器与导出逐帧求值同一不可变路径。
@@ -56,6 +60,7 @@ public final class SceneInstruction: NSObject, AVVideoCompositionInstructionProt
             self.edit = edit.resolvingTimelineFocus(events: pointers.focusSamples); replanned = true
         }
         self.backgroundImage = backgroundImage
+        if let crop = self.edit.layout.effectiveCrop, !crop.isFull { croppedFocuses = self.edit.cropResolved().focuses } else { croppedFocuses = nil }
         timeRange = CMTimeRange(start: .zero, duration: CMTime(seconds: edit.duration, preferredTimescale: 48_000))
         self.screenRoutes = (screenRoutes.isEmpty ? [VideoTrackRange(trackID: trackID, range: timeRange)] : screenRoutes).sorted { $0.range.start < $1.range.start }
         self.cameraRoutes = (cameraRoutes.isEmpty ? cameraRanges.compactMap { range in
@@ -90,6 +95,40 @@ public final class SceneInstruction: NSObject, AVVideoCompositionInstructionProt
     }
 }
 
+/// 合成输出的色彩约定：BT.709（与导出文件、录制素材的标签一致）。
+public enum SceneColor {
+    /// 输出色彩空间：取"BT.709 三项标签"在 CoreMedia 里对应的那个空间（`kCGColorSpaceCoreMedia709`）。
+    /// 解码端（播放器、缩略图、Core Image 读源帧）见到 709 标签用的就是它，渲染也必须用它，往返才是恒等的。
+    /// 不能用 `CGColorSpace.itur_709`：那是按 709 摄像机曲线定义的另一条曲线，同样标 709，中灰实测被抬高约 15 个亮度级；
+    /// 更早按 sRGB 曲线写也一样发灰（约 10 级）。导出画面应与原录制逐级一致，见 `exportKeepsTheRecordedBrightness`。
+    public static let output: CGColorSpace = {
+        let tags = [kCVImageBufferColorPrimariesKey: kCVImageBufferColorPrimaries_ITU_R_709_2,
+                    kCVImageBufferTransferFunctionKey: kCVImageBufferTransferFunction_ITU_R_709_2,
+                    kCVImageBufferYCbCrMatrixKey: kCVImageBufferYCbCrMatrix_ITU_R_709_2] as CFDictionary
+        return CVImageBufferCreateColorSpaceFromAttachments(tags)?.takeRetainedValue() ?? CGColorSpace(name: CGColorSpace.itur_709)!
+    }()
+
+    /// 在帧上标明 BT.709：像素缓冲的色彩附件给 Core Image / 编码器读，IOSurface 的色彩空间给 Core Animation 读——
+    /// 预览把这一帧的 IOSurface 直接贴成图层内容，不标的话会被当成 sRGB 显示，编辑器里反而偏暗。
+    public static func tag(_ buffer: CVPixelBuffer) {
+        CVBufferSetAttachment(buffer, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
+        CVBufferSetAttachment(buffer, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
+        CVBufferSetAttachment(buffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
+        CVBufferSetAttachment(buffer, kCVImageBufferCGColorSpaceKey, output, .shouldPropagate)
+        tagSurface(of: buffer)
+    }
+
+    /// 只补 IOSurface 的色彩空间（按缓冲附件推出来）。播放器输出的缓冲若是拷贝，附件会跟过来、IOSurface 属性不会，
+    /// 显示前再补一次。
+    public static func tagSurface(of buffer: CVPixelBuffer) {
+        guard let surface = CVPixelBufferGetIOSurface(buffer)?.takeUnretainedValue() else { return }
+        let space = CVImageBufferGetColorSpace(buffer)?.takeUnretainedValue()
+            ?? CVImageBufferCreateColorSpaceFromAttachments(CVBufferCopyAttachments(buffer, .shouldPropagate) ?? [:] as CFDictionary)?.takeRetainedValue()
+        guard let space, let list = space.copyPropertyList() else { return }
+        IOSurfaceSetValue(surface, kIOSurfaceColorSpace, list)
+    }
+}
+
 /// 串行渲染队列持有 Core Image 上下文；每次请求只有一帧，不缓存随时长增长的像素数据。
 public final class VideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.caplo.video-compositor", qos: .userInitiated)
@@ -120,8 +159,11 @@ public final class VideoCompositor: NSObject, AVVideoCompositing, @unchecked Sen
                 let backdrop = backdrops.backdrop(edit: instruction.edit, sourceSize: SceneRenderer.croppedSourceSize(sourceImage?.extent.size ?? size, layout: instruction.edit.layout),
                                                   size: size, backgroundImage: instruction.backgroundImage,
                                                   hasCamera: camera != nil, context: context)
-                let image = SceneRenderer.frame(source: sourceImage, edit: instruction.edit, time: request.compositionTime.seconds, size: size, camera: camera, pointer: instruction.pointerFrame(at: request.compositionTime.seconds), backgroundImage: instruction.backgroundImage, backdrop: backdrop, timeline: instruction.timeline)
-                context.render(image, to: output, bounds: CGRect(origin: .zero, size: size), colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+                let image = SceneRenderer.frame(source: sourceImage, edit: instruction.edit, time: request.compositionTime.seconds, size: size, camera: camera, pointer: instruction.pointerFrame(at: request.compositionTime.seconds), backgroundImage: instruction.backgroundImage, backdrop: backdrop, timeline: instruction.timeline, croppedFocuses: instruction.croppedFocuses)
+                // 输出按 BT.709 编码并在帧上标明：导出文件的色彩标签是 BT.709，像素就必须按 BT.709 曲线写。
+                // 以前按 sRGB 曲线写、却标成 BT.709，播放器按 BT.709 解读时暗部与中间调整体提亮约 10 个色阶，画面发灰。
+                context.render(image, to: output, bounds: CGRect(origin: .zero, size: size), colorSpace: SceneColor.output)
+                SceneColor.tag(output)
                 request.finish(withComposedVideoFrame: output)
             }
         }
@@ -226,6 +268,19 @@ public enum SceneRenderer {
         return result
     }
 
+    /// 按仿射变换缩放画面；缩小到一半以下时先用 Lanczos 缩好，再做剩下的平移（和镜像）。
+    /// Core Image 的仿射变换按双线性取样，只看相邻四个像素：5K 全屏录制导出 1080p 要缩到三分之一，
+    /// 文字会出锯齿、镜头平移时闪烁。Lanczos 先低通再取样。缩小不到一半时双线性已经够用，不多花这一步。
+    public static func resampled(_ image: CIImage, by transform: CGAffineTransform) -> CIImage {
+        let scale = hypot(transform.a, transform.b)
+        guard transform.b == 0, transform.c == 0, abs(abs(transform.d) - scale) < 1e-9, scale > 0, scale < 0.5 else {
+            return image.transformed(by: transform)
+        }
+        let reduced = image.applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: scale, kCIInputAspectRatioKey: 1])
+        // Lanczos 以原点为中心缩放：剩下的变换先抵掉这一层缩放，只留平移与镜像。
+        return reduced.transformed(by: CGAffineTransform(scaleX: 1 / scale, y: 1 / scale).concatenating(transform))
+    }
+
     /// 裁切后的源画面像素尺寸。
     public static func croppedSourceSize(_ full: CGSize, layout: CanvasLayout) -> CGSize {
         guard let crop = layout.effectiveCrop else { return full }
@@ -273,7 +328,8 @@ public enum SceneRenderer {
     }
 
     /// `backdrop`：缓存好的"背景 + 阴影"；人像在后时缓存的是只有阴影的透明图层（见 `SceneBackdropCache`）。
-    public static func frame(source full: CIImage?, edit: VideoEdit, time: Double, size: CGSize, camera: CIImage? = nil, pointer: PointerFrame = PointerFrame(), backgroundImage: CIImage? = nil, backdrop: CIImage? = nil, timeline: TimelineIndex? = nil) -> CIImage {
+    /// `croppedFocuses`：调用方预先换算好的裁切后镜头（见 `SceneInstruction.croppedFocuses`）；不传就当场换算，结果相同。
+    public static func frame(source full: CIImage?, edit: VideoEdit, time: Double, size: CGSize, camera: CIImage? = nil, pointer: PointerFrame = PointerFrame(), backgroundImage: CIImage? = nil, backdrop: CIImage? = nil, timeline: TimelineIndex? = nil, croppedFocuses: [FocusSegment]? = nil) -> CIImage {
         let bounds = CGRect(origin: .zero, size: size)
         let behind = cameraIsBehind(edit) && camera != nil
         // 文字投影与画面层的摆放各算一次：字幕、文字、版式变换共用同一份结果。
@@ -320,7 +376,8 @@ public enum SceneRenderer {
                                   width: extent.width * crop.width, height: extent.height * crop.height)
             source = covered.cropped(to: cropRect)
             // 聚焦坐标换到裁切区域。画布上的编辑框用同一个函数，两边的相机才是同一个点。
-            edit.focuses = edit.cropResolved().focuses
+            // 版式变换只改留白不动镜头，所以指令里预先换算好的结果可以直接用。
+            edit.focuses = croppedFocuses ?? edit.cropResolved().focuses
         }
         let geometry = geometry(edit: edit, sourceSize: source.extent.size, size: size)
         let rect = geometry.rect
@@ -346,7 +403,7 @@ public enum SceneRenderer {
         let transform = CGAffineTransform(translationX: -center.x, y: -center.y)
             .concatenating(CGAffineTransform(scaleX: scale, y: scale))
             .concatenating(CGAffineTransform(translationX: rect.midX, y: rect.midY))
-        var screen = source.transformed(by: transform).cropped(to: rect)
+        var screen = resampled(source, by: transform).cropped(to: rect)
         if let effects = edit.pointer, effects.isValid {
             // 效果与内容共享变换，随后一并裁进屏幕圆角，不污染背景或覆盖摄像头。
             screen = PointerRenderer.overlay(frame: pointer, effects: effects, sourceBounds: full.extent, transform: transform,
@@ -461,7 +518,7 @@ public enum SceneRenderer {
         let transform = CGAffineTransform(translationX: -source.extent.midX, y: -source.extent.midY)
             .concatenating(CGAffineTransform(scaleX: layout.mirrored ? -scale : scale, y: scale))
             .concatenating(CGAffineTransform(translationX: rect.midX, y: rect.midY))
-        let image = source.transformed(by: transform).cropped(to: rect)
+        let image = resampled(source, by: transform).cropped(to: rect)
         // 一律按短边乘以面板里的圆角比例：圆形预设是 1 : 1 加 0.5，拉小就成圆角方块；人像全屏没有圆角。
         let radius = layout.isCameraFull ? 0 : min(rect.width, rect.height) * min(0.5, max(0, layout.cornerRadius))
         let shape: CIImage
@@ -507,7 +564,7 @@ public enum SceneRenderer {
             let transform = CGAffineTransform(translationX: -image.extent.midX, y: -image.extent.midY)
                 .concatenating(CGAffineTransform(scaleX: scale, y: scale))
                 .concatenating(CGAffineTransform(translationX: size.width / 2, y: size.height / 2))
-            let filled = image.transformed(by: transform)
+            let filled = resampled(image, by: transform)
             let blur = max(0, min(100, layout.backgroundBlur)) * size.width / 960 * 0.5
             guard blur > 0.05 else { return filled.cropped(to: bounds) }
             // 先把边缘向外延伸再糊：不然四周会被透明像素拉淡，露出一圈灰边。

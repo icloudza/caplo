@@ -57,7 +57,6 @@ public struct VideoClip: Codable, Equatable, Sendable, Identifiable {
     }
 
     public func gain(for track: AudioTrack) -> Float { track == .system ? systemGain : microphoneGain }
-    public var hasCustomSettings: Bool { systemGain != 1 || microphoneGain != 1 || cursorHidden }
 }
 
 /// 名称对应内置光标包；未知或自定义光标回退标准箭头。

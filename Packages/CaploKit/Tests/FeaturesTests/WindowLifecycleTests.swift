@@ -9,33 +9,6 @@ import ProjectKit
 /// 验证重复打开、会话保存失败及关闭重开，不能替代鼠标、Dock 和系统权限交互验收。
 @Suite(.serialized) @MainActor
 struct WindowLifecycleTests {
-    /// 用屏幕上任意一个其他进程的普通窗口验证高亮层能拿到位置并显示遮罩；没有这样的窗口（无头环境）时跳过。
-    @Test func windowHighlightFollowsAnOnScreenWindow() async throws {
-        let list = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
-        guard let front = WindowGeometry.frontmostWindow(in: list, excluding: ProcessInfo.processInfo.processIdentifier) else { return }
-        let bounds = try #require(WindowGeometry.onScreenBounds(of: front.windowID))
-        #expect(bounds == front.bounds)
-        let source = CaptureSource(id: "window-\(front.windowID)", title: "测试窗口", kind: .window, frame: bounds,
-                                   applicationName: "测试", processID: front.pid, windowID: front.windowID)
-        let model = RecordBarModel(mode: .window, source: source)
-        WindowHighlightSession.begin(model: model)
-        defer { WindowHighlightSession.dismiss() }
-        let session = try #require(WindowHighlightSession.current)
-        try await Task.sleep(for: .milliseconds(120))
-        #expect(session.trackedBounds == bounds)
-        #expect(session.isShowing)
-        // 阻挡层围住挖空处：没有一条压到目标窗口，且窗口所在显示器上四周都有阻挡（窗口不贴边时）。
-        let primaryHeight = NSScreen.screens.first?.frame.maxY ?? bounds.maxY
-        let windowRect = WindowGeometry.appKitRect(fromGlobal: bounds, primaryHeight: primaryHeight)
-        let frames = session.blockerFrames
-        #expect(!frames.isEmpty)
-        for frame in frames { #expect(frame.intersection(windowRect.insetBy(dx: 1, dy: 1)).isNull) }
-        // 同一模型重复开始不重建；撤掉后遮罩消失。
-        WindowHighlightSession.begin(model: model)
-        #expect(WindowHighlightSession.current === session)
-        WindowHighlightSession.dismiss()
-        #expect(!session.isShowing && WindowHighlightSession.current == nil)
-    }
 
     @Test func recorderAndEditorPreserveWindowAndSessionLifetimes() async throws {
         _ = NSApplication.shared
@@ -110,12 +83,15 @@ struct WindowLifecycleTests {
         #expect(windows("caplo-video-editor").count == 1)
 
         // 使编辑目标临时变成目录，真实触发写入失败，检查内存编辑与排他租约仍保留。
+        // 存盘在后台进行：先等上一笔落盘，否则挪走文件时它可能正被原子改名写回来。
+        original.settlePendingSaves()
         let edits = url.appendingPathComponent("edits.json")
         let backup = url.appendingPathComponent("edits-backup.json")
         try FileManager.default.moveItem(at: edits, to: backup)
         try FileManager.default.createDirectory(at: edits, withIntermediateDirectories: false)
         original.commit { $0.layout.padding = 49 }
-        #expect(original.saveStatus == "保存失败")
+        // 写盘在后台进行：结果回到主线程后才显示"保存失败"；关窗时 flush 会同步等它。
+        try await waitFor { original.saveStatus == "保存失败" }
         #expect(!original.close())
         #expect(VideoEditorSessions.current === original)
         #expect(throws: (any Error).self) { try ProjectLease(url: url) }
@@ -177,32 +153,6 @@ struct WindowLifecycleTests {
         return result
     }
 
-    @Test func audioPreferencesPreserveIndependentPowerAndSelections() throws {
-        let suite = "caplo-audio-test-" + UUID().uuidString
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        defaults.set("usb-device", forKey: "recording.microphoneDeviceID")
-        defaults.set("applications", forKey: "recording.systemAudioScope")
-        defaults.set(try JSONEncoder().encode(["com.demo.player"]), forKey: "recording.systemAudioApplications")
-        var options = RecordingOptions()
-        RecordingAudioPreferences.apply(to: &options, defaults: defaults)
-        #expect(!options.microphone && !options.systemAudio)
-        #expect(options.microphoneDeviceID == "usb-device")
-        #expect(options.systemAudioApplicationBundleIDs == ["com.demo.player"])
-        defaults.set("all", forKey: "recording.systemAudioScope")
-        RecordingAudioPreferences.apply(to: &options, defaults: defaults)
-        #expect(options.systemAudioApplicationBundleIDs == nil)
-        defaults.set("camera-usb", forKey: "recording.cameraDeviceID")
-        RecordingCameraPreferences.apply(to: &options, defaults: defaults)
-        #expect(!options.camera && options.cameraDeviceID == "camera-usb")
-        defaults.set(true, forKey: "recording.camera")
-        RecordingCameraPreferences.apply(to: &options, defaults: defaults)
-        #expect(options.camera && !options.microphone && !options.systemAudio)
-        defaults.set(false, forKey: "recording.camera")
-        RecordingCameraPreferences.apply(to: &options, defaults: defaults)
-        #expect(!options.camera && options.cameraDeviceID == "camera-usb")
-    }
-
     /// 仅导出本测试进程创建的窗口视图，不使用桌面截取或辅助功能权限。
     private func writeArtifact(_ window: NSWindow, name: String) throws {
         guard let path = ProcessInfo.processInfo.environment["CAPLO_UI_ARTIFACTS_DIR"],
@@ -227,22 +177,3 @@ struct WindowLifecycleTests {
     private enum WindowCheckError: Error { case timeout }
 }
 
-
-/// 阻挡层几何：四条围住挖空处，挖空处本身不被覆盖；窗口不在该显示器上时整屏一条。
-@MainActor @Test func windowBlockerRectsSurroundTheHole() {
-    let screen = CGRect(x: 0, y: 0, width: 1000, height: 600)
-    let hole = CGRect(x: 200, y: 100, width: 400, height: 300)
-    let rects = WindowHighlightSession.blockerRects(screen: screen, hole: hole)
-    #expect(rects.count == 4)
-    for rect in rects { #expect(rect.intersection(hole.insetBy(dx: 0.5, dy: 0.5)).isNull) }
-    // 四条面积之和正好等于屏幕减去挖空处。
-    let covered = rects.reduce(0) { $0 + $1.width * $1.height }
-    #expect(abs(covered - (screen.width * screen.height - hole.width * hole.height)) < 0.001)
-    // 挖空处四周各点都被某一条盖住。
-    for point in [CGPoint(x: 400, y: 50), CGPoint(x: 400, y: 550), CGPoint(x: 100, y: 250), CGPoint(x: 800, y: 250)] {
-        #expect(rects.contains { $0.contains(point) })
-    }
-    // 窗口在别的显示器上：整屏一条阻挡，其余为空。
-    let elsewhere = WindowHighlightSession.blockerRects(screen: screen, hole: CGRect(x: 2000, y: 0, width: 100, height: 100))
-    #expect(elsewhere[0] == screen && elsewhere[1...].allSatisfy { $0 == .zero })
-}

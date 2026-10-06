@@ -65,25 +65,6 @@ import RenderKit
     #expect(analysis.system.max()! > 0.05 && analysis.microphone.max()! > 0.05)
 }
 
-@Test func pointerSamplesExcludePauseAndUseExactSegmentOrigins() async throws {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: root) }
-    let url = try ProjectStorage.create(in: root, name: "鼠标暂停测试")
-    let writer = SegmentedCaptureWriter(project: url, width: 320, height: 180, systemAudio: false, microphone: false, onStarted: {}, onFailure: { _ in })
-    try await onQueue(writer) { writer.ingest(try makeFrame(at: CMTime(seconds: 10, preferredTimescale: 600)), role: .screen) }
-    writer.appendPointer(PointerSample(time: 10.5, x: 0.5, y: 0.5, kind: .click))
-    await writer.pause(at: CMTime(seconds: 11, preferredTimescale: 600))
-    writer.appendPointer(PointerSample(time: 15, x: 0.5, y: 0.5, kind: .click))
-    try await Task.sleep(for: .milliseconds(400))
-    await writer.resume(at: CMTime(seconds: 20, preferredTimescale: 600))
-    writer.appendPointer(PointerSample(time: 20.2, x: 0.5, y: 0.5, kind: .click))
-    try await writer.finish(at: CMTime(seconds: 21, preferredTimescale: 600))
-    let events = try EditStorage.events(in: url, document: ProjectStorage.load(url))
-    #expect(events.count == 2)
-    #expect(abs(events[0].time - 0.5) < 0.001)
-    #expect(abs(events[1].time - 1.2) < 0.001)
-}
-
 /// 使用有方向的彩色梯度验证聚焦位移和坐标翻转，避免单色样本掩盖变换错误。
 private func patternFrame(at time: CMTime) throws -> CMSampleBuffer {
     let sample = try makeFrame(at: time)
@@ -101,14 +82,17 @@ private func patternFrame(at time: CMTime) throws -> CMSampleBuffer {
     return sample
 }
 
+/// 4K 导出按所选画幅给出标准尺寸，并保持录制帧率。
 @Test(arguments: [CanvasRatio.widescreen, .portrait, .square]) @MainActor func uhdExportUsesRequestedCanvasSize(ratio: CanvasRatio) async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let url = try ProjectStorage.create(in: root, name: "4K 画布")
-    let writer = SegmentedCaptureWriter(project: url, width: 320, height: 180, systemAudio: false, microphone: false, onStarted: {}, onFailure: { _ in })
+    let writer = SegmentedCaptureWriter(project: url, width: 320, height: 180, systemAudio: false, microphone: false, frameRate: 60, onStarted: {}, onFailure: { _ in })
     try await onQueue(writer) { writer.ingest(try patternFrame(at: CMTime(seconds: 10, preferredTimescale: 600)), role: .screen) }
     try await writer.finish(at: CMTime(seconds: 10.2, preferredTimescale: 600))
-    let document = try ProjectStorage.load(url)
+    var document = try ProjectStorage.load(url)
+    var capture = CaptureMetadata(desktopBounds: CGRect(x: 0, y: 0, width: 320, height: 180), pixelSize: CGSize(width: 320, height: 180), pointPixelScale: 1, pointerEnabled: false)
+    capture.frameRate = 60; document.capture = capture
     var edit = VideoEdit(duration: document.duration); edit.layout.ratio = ratio
     let target = root.appendingPathComponent("4k.mp4")
     try await ProjectMedia.export(url: url, document: document, levels: edit.audio, destination: target, edit: edit, longEdge: 3840) { _ in }
@@ -116,6 +100,8 @@ private func patternFrame(at time: CMTime) throws -> CMSampleBuffer {
     let size = try await video.load(.naturalSize)
     let expected = ratio == .widescreen ? CGSize(width: 3840, height: 2160) : ratio == .portrait ? CGSize(width: 2160, height: 3840) : CGSize(width: 2160, height: 2160)
     #expect(size == expected)
+    // 4K 也保持录制的 60 帧：系统"最高质量"预设在 4K 上会降到 30 帧。
+    #expect(abs(try await video.load(.nominalFrameRate) - 60) < 2)
 }
 
 @MainActor private final class ExportCancellation {

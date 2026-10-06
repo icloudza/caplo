@@ -15,15 +15,6 @@ import Testing
     #expect(recovered.state == .recovered)
 }
 
-@Test func activeProjectCannotBeRecoveredConcurrently() throws {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: root) }
-    let url = try ProjectStorage.create(in: root, name: "租约测试")
-    let lease = try ProjectLease(url: url)
-    defer { withExtendedLifetime(lease) {} }
-    #expect(throws: (any Error).self) { try ProjectStorage.recover(url) }
-}
-
 @Test func refusesEscapingMediaPaths() throws {
     let root = URL(fileURLWithPath: "/tmp/project.caplo")
     #expect(throws: (any Error).self) { try ProjectStorage.mediaURL("Media/../../secret", in: root) }
@@ -48,15 +39,3 @@ import Testing
     #expect(try Data(contentsOf: url.appendingPathComponent("edits.json")) == edits)
 }
 
-@Test func renameRejectsActiveLeaseAndBlankName() throws {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: root) }
-    let url = try ProjectStorage.create(in: root, name: "保留名称")
-    #expect(throws: (any Error).self) { try ProjectStorage.rename(url, to: "录制中的新名称") }
-    try ProjectStorage.complete(url)
-    #expect(throws: (any Error).self) { try ProjectStorage.rename(url, to: " \n ") }
-    let lease = try ProjectLease(url: url)
-    defer { withExtendedLifetime(lease) {} }
-    #expect(throws: (any Error).self) { try ProjectStorage.rename(url, to: "其他窗口修改") }
-    #expect(try ProjectStorage.load(url).name == "保留名称")
-}

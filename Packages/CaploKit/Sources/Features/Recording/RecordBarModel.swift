@@ -151,10 +151,19 @@ public final class RecordBarModel {
         guard StudioWindows.prepareForRecording() else { return }
         localError = nil
         // 试听与预览不停：录制器直接借用正在跑的麦克风采集与摄像头会话（只加写盘出口），设备从打开到录完一直亮着。
+        let previous = recorder.completedURL
         Task {
             await recorder.start(sourceID: source.id, options: options)
-            if !recorder.isBusy, recorder.completedURL == nil { StudioWindows.showRecordBar(self) }
+            if Self.shouldReturnToBar(busy: recorder.isBusy, completed: recorder.completedURL, before: previous) { StudioWindows.showRecordBar(self) }
         }
+    }
+
+    /// 开始录制之后要不要把录制条放回来：没在录、也没有产出新的工程（产出了就交给编辑器打开）。
+    /// 不能只看 `completedURL == nil`：它保留着上一段录制的结果，开始在前置检查就退出时它不会被清空，
+    /// 以前这种情况下准备窗口已经藏起来、录制条又不回来，屏幕上什么都没有，错误也看不到。
+    static func shouldReturnToBar(busy: Bool, completed: URL?, before previous: URL?) -> Bool {
+        guard !busy else { return false }
+        return completed == nil || completed == previous
     }
 
     /// 离屏预览用的静态模型，不枚举真实来源。

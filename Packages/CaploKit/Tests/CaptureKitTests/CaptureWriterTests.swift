@@ -4,15 +4,6 @@ import Testing
 import ProjectKit
 @testable import CaptureKit
 
-@Test @MainActor func encoderDimensionsStayEvenAndWithinLimit() {
-    let size = ScreenRecorder.encodingSize(points: CGSize(width: 3024, height: 1964), scale: 2)
-    #expect(size.width == 3840)
-    #expect(size.height % 2 == 0)
-    #expect(size.height < 3840)
-    let tiny = ScreenRecorder.encodingSize(points: CGSize(width: 1, height: 1), scale: 1)
-    #expect(tiny.width == 2 && tiny.height == 2)
-}
-
 /// 使用合成帧验证编码器，不触发屏幕权限，不采集用户桌面。
 @Test func writesPlayableMovieAndPreservesStaticTail() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

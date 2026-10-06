@@ -232,6 +232,38 @@ final class MicrophoneCapture: @unchecked Sendable {
         return AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, UInt32(MemoryLayout<AudioDeviceID>.size), &value) == noErr
     }
 
+    /// 设备号 → CoreAudio UID。设备号每次开机可能不同，跨进程记账只能用 UID。
+    static func uid(of device: AudioDeviceID) -> String? {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceUID, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var value: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value) == noErr, let value else { return nil }
+        return value.takeRetainedValue() as String
+    }
+
+    // MARK: - 默认输入的借用记账
+
+    /// 语音处理单元只认系统默认输入，使用期间要把它切到所选麦克风。切之前把"从哪切到哪"记进偏好，
+    /// 正常停止时清掉；应用崩溃或被强退来不及恢复的话，下次启动按这条记录改回去（见 `restoreDefaultInputLeftBehind`）。
+    static let switchedDefaultInputKey = "microphone.switchedDefaultInput"
+    static func rememberSwitch(from previous: AudioDeviceID, to device: AudioDeviceID, defaults: UserDefaults = .standard) {
+        guard let from = uid(of: previous), let to = uid(of: device) else { return }
+        defaults.set(["from": from, "to": to], forKey: switchedDefaultInputKey)
+    }
+    static func forgetSwitch(defaults: UserDefaults = .standard) { defaults.removeObject(forKey: switchedDefaultInputKey) }
+
+    /// 上次运行借用了系统默认输入却没来得及还：如果默认输入还停在当时切过去的那个麦克风，就改回原来的设备。
+    /// 用户之后自己换过默认输入的，尊重用户，只清记录。返回是否真的改回了。
+    @discardableResult
+    static func restoreDefaultInputLeftBehind(defaults: UserDefaults = .standard,
+                                              current: () -> String? = { uid(of: defaultInputDevice()) },
+                                              restore: (String) -> Bool = { setDefaultInputDevice(audioDeviceID(forUID: $0)) }) -> Bool {
+        guard let record = defaults.dictionary(forKey: switchedDefaultInputKey) as? [String: String] else { return false }
+        defaults.removeObject(forKey: switchedDefaultInputKey)
+        guard let from = record["from"], let to = record["to"], from != to, current() == to else { return false }
+        return restore(from)
+    }
+
     // MARK: - 设备
 
     /// 能出现在麦克风列表里的设备：不是聚合设备、不是隐藏设备、有输入通道（系统会把临时聚合设备和扬声器的参考流当麦克风列出来）。
@@ -289,6 +321,14 @@ final class VoiceIOEngine: @unchecked Sendable {
     private let deliver: @Sendable (CMSampleBuffer, Float) -> Void
     private let onFailure: @Sendable (String) -> Void
     private var running = false
+    /// 失败只报一次：断开、默认输入被改走、渲染持续出错可能前后脚到达。
+    private let reported = OSAllocatedUnfairLock(initialState: false)
+    /// 连续渲染失败的块数（只在音频线程读写）。偶发一两块失败是正常抖动，持续失败才算采集中断。
+    private var renderFailures = 0
+    /// 属性监听用独立队列：在回调所在的队列上移除监听可能与正在执行的回调互等。
+    private let listenerQueue = DispatchQueue(label: "com.caplo.microphone.voice-listener")
+    private var defaultInputListener: AudioObjectPropertyListenerBlock?
+    private var aliveListener: AudioObjectPropertyListenerBlock?
 
     init(deliver: @escaping @Sendable (CMSampleBuffer, Float) -> Void, onFailure: @escaping @Sendable (String) -> Void) {
         self.deliver = deliver; self.onFailure = onFailure
@@ -311,8 +351,13 @@ final class VoiceIOEngine: @unchecked Sendable {
         // 单元只认系统默认输入：使用期间切到所选麦克风，停止时恢复。
         let current = MicrophoneCapture.defaultInputDevice()
         if current != device {
-            guard MicrophoneCapture.setDefaultInputDevice(device) else { throw RecordingError.message("无法把系统默认输入切到所选麦克风。") }
+            MicrophoneCapture.rememberSwitch(from: current, to: device)
+            guard MicrophoneCapture.setDefaultInputDevice(device) else {
+                MicrophoneCapture.forgetSwitch()
+                throw RecordingError.message("无法把系统默认输入切到所选麦克风。")
+            }
             restoreDefaultInput = current
+            // 切换默认输入是异步生效的；紧接着建单元会抓到旧设备。这里在麦克风串行队列上，不占主线程。
             Thread.sleep(forTimeInterval: 0.2)
         }
         var componentDescription = AudioComponentDescription(componentType: kAudioUnitType_Output, componentSubType: kAudioUnitSubType_VoiceProcessingIO,
@@ -343,6 +388,7 @@ final class VoiceIOEngine: @unchecked Sendable {
             try check(AudioUnitInitialize(unit), "初始化语音处理单元")
             try check(AudioOutputUnitStart(unit), "启动语音处理单元")
             running = true
+            listen()
         } catch {
             stop()
             throw error
@@ -350,6 +396,7 @@ final class VoiceIOEngine: @unchecked Sendable {
     }
 
     func stop() {
+        unlisten()
         if let unit {
             if running { AudioOutputUnitStop(unit) }
             AudioUnitUninitialize(unit)
@@ -361,7 +408,52 @@ final class VoiceIOEngine: @unchecked Sendable {
 
     private func restore() {
         if let previous = restoreDefaultInput, MicrophoneCapture.defaultInputDevice() == device { MicrophoneCapture.setDefaultInputDevice(previous) }
+        if restoreDefaultInput != nil { MicrophoneCapture.forgetSwitch() }
         restoreDefaultInput = nil
+    }
+
+    /// 单元跟着系统默认输入走：别人把默认输入换成别的设备，录到的就悄悄变成另一支麦克风。
+    /// 这和"设备拔掉绝不静默改用其他输入"是同一条原则，按采集中断上报，由录制器收尾保存。
+    /// 设备本身消失也在这里报一次（录制器另有 AVCaptureDevice 断开通知，重复上报只生效一次）。
+    private func listen() {
+        var defaultAddress = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultInputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        let defaultBlock: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            guard let self, self.running, MicrophoneCapture.defaultInputDevice() != self.device else { return }
+            self.fail("系统默认输入被换成了其他设备，为免录进别的麦克风，已停止麦克风采集。")
+        }
+        if AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &defaultAddress, listenerQueue, defaultBlock) == noErr {
+            defaultInputListener = defaultBlock
+        }
+        var aliveAddress = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceIsAlive, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        let aliveBlock: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            guard let self, self.running else { return }
+            var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceIsAlive, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            var alive: UInt32 = 1
+            var size = UInt32(MemoryLayout<UInt32>.size)
+            if AudioObjectGetPropertyData(self.device, &address, 0, nil, &size, &alive) != noErr || alive == 0 { self.fail("麦克风已断开。") }
+        }
+        if AudioObjectAddPropertyListenerBlock(device, &aliveAddress, listenerQueue, aliveBlock) == noErr {
+            aliveListener = aliveBlock
+        }
+    }
+
+    private func unlisten() {
+        if let block = defaultInputListener {
+            var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultInputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, listenerQueue, block)
+        }
+        if let block = aliveListener {
+            var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceIsAlive, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            AudioObjectRemovePropertyListenerBlock(device, &address, listenerQueue, block)
+        }
+        defaultInputListener = nil; aliveListener = nil
+    }
+
+    /// 上报离开音频线程：失败处理会切主线程、建任务，不能在实时回调里做。
+    private func fail(_ message: String) {
+        guard reported.withLock({ done in defer { done = true }; return !done }) else { return }
+        let onFailure = onFailure
+        DispatchQueue.global(qos: .userInitiated).async { onFailure(message) }
     }
 
     private func check(_ status: OSStatus, _ step: String) throws {
@@ -376,7 +468,13 @@ final class VoiceIOEngine: @unchecked Sendable {
         list.pointee.mBuffers.mDataByteSize = UInt32(bytes)
         list.pointee.mBuffers.mData = storage
         let status = AudioUnitRender(unit, flags, timestamp, bus, frames, list)
-        guard status == noErr else { return status }
+        guard status == noErr else {
+            // 约一秒（48 kHz 下每块 10 毫秒左右）一直拉不到数据才算中断；以前这里只把错误码还给单元，录到的是一段静默。
+            renderFailures += 1
+            if renderFailures == 100 { fail("麦克风采集中断（\(status)）。") }
+            return status
+        }
+        renderFailures = 0
         let level = MicrophoneCapture.level(bytes: storage, byteCount: bytes, description: format)
         let presentation = timestamp.pointee.mFlags.contains(.hostTimeValid)
             ? CMClockMakeHostTimeFromSystemUnits(timestamp.pointee.mHostTime) : CMClockGetTime(CMClockGetHostTimeClock())
@@ -494,4 +592,9 @@ final class SessionEngine: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
         guard keyPath == "activeMicrophoneMode" else { return }
         Task { @MainActor in self.refresh() }
     }
+}
+
+/// 应用启动时调用：上次运行借走了系统默认输入却没来得及还（崩溃、强退）时把它改回去。
+public enum MicrophoneDefaultInput {
+    public static func restoreIfLeftBehind() { MicrophoneCapture.restoreDefaultInputLeftBehind() }
 }

@@ -250,13 +250,7 @@ public enum ProjectMedia {
     nonisolated static let backgroundMaximumEdge = 3840
     nonisolated static func decodedBackground(at file: URL) -> CIImage? {
         guard let source = CGImageSourceCreateWithURL(file as CFURL, nil) else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: backgroundMaximumEdge,
-        ]
-        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return CIImage(contentsOf: file) }
+        guard let image = ImageDownsampler.image(from: source, maximumPixelSize: backgroundMaximumEdge) else { return CIImage(contentsOf: file) }
         return CIImage(cgImage: image)
     }
 
@@ -285,21 +279,14 @@ public enum ProjectMedia {
     public static func export(url: URL, document: ProjectDocument, levels: AudioLevels, destination: URL, edit: VideoEdit? = nil, longEdge: Int = 1920,
                               progress: @escaping @MainActor (Double) -> Void) async throws {
         let (composition, mix) = try await compose(url: url, document: document, levels: levels, edit: edit)
-        guard let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
-            throw ProjectError.invalid("当前工程无法导出。")
-        }
-        session.audioMix = mix
-        if let edit { session.videoComposition = try videoComposition(composition: composition, edit: edit, longEdge: longEdge, pointers: loadPointers(url: url, document: document), backgroundImage: backgroundImage(for: edit.layout, in: url), frameRate: document.frameRate) }
+        // 码率与帧率自己定（见 ExportEncoder）：系统预设在 4K 上只给约 10 Mbps 且降到 30 fps。
+        let rate = ExportEncoder.frameRate(recorded: document.frameRate, longEdge: longEdge)
+        let video = try edit.map { try videoComposition(composition: composition, edit: $0, longEdge: longEdge, pointers: loadPointers(url: url, document: document), backgroundImage: backgroundImage(for: $0.layout, in: url), frameRate: rate) }
         let temporary = destination.deletingLastPathComponent().appendingPathComponent(".caplo-export-\(UUID()).mp4")
         defer { try? FileManager.default.removeItem(at: temporary) }
-        let monitoring = Task { @MainActor in
-            for await state in session.states(updateInterval: 0.15) {
-                if Task.isCancelled { return }
-                if case .exporting(let value) = state { progress(value.fractionCompleted) }
-            }
+        try await ExportEncoder.encode(asset: composition, videoComposition: video, audioMix: mix, destination: temporary) { value in
+            Task { @MainActor in progress(value) }
         }
-        defer { monitoring.cancel() }
-        try await session.export(to: temporary, as: .mp4)
         try Task.checkCancellation()
         if FileManager.default.fileExists(atPath: destination.path) {
             _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)

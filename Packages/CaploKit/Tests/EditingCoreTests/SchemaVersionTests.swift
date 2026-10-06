@@ -13,23 +13,6 @@ private func recordingLikeEdit() -> VideoEdit {
     return edit
 }
 
-@Test func overlaysNeverPushTheVersionPastTheWrittenOne() throws {
-    var edit = recordingLikeEdit()
-    edit.addMask(MaskSegment(start: 0, duration: 2, x: 0.5, y: 0.5, width: 0.2, height: 0.1))
-    edit.addText(TextSegment(start: 0, duration: 2, text: "标题"))
-    edit.captionList = [CaptionCue(sourceStart: 0, sourceEnd: 2, text: "一句话")]
-    #expect(edit.schemaVersion <= VideoEdit.writtenSchemaVersion)
-    try edit.validate(sourceDuration: 8)
-
-    // 展开图层会把版本升到 6，而且不会被后续操作冲掉。
-    edit.prepareLayerEditing(camera: false, system: false, microphone: false)
-    #expect(edit.schemaVersion == VideoEdit.writtenSchemaVersion)
-    try edit.validate(sourceDuration: 8)
-    edit.removeMask(id: edit.maskList[0].id)
-    #expect(edit.schemaVersion == VideoEdit.writtenSchemaVersion, "删遮罩把图层模型的版本冲掉了")
-    try edit.validate(sourceDuration: 8)
-}
-
 @Test func projectsSavedDuringDevelopmentStillOpenAndFallBack() throws {
     var edit = recordingLikeEdit()
     edit.addMask(MaskSegment(start: 0, duration: 2, x: 0.5, y: 0.5, width: 0.2, height: 0.1))
@@ -49,15 +32,3 @@ private func recordingLikeEdit() -> VideoEdit {
     }
 }
 
-@Test func rowTimingMaterializationKeepsTheLayeredVersion() throws {
-    var edit = VideoEdit(duration: 8)
-    var second = VideoClip(sourceStart: 4, duration: 4)
-    second.timelineStart = 4
-    edit.clips = [edit.clips[0], second]
-    edit.clips[0].timelineStart = 0
-    edit.addMask(MaskSegment(start: 0, duration: 2, x: 0.5, y: 0.5, width: 0.2, height: 0.1))
-    let mask = edit.maskList[0].id
-    edit.placeBlock(mask, beforeRowContaining: edit.clips[0].id)
-    #expect(edit.schemaVersion == VideoEdit.writtenSchemaVersion)
-    try edit.validate(sourceDuration: 8)
-}

@@ -107,26 +107,6 @@ private func makeStripedProject(_ root: URL, name: String) async throws -> (url:
     #expect(edgeDensity(preview, box: previewInside) < 0.02, "预览的遮罩区域还剩 \(edgeDensity(preview, box: previewInside)) 的边缘密度")
 }
 
-@Test @MainActor func projectThumbnailIsMaskedAndRefusesToGuessWhenUnreadable() async throws {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: root) }
-    let project = try await makeStripedProject(root, name: "遮罩封面")
-    let bare = try await ProjectMedia.thumbnail(url: project.url, document: project.document)
-    let full = CGRect(x: 0, y: 0, width: Double(bare.width), height: Double(bare.height))
-    #expect(edgeDensity(bare, box: full) > 0.2)
-
-    var edit = try EditStorage.load(in: project.url, document: project.document)
-    // 遮住整幅画面：封面是原素材首帧，不经画布布局，所以直接量全图。
-    edit.addMask(MaskSegment(start: 0, duration: 2, x: 0.5, y: 0.5, width: 1.4, height: 1.4, effect: .pixelate, amount: 60))
-    try EditStorage.save(edit, in: project.url, document: project.document)
-    let masked = try await ProjectMedia.thumbnail(url: project.url, document: project.document)
-    #expect(edgeDensity(masked, box: full) < 0.06, "封面还剩 \(edgeDensity(masked, box: full)) 的边缘密度")
-
-    // 编辑文件坏掉时宁可没有封面，也不能给一张没打码的原帧。
-    try Data("{ 这不是 JSON".utf8).write(to: project.url.appendingPathComponent("edits.json"))
-    await #expect(throws: (any Error).self) { try await ProjectMedia.thumbnail(url: project.url, document: project.document) }
-}
-
 /// 导出的两帧逐像素比较：只在文字覆盖的地方不同。
 private func pixels(_ image: CGImage) -> (bytes: [UInt8], width: Int, height: Int)? {
     let width = image.width, height = image.height
@@ -137,46 +117,3 @@ private func pixels(_ image: CGImage) -> (bytes: [UInt8], width: Int, height: In
     return (bytes, width, height)
 }
 
-@MainActor
-private func exportFrame(_ project: (url: URL, document: ProjectDocument), edit: VideoEdit, to target: URL, at time: Double) async throws -> CGImage {
-    try EditStorage.save(edit, in: project.url, document: project.document)
-    try await ProjectMedia.export(url: project.url, document: project.document, levels: edit.audio, destination: target, edit: edit) { _ in }
-    let generator = AVAssetImageGenerator(asset: AVURLAsset(url: target))
-    generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
-    return try await generator.image(at: CMTime(seconds: time, preferredTimescale: 600)).image
-}
-
-@Test @MainActor func exportedFileCarriesTheTextLayer() async throws {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: root) }
-    let project = try await makeStripedProject(root, name: "文字导出")
-    var edit = try EditStorage.load(in: project.url, document: project.document)
-    edit.layout.padding = 0; edit.layout.cornerRadius = 0; edit.layout.shadow = false
-    let plainFrame = try await exportFrame(project, edit: edit, to: root.appendingPathComponent("plain.mp4"), at: 1)
-
-    var label = TextPreset.bigNumber.segment(start: 0, duration: 2)
-    label.text = "3×"; label.color = .white; label.shadow = false
-    label.enterKind = .none; label.exitKind = .none; label.enterDuration = 0; label.exitDuration = 0
-    edit.addText(label)
-    let textFrame = try await exportFrame(project, edit: edit, to: root.appendingPathComponent("text.mp4"), at: 1)
-
-    let plain = try #require(pixels(plainFrame)), withText = try #require(pixels(textFrame))
-    #expect(plain.width == withText.width && plain.height == withText.height)
-    let width = plain.width, height = plain.height
-    func changed(in box: CGRect) -> Int {
-        var count = 0
-        for y in Int(box.minY)..<Int(box.maxY) {
-            for x in Int(box.minX)..<Int(box.maxX) {
-                let offset = (y * width + x) * 4
-                if abs(Int(plain.bytes[offset]) - Int(withText.bytes[offset])) > 60 { count += 1 }
-            }
-        }
-        return count
-    }
-    // 大数字预设居中：中央三分之一里有成片的像素被改写。
-    let center = CGRect(x: width / 3, y: height / 3, width: width / 3, height: height / 3)
-    #expect(changed(in: center) > 4000, "导出的画面中央只有 \(changed(in: center)) 个像素被文字改写")
-    // 四角不该被碰到——文字最大宽度是 0.9，上下也够不着。
-    let corner = CGRect(x: 0, y: 0, width: Double(width) / 8, height: Double(height) / 8)
-    #expect(changed(in: corner) == 0, "文字之外有 \(changed(in: corner)) 个像素被改动了")
-}

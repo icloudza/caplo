@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import RenderKit
 import CoreImage
 import CoreVideo
 import IOSurface
@@ -64,6 +65,9 @@ final class CanvasPresenter: NSObject {
     }
 
     func present(_ buffer: CVPixelBuffer) {
+        // 合成器输出按 BT.709 编码；播放器交来的若是拷贝过的缓冲，IOSurface 上没有色彩空间，
+        // 图层会把它当 sRGB 显示（偏暗）。贴上去之前按缓冲附件补齐。
+        SceneColor.tagSurface(of: buffer)
         frame = buffer; image = nil; frameRevision &+= 1
         view?.show(buffer)
     }

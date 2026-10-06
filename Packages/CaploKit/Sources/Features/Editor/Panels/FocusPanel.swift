@@ -29,12 +29,14 @@ struct FocusPanel: View {
                     Text("柔和平滑").tag(FocusSegment.Easing.smooth)
                     Text("演示推近").tag(FocusSegment.Easing.demo)
                 }.environment(\.colorScheme, .dark)
-                EditorSlider(model: model, title: "推近时长", value: optionalBinding(id, \.easeIn, fallback: 0.6), range: 0.05...2, defaultValue: 0.6)
-                EditorSlider(model: model, title: "拉远时长", value: optionalBinding(id, \.easeOut, fallback: 0.7), range: 0.05...2, defaultValue: 0.7)
+                EditorStepper(model: model, title: "推近时长", value: optionalBinding(id, \.easeIn, fallback: 0.6), range: 0.05...2, defaultValue: 0.6)
+                EditorStepper(model: model, title: "拉远时长", value: optionalBinding(id, \.easeOut, fallback: 0.7), range: 0.05...2, defaultValue: 0.7)
                 EditorSlider(model: model, title: "缩放倍率", value: binding(id, \.scale), range: 1...3, suffix: "×", detents: [1.5, 2, 2.5])
-                EditorSlider(model: model, title: "水平位置", value: binding(id, \.x), range: 0...1, detents: [0.5])
-                EditorSlider(model: model, title: "垂直位置", value: binding(id, \.y), range: 0...1, detents: [0.5])
-        Button("删除此镜头") { model.selectedFocus = id; model.deleteSelection() }.buttonStyle(StudioButtonStyle(.destructive, size: .small))
+                // 取景框的大小就是 1 / 倍率：在底板上看得见推近之后画面里还剩多大一块。
+                let scale = max(1, focus.scale)
+                EditorRegion(model: model, title: "取景位置", shape: .window(width: 1 / scale, height: 1 / scale), aspect: model.sourceAspect,
+                             region: focusRegion(id)) { EditorRegion.positionReadout(CGPoint(x: $0.midX, y: $0.midY)) }
+        Button("删除此镜头") { model.select(.focus(id)); model.deleteSelection() }.buttonStyle(StudioButtonStyle(.destructive, size: .small))
     }
 
     var body: some View {
@@ -45,11 +47,11 @@ struct FocusPanel: View {
         // 默认收起，专注于各镜头的参数；需要时展开调整。状态随偏好保留。
         PanelSection("自动聚焦设置", expanded: $autoParametersExpanded) {
             EditorSlider(model: model, title: "默认缩放倍率", value: styleBinding(\.baseScale), range: 1...3, suffix: "×", detents: [1.5, 2, 2.5])
-            EditorSlider(model: model, title: "拉远延迟", value: styleBinding(\.idleTimeout), range: 0.5...5)
-            EditorSlider(model: model, title: "合并间隔", value: styleBinding(\.mergeGap), range: 0...2)
-            EditorSlider(model: model, title: "提前对准", value: optionalStyleBinding(\.prediction, fallback: 0.21), range: 0...0.4)
-            EditorSlider(model: model, title: "跟随平滑度", value: optionalStyleBinding(\.panResponse, fallback: 0.55), range: 0.15...1.5)
-            EditorSlider(model: model, title: "安全区", value: optionalStyleBinding(\.clusterWidth, fallback: 0.5), range: 0.2...0.9)
+            EditorStepper(model: model, title: "拉远延迟", value: styleBinding(\.idleTimeout), range: 0.5...5, step: 0.1, defaultValue: AutoFocusStyle().idleTimeout)
+            EditorStepper(model: model, title: "合并间隔", value: styleBinding(\.mergeGap), range: 0...2, defaultValue: AutoFocusStyle().mergeGap)
+            EditorStepper(model: model, title: "提前对准", value: optionalStyleBinding(\.prediction, fallback: 0.21), range: 0...0.4, step: 0.01, defaultValue: 0.21)
+            EditorFill(model: model, title: "跟随平滑度", value: optionalStyleBinding(\.panResponse, fallback: 0.55), range: 0.15...1.5, defaultValue: 0.55, detents: [0.55])
+            EditorFill(model: model, title: "安全区", value: optionalStyleBinding(\.clusterWidth, fallback: 0.5), range: 0.2...0.9, suffix: "%", percentage: true, defaultValue: 0.5, detents: [0.5])
             Button(generating ? "正在生成…" : "重新生成自动镜头") {
                 generating = true
                 Task { await model.regenerateFocus(); generating = false }
@@ -70,7 +72,9 @@ struct FocusPanel: View {
             }
         }
         // 进面板时还没选中就先选第一个，免得面板空着、非得先去时间线点一下。
-        .onAppear { if model.selectedFocus == nil { model.selectedFocus = model.edit.focuses.first?.id } }
+        // 进面板（或工程刚载入完）时还没选中镜头就先选第一个；面板可能比工程先出现，所以载入完成时再补一次。
+        .onAppear(perform: selectFirstIfNeeded)
+        .onChange(of: model.ready) { selectFirstIfNeeded() }
         .onChange(of: autoParametersExpanded) { _, value in UserDefaults.standard.set(value, forKey: Self.autoParametersKey) }
     }
 
@@ -93,6 +97,19 @@ struct FocusPanel: View {
             guard let index = model.edit.focuses.firstIndex(where: { $0.id == id }) else { return }
             model.edit.focuses[index][keyPath: key] = value
             model.edit.focuses[index].automatic = false
+        })
+    }
+
+    private func selectFirstIfNeeded() {
+        if model.selectedFocus == nil, let first = model.edit.focuses.first?.id { model.select(.focus(first)) }
+    }
+
+    /// 取景位置：底板只认中心，横竖两个坐标走同一条写入路径（指定坐标即改为固定取景）。
+    private func focusRegion(_ id: UUID) -> Binding<CGRect> {
+        let x = binding(id, \.x), y = binding(id, \.y)
+        return Binding(get: { CGRect(x: x.wrappedValue, y: y.wrappedValue, width: 0, height: 0) }, set: { rect in
+            if abs(rect.midX - x.wrappedValue) > 0.000_01 { x.wrappedValue = rect.midX }
+            if abs(rect.midY - y.wrappedValue) > 0.000_01 { y.wrappedValue = rect.midY }
         })
     }
 

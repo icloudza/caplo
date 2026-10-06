@@ -15,13 +15,14 @@ public enum EditStorage {
                 edit.layout.backgroundImage = imported
             }
             if document.segments.contains(where: { $0.files[.camera] != nil }) { edit.camera = CameraLayout() }
+            // 指针事件只解析一次：光标样式判断与自动镜头共用（长录制的事件文件解析两遍要多花几百毫秒）。
+            let samples = try events(in: url, document: document)
             if document.capture?.pointerEnabled == true {
                 edit.pointer = .recommended
-                let samples = try events(in: url, document: document)
                 if samples.contains(where: { $0.cursorAssetID != nil }) { edit.pointer?.style = .captured }
             }
             edit.focusEngineVersion = 2
-            edit.focuses = AutoFocus.generate(events: try events(in: url, document: document), duration: document.duration)
+            edit.focuses = AutoFocus.generate(events: samples, duration: document.duration)
             return edit
         }
         let data = try Data(contentsOf: path)
@@ -51,28 +52,48 @@ public enum EditStorage {
         return edit
     }
 
+    /// 盘上那份编辑数据的版本号：决定这次保存要不要先留备份。
+    public struct FileVersions: Equatable, Sendable {
+        public var schema: Int
+        public var focusEngine: Int
+        public init(schema: Int, focusEngine: Int) { self.schema = schema; self.focusEngine = focusEngine }
+    }
+
     public static func save(_ edit: VideoEdit, in url: URL, document: ProjectDocument) throws {
+        var unknown: FileVersions?
+        try save(edit, in: url, document: document, onDisk: &unknown)
+    }
+
+    /// `onDisk`：调用方记得的盘上版本。知道就不再读旧文件——以前每次保存都把旧文件整份读两遍、解析两遍，
+    /// 带长运镜路径的工程每改一下都要多花几十到几百毫秒。不知道（nil）时读一次，写完更新成这次写下的版本。
+    public static func save(_ edit: VideoEdit, in url: URL, document: ProjectDocument, onDisk: inout FileVersions?) throws {
         try edit.validate(sourceDuration: document.duration)
         let path = url.appendingPathComponent("edits.json")
+        let target = FileVersions(schema: edit.schemaVersion, focusEngine: edit.focusEngineVersion ?? 1)
+        let old = onDisk ?? versions(at: path)
         // 每次升版本号之前留一份旧文件：升上去之后旧版 Caplo 就打不开了，
         // 用户要退回去只能靠这份备份。每个版本只留第一份，不会越攒越多。
-        if let data = try? Data(contentsOf: path),
-           let old = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            let version = old["schemaVersion"] as? Int ?? 1
-            if version < edit.schemaVersion {
-                let backup = url.appendingPathComponent("Recovery/edits-v\(version).json")
-                try FileManager.default.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
-                if !FileManager.default.fileExists(atPath: backup.path) { try data.write(to: backup, options: .atomic) }
-            }
+        if let old, old.schema < target.schema || (old.focusEngine < 2 && target.focusEngine == 2), let data = try? Data(contentsOf: path) {
+            if old.schema < target.schema { try backup(data, as: "Recovery/edits-v\(old.schema).json", in: url) }
+            if old.focusEngine < 2, target.focusEngine == 2 { try backup(data, as: "Recovery/edits-focus-v1.json", in: url) }
         }
-        if let data = try? Data(contentsOf: path),
-           let old = try JSONSerialization.jsonObject(with: data) as? [String: Any], (old["focusEngineVersion"] as? Int ?? 1) < 2, edit.focusEngineVersion == 2 {
-            let backup = url.appendingPathComponent("Recovery/edits-focus-v1.json")
-            try FileManager.default.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if !FileManager.default.fileExists(atPath: backup.path) { try data.write(to: backup, options: .atomic) }
-        }
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        // 不再缩进排版：文件只给程序读，缩进会让体积翻倍、编码变慢；键排序保留，内容不变时字节不变。
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         try encoder.encode(edit).write(to: path, options: .atomic)
+        onDisk = target
+    }
+
+    /// 只解析版本号两个字段；文件不存在或读不出来返回 nil（没有旧文件就不需要备份）。
+    static func versions(at path: URL) -> FileVersions? {
+        struct Header: Decodable { var schemaVersion: Int?; var focusEngineVersion: Int? }
+        guard let data = try? Data(contentsOf: path), let header = try? JSONDecoder().decode(Header.self, from: data) else { return nil }
+        return FileVersions(schema: header.schemaVersion ?? 1, focusEngine: header.focusEngineVersion ?? 1)
+    }
+
+    private static func backup(_ data: Data, as relative: String, in url: URL) throws {
+        let backup = url.appendingPathComponent(relative)
+        try FileManager.default.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if !FileManager.default.fileExists(atPath: backup.path) { try data.write(to: backup, options: .atomic) }
     }
 
     /// 只把遮罩读出来，不做迁移也不做校验。缩略图这类"不载入整个工程也要打码"的路径用它。

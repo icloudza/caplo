@@ -35,6 +35,8 @@ targets:
         NSMicrophoneUsageDescription: 用于录制讲解声音，麦克风素材会保存在本地工程中。
         NSCameraUsageDescription: 用于录制讲解人像，摄像头视频会作为独立素材保存在本地工程中。
         NSCameraUseContinuityCameraDeviceType: true
+        # 本地转写字幕用。缺了这项系统会在第一次请求语音识别权限时直接终止应用；重新生成工程前必须保留。
+        NSSpeechRecognitionUsageDescription: 用于把录制的讲解声音转写成字幕。转写全部在本机完成，音频不会离开这台电脑。
         CFBundleDocumentTypes:
           - CFBundleTypeName: Caplo 工程
             CFBundleTypeRole: Editor

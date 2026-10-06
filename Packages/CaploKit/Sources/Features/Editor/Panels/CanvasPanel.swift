@@ -66,7 +66,7 @@ struct CanvasPanel: View {
             }
             // 只有真的在用图片时才给模糊：渐变与纯色糊了还是原样，摆个滑块出来纯属误导。
             if model.edit.layout.backgroundImage != nil {
-                EditorSlider(model: model, title: "背景模糊", value: Binding(get: { model.edit.layout.backgroundBlur },
+                EditorFill(model: model, title: "背景模糊", value: Binding(get: { model.edit.layout.backgroundBlur },
                                                                         set: { model.edit.layout.backgroundBlur = $0 }),
                              range: 0...100, decimals: 0, defaultValue: 0)
             }
@@ -80,7 +80,7 @@ struct CanvasPanel: View {
                 SettingLabel("阴影", systemImage: "square.3.layers.3d")
             }.toggleStyle(StudioToggleStyle())
             if model.edit.layout.shadow {
-                EditorSlider(model: model, title: "不透明度", value: Binding(get: { model.edit.layout.shadowOpacity }, set: { model.edit.layout.shadowOpacity = $0 }), range: 0...1, suffix: "%", percentage: true, defaultValue: CanvasLayout.defaultShadowOpacity)
+                EditorFill(model: model, title: "不透明度", value: Binding(get: { model.edit.layout.shadowOpacity }, set: { model.edit.layout.shadowOpacity = $0 }), range: 0...1, suffix: "%", percentage: true, defaultValue: CanvasLayout.defaultShadowOpacity)
                 EditorSlider(model: model, title: "模糊", value: Binding(get: { model.edit.layout.shadowBlur }, set: { model.edit.layout.shadowBlur = $0 }), range: 0...60, decimals: 0, defaultValue: CanvasLayout.defaultShadowBlur)
                 EditorSlider(model: model, title: "距离", value: Binding(get: { model.edit.layout.shadowOffset }, set: { model.edit.layout.shadowOffset = $0 }), range: -40...40, decimals: 0, defaultValue: CanvasLayout.defaultShadowOffset, detents: [0])
             }

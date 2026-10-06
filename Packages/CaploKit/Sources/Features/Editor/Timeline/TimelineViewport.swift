@@ -387,8 +387,16 @@ final class TimelineViewportView: NSView {
         TimelineTextRenderer.resolvedColor(color, appearance: effectiveAppearance)
     }
     /// 块标题的宽度：每帧为每个块量一次文字是白花的钱，量过一次就记住。
+    /// 波形高度（0…1）：峰值按分贝映射，-48 dBFS 以下为 0、0 dBFS 为 1。
+    static func waveformLevel(_ peak: Float) -> Double {
+        guard peak.isFinite, peak > 0 else { return 0 }
+        let decibels = 20 * log10(Double(min(1, peak)))
+        return min(1, max(0, (decibels + 48) / 48))
+    }
     private func labelWidth(_ text: String) -> Double { TimelineTextRenderer.width(text, size: 10, bold: true) }
     private var visibleRange: Range<Double> { offset..<(offset + contentWidth / scale) }
+    /// 只读的可见时间范围，给测试核对"定位到块"等滚动行为。
+    var visibleTimeRange: Range<Double> { visibleRange }
     private func x(_ time: Double) -> Double { timeOrigin + (time - offset) * scale }
     private func time(_ x: Double) -> Double { max(0, offset + (x - timeOrigin) / scale) }
     private func clampOffset() {
@@ -1021,32 +1029,53 @@ final class TimelineViewportView: NSView {
         let rect = blockRect(block, row: row)
         guard rect.maxX > timeOrigin, rect.minX < bounds.width else { return }
         let color = color(for: block)
+        // 标题在左上角一条 14 点高的标题带里（像 Logic 的片段名）：贴着块在视口里可见部分的左缘，
+        // 块从视口左边外开始时名字也看得见；块比名字窄就截断。以前标题固定在整块正中，
+        // 长块的名字跑到几十秒之外，看不到是哪一块。
+        let titleBand = rect.width >= 72 ? 14.0 : 0
         if block.role == .system || block.role == .microphone,
            let role = block.role, let clip = edit.mediaClips(role).first(where: { $0.id == block.id }) {
             let samples = role == .system ? analysis.system : analysis.microphone
             if !samples.isEmpty {
-                // 波形从块左缘 6 点铺到右缘 6 点；每 2 点一根，取这 2 点覆盖时间段内的峰值（金字塔查询），缩放再粗也不漏掉短促的声音。
-                let waveform = NSBezierPath()
-                let step = 2.0
-                let left = max(timeOrigin, rect.minX + 6), right = min(bounds.width, rect.maxX - 6)
-                for pixel in stride(from: left, to: max(left, right), by: step) {
-                    let begin = time(pixel) - block.start, finish = time(pixel + step) - block.start
-                    guard finish > 0, begin < clip.playableDuration else { continue }
-                    let start = clip.sourceStart + max(0, begin), end = clip.sourceStart + min(clip.playableDuration, finish)
-                    let peak = role == .system ? analysis.systemPeak(from: start, to: end) : analysis.microphonePeak(from: start, to: end)
-                    let height = max(1, Double(peak) * rect.height * 0.75)
-                    waveform.appendRect(CGRect(x: pixel, y: rect.midY - height / 2, width: 1.25, height: height))
+                // 上下对称的填充包络，画在标题带下面。每 1 点取这一点覆盖时间段的峰值（金字塔查询，缩得再小也不漏短促的声音）。
+                // 幅度按分贝映射（-48 dBFS 以下为 0、0 dBFS 满格）：按线性幅度画的话，-18 dBFS 的讲话只有一两点高，
+                // 整条看起来像一串点线。
+                let top = rect.minY + titleBand + 1, bottom = rect.maxY - 2
+                let center = (top + bottom) / 2, half = max(1, (bottom - top) / 2)
+                let left = max(timeOrigin, rect.minX + 2), right = min(bounds.width, rect.maxX - 2)
+                var upper: [CGPoint] = []
+                for pixel in stride(from: left, through: max(left, right), by: 1.0) {
+                    let begin = time(pixel) - block.start, finish = time(pixel + 1) - block.start
+                    var level = 0.0
+                    if finish > 0, begin < clip.playableDuration {
+                        let start = clip.sourceStart + max(0, begin), end = clip.sourceStart + min(clip.playableDuration, finish)
+                        let peak = role == .system ? analysis.systemPeak(from: start, to: end) : analysis.microphonePeak(from: start, to: end)
+                        level = Self.waveformLevel(peak)
+                    }
+                    upper.append(CGPoint(x: pixel, y: center - level * half))
                 }
-                color.withAlphaComponent(0.55).setFill(); waveform.fill()
+                if upper.count > 1 {
+                    let envelope = NSBezierPath()
+                    envelope.move(to: CGPoint(x: upper[0].x, y: center))
+                    for point in upper { envelope.line(to: point) }
+                    for point in upper.reversed() { envelope.line(to: CGPoint(x: point.x, y: 2 * center - point.y)) }
+                    envelope.close()
+                    color.withAlphaComponent(0.8).setFill(); envelope.fill()
+                    // 中线：静音处也看得出这是一条声音。
+                    color.withAlphaComponent(0.45).setFill()
+                    CGRect(x: upper[0].x, y: center - 0.25, width: upper[upper.count - 1].x - upper[0].x, height: 0.5).fill()
+                }
             }
         }
         if rect.width < 72 { drawRoleIcon(block, at: CGRect(x: rect.midX - 7, y: rect.midY - 7, width: 14, height: 14)) }
         else {
-            // 标题固定在整块的正中，横向滚动时随块一起移动、不跟随可见部分；块比文字窄才靠左截断。
             let width = labelWidth(block.title)
-            let available = max(0, rect.width - 18)
-            let x = width <= available ? rect.midX - width / 2 : rect.minX + 9
-            label(block.title, in: CGRect(x: x, y: rect.minY + 8, width: min(width, available), height: 14), color: CaploNSColor.textPrimary, size: 10, bold: true)
+            let visibleLeft = max(rect.minX, timeOrigin) + 8
+            let available = max(0, rect.maxX - 8 - visibleLeft)
+            // 贴可见左缘，但块快要滚出去时不越过块的右端（名字整段跟着块走）。
+            let x = min(visibleLeft, max(rect.minX + 8, rect.maxX - 8 - width))
+            label(block.title, in: CGRect(x: x, y: rect.minY + 2, width: min(width, max(available, rect.maxX - 8 - x)), height: 12),
+                  color: CaploNSColor.textPrimary, size: 10, bold: true)
         }
         if block.duration * scale < TimelineInteractionGeometry.minimumBlockWidth {
             color.withAlphaComponent(0.6).setFill()
@@ -1132,75 +1161,104 @@ final class TimelineViewportView: NSView {
             ?? hits.first { isSelected($0.0) }
             ?? hits.min { abs($0.0.start - value) < abs($1.0.start - value) }
     }
-    /// 每个块有自己的右键菜单：先选中它，再列出这个块的操作；"同行块"作为子菜单方便在重叠的块之间切换。
-    /// 行内空白处右键只列同行块。
+    /// 右键菜单按块的种类给各自用得上的操作，先选中被点的块。分组从上到下：
+    /// 分割（只有画面、摄像头、声音与字幕能切）→ 在此处添加（只在录制画面上）→ 复制 / 重命名 → 整轨的静音与独奏 → 同行块 → 删除。
+    /// 做不了的操作直接不列，而不是列一排灰掉的项；删除放最后、单独一组。
+    /// 行内空白处右键：叠加层行（聚焦 / 遮罩 / 文字）给"在此处添加"，有重叠块时再给"同行块"。
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
         let number = Int((point.y - 28 + verticalOffset) / rowHeight)
         guard trackArea.contains(point), rows.indices.contains(number) else { return nil }
         let siblings = rows[number].sorted { $0.start < $1.start }
+        let clicked = TimelineTime.quantized(time(point.x))
         let menu = NSMenu()
         // 不关掉自动启用的话，AppKit 会把下面手写的 isEnabled 全部覆盖成可点，
         // "两侧留不下最小时长就禁用" 这类判断等于没写。
         menu.autoenablesItems = false
-        if let (block, _) = hitBlock(at: point, row: number) {
-            if !isSelected(block) { select(block) }
-            let header = NSMenuItem(title: block.title + " · " + TimelineTime.code(block.start), action: nil, keyEquivalent: "")
-            header.isEnabled = false
-            menu.addItem(header); menu.addItem(.separator())
-            // 分割：右键落点处，以及播放头处（播放头在这块里时）；两侧留不下最小时长就禁用。
-            let clicked = TimelineTime.quantized(time(point.x))
+        guard let (block, _) = hitBlock(at: point, row: number) else {
+            if let add = addItem(forRowOf: siblings.first, at: clicked) { menu.addItem(add) }
+            if siblings.count > 1 {
+                if !menu.items.isEmpty { menu.addItem(.separator()) }
+                menu.addItem(rowMembersItem(siblings))
+            }
+            return menu.items.isEmpty ? nil : menu
+        }
+        if !isSelected(block) { select(block) }
+        let header = NSMenuItem(title: block.title + " · " + TimelineTime.code(block.start), action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        // 分割：右键落点处，以及播放头处；两侧留不下最小时长就禁用。聚焦、遮罩、文字与定格卡段切不得，不列。
+        let splittable = block.caption || (block.role != nil && !block.hold)
+        if splittable {
+            menu.addItem(.separator())
             let here = NSMenuItem(title: "在此处分割 · " + TimelineTime.code(clicked), action: #selector(splitBlockHere(_:)), keyEquivalent: "")
             here.target = self; here.representedObject = clicked; here.isEnabled = model.canSplit(at: clicked)
             menu.addItem(here)
             let atPlayhead = NSMenuItem(title: "在播放头分割", action: #selector(splitBlockAtPlayhead(_:)), keyEquivalent: "b")
             atPlayhead.target = self; atPlayhead.isEnabled = model.canSplit
             menu.addItem(atPlayhead)
-            if block.role == .screen {
-                // 从右键落点起加一个 2 秒的跟随镜头；这段已有镜头时模型会先问。
-                let focus = NSMenuItem(title: "在此处添加聚焦 · " + TimelineTime.code(clicked), action: #selector(addFocusHere(_:)), keyEquivalent: "")
-                focus.target = self; focus.representedObject = clicked
-                menu.addItem(focus)
-                let mask = NSMenuItem(title: "在此处添加遮罩 · " + TimelineTime.code(clicked), action: #selector(addMaskHere(_:)), keyEquivalent: "")
-                mask.target = self; mask.representedObject = clicked
-                menu.addItem(mask)
-                let text = NSMenuItem(title: "在此处添加文字 · " + TimelineTime.code(clicked), action: #selector(addTextHere(_:)), keyEquivalent: "")
-                text.target = self; text.representedObject = clicked
-                menu.addItem(text)
-            }
-            menu.addItem(.separator())
-            // 字幕块的名字就是它的台词，改名没有意义；文本在字幕面板里编辑。
-            if !block.caption {
-                let rename = NSMenuItem(title: "重命名…", action: #selector(renameBlock(_:)), keyEquivalent: "")
-                rename.target = self; rename.representedObject = block.id
-                menu.addItem(rename)
-            }
-            if block.role == .screen {
-                let duplicate = NSMenuItem(title: "复制片段", action: #selector(duplicateBlock(_:)), keyEquivalent: "d")
-                duplicate.target = self; menu.addItem(duplicate)
-            }
-            if let role = block.role, role == .system || role == .microphone {
-                let track: AudioTrack = role == .system ? .system : .microphone
-                for solo in [false, true] {
-                    let item = NSMenuItem(title: solo ? "仅播放此轨" : "静音", action: #selector(toggleRowAudio(_:)), keyEquivalent: "")
-                    item.target = self; item.identifier = NSUserInterfaceItemIdentifier(track.rawValue + (solo ? ".solo" : ".mute"))
-                    item.state = (solo ? edit.audio.solo : edit.audio.muted).contains(track) ? .on : .off
-                    item.isEnabled = model.audioTracks.contains(track)
-                    menu.addItem(item)
-                }
-            }
-            let delete = NSMenuItem(title: "删除", action: #selector(deleteBlock(_:)), keyEquivalent: "\u{8}")
-            delete.keyEquivalentModifierMask = []; delete.target = self; menu.addItem(delete)
-            if siblings.count > 1 {
-                menu.addItem(.separator())
-                let group = NSMenuItem(title: "同行块", action: nil, keyEquivalent: "")
-                group.submenu = rowMembersMenu(siblings)
-                menu.addItem(group)
-            }
-            return menu
         }
-        guard siblings.count > 1 else { return nil }
-        return rowMembersMenu(siblings)
+        // 在录制画面上右键：从落点起加聚焦（2 秒）、遮罩（2 秒）、文字（3 秒），收成一个子菜单。
+        if block.role == .screen, !block.hold {
+            menu.addItem(.separator())
+            let add = NSMenuItem(title: "在此处添加", action: nil, keyEquivalent: "")
+            let submenu = NSMenu(title: "在此处添加")
+            for (title, action) in [("聚焦", #selector(addFocusHere(_:))), ("遮罩", #selector(addMaskHere(_:))), ("文字", #selector(addTextHere(_:)))] {
+                let item = NSMenuItem(title: title + " · " + TimelineTime.code(clicked), action: action, keyEquivalent: "")
+                item.target = self; item.representedObject = clicked
+                submenu.addItem(item)
+            }
+            add.submenu = submenu
+            menu.addItem(add)
+        }
+        menu.addItem(.separator())
+        // 定格卡段的副本会变成普通的一段定格画面，没有意义；其余种类都能就地复制一份接在后面。
+        if !block.hold {
+            let duplicate = NSMenuItem(title: "复制", action: #selector(duplicateBlock(_:)), keyEquivalent: "d")
+            duplicate.target = self; menu.addItem(duplicate)
+        }
+        // 字幕块的名字就是它的台词，改名没有意义；文本在字幕面板里编辑。
+        if !block.caption {
+            let rename = NSMenuItem(title: "重命名…", action: #selector(renameBlock(_:)), keyEquivalent: "")
+            rename.target = self; rename.representedObject = block.id
+            menu.addItem(rename)
+        }
+        // 静音与独奏作用于整条音轨，不是这一块；标题写明轨道，免得以为只静这一段（这一块的音量在音频面板里调）。
+        if let role = block.role, role == .system || role == .microphone {
+            let track: AudioTrack = role == .system ? .system : .microphone
+            let name = role == .system ? "系统声音" : "麦克风"
+            menu.addItem(.separator())
+            for solo in [false, true] {
+                let item = NSMenuItem(title: solo ? "仅播放“\(name)”轨" : "静音“\(name)”轨", action: #selector(toggleRowAudio(_:)), keyEquivalent: "")
+                item.target = self; item.identifier = NSUserInterfaceItemIdentifier(track.rawValue + (solo ? ".solo" : ".mute"))
+                item.state = (solo ? edit.audio.solo : edit.audio.muted).contains(track) ? .on : .off
+                item.isEnabled = model.audioTracks.contains(track)
+                menu.addItem(item)
+            }
+        }
+        if siblings.count > 1 {
+            menu.addItem(.separator())
+            menu.addItem(rowMembersItem(siblings))
+        }
+        menu.addItem(.separator())
+        // 删定格卡段会连同它插入的时长一起撤掉、后面的内容前移，标题说清楚。
+        let delete = NSMenuItem(title: block.hold ? "删除卡段" : "删除", action: #selector(deleteBlock(_:)), keyEquivalent: "\u{8}")
+        delete.keyEquivalentModifierMask = []; delete.target = self; menu.addItem(delete)
+        return menu
+    }
+    /// 空白处的"在此处添加"：按这一行装的是哪种叠加层决定；素材行与字幕行没有可凭空添加的东西。
+    private func addItem(forRowOf sample: Block?, at time: Double) -> NSMenuItem? {
+        guard let sample, sample.role == nil, !sample.caption else { return nil }
+        let (title, action): (String, Selector) = sample.mask ? ("添加遮罩", #selector(addMaskHere(_:)))
+            : sample.text ? ("添加文字", #selector(addTextHere(_:))) : ("添加聚焦", #selector(addFocusHere(_:)))
+        let item = NSMenuItem(title: "在此处" + title + " · " + TimelineTime.code(time), action: action, keyEquivalent: "")
+        item.target = self; item.representedObject = time
+        return item
+    }
+    private func rowMembersItem(_ members: [Block]) -> NSMenuItem {
+        let group = NSMenuItem(title: "同行块", action: nil, keyEquivalent: "")
+        group.submenu = rowMembersMenu(members)
+        return group
     }
     private func rowMembersMenu(_ members: [Block]) -> NSMenu {
         let menu = NSMenu(title: "同行块")
@@ -1303,9 +1361,17 @@ final class TimelineViewportView: NSView {
                 updateDropTarget(at: point, proposed: next)
                 updateDragGhost(at: CGPoint(x: drag.origin.x + displacement.x, y: drag.origin.y + displacement.y))
             } else { dropTarget = nil }
-            if model.edit != next { model.edit = next; model.previewChanged() }
+            if model.edit != next { model.edit = next; model.previewChanged(edgeSource: edgePreviewSource(of: block, edge: edge, in: next), edgeClip: block.id) }
             needsDisplay = true
         }
+    }
+    /// 拖录制画面的边裁剪时，画布显示正在拖的那条边的画面：左边是新的第一帧，右边是新的最后一帧。
+    /// 片段变化不重建播放项，模型拿这个源时间去定位或离线渲染；以前这里没传，拖边时画布一直停在播放头那一帧。
+    private func edgePreviewSource(of block: Block, edge: VideoEdit.FocusDragEdge, in edit: VideoEdit) -> Double? {
+        guard block.role == .screen, edge != .body, let clip = edit.clips.first(where: { $0.id == block.id }) else { return nil }
+        if edge == .leading { return clip.sourceStart }
+        let frame = 1 / max(24, model.entry.document.frameRate)
+        return clip.sourceStart + max(0, clip.playableDuration - frame)
     }
     private func remainsInOriginalRow(_ drag: Drag, at point: CGPoint) -> Bool {
         guard let id = drag.blockID else { return false }
@@ -1420,7 +1486,8 @@ final class TimelineViewportView: NSView {
         let command = event.modifierFlags.contains(.command), shift = event.modifierFlags.contains(.shift)
         if command {
             switch event.charactersIgnoringModifiers?.lowercased() {
-            case "a": model.selectedClipIDs = Set(edit.clips.map(\.id)); model.selectedClip = edit.clips.first?.id; model.selectedFocus = nil
+            // 全选的是画面片段：先清掉其他类别，否则删除键会先删掉还选着的字幕 / 文字 / 遮罩。
+            case "a": model.clearSelection(); model.selectedClipIDs = Set(edit.clips.map(\.id)); model.selectedClip = edit.clips.first?.id
             case "d": model.duplicateSelection()
             case "b": model.split()
             case "z": if shift { model.redo() } else { model.undo() }

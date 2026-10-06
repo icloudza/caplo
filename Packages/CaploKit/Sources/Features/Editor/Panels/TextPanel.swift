@@ -20,7 +20,7 @@ struct TextPanel: View {
     }
 
     /// 新建之后直接选中它并滚进视口——面板显示的永远是时间线上选中的那一段。
-    private func select(_ id: UUID) { model.selectedText = id; model.reveal(id) }
+    private func select(_ id: UUID) { model.select(.text(id)); model.reveal(id) }
 
     var body: some View {
         PanelSection("预设", info: "预设只是一组排版与动画的初值，套用之后每一项都还能单独改。") {
@@ -56,8 +56,10 @@ struct TextPanel: View {
         // 进面板时还没选中任何一段就先选第一段，免得面板空着、非得先去时间线点一下。
         .onAppear {
             model.textEditing = true
-            if model.selectedText == nil { model.selectedText = model.edit.textList.first?.id }
+            selectFirstIfNeeded()
         }
+        // 面板可能比工程先出现（直接打开到这个面板时）：载入完成再补选一次。
+        .onChange(of: model.ready) { selectFirstIfNeeded() }
         .onDisappear { model.textEditing = false }
         .onChange(of: typographyExpanded) { _, value in UserDefaults.standard.set(value, forKey: Self.typographyKey) }
         .onChange(of: appearanceExpanded) { _, value in UserDefaults.standard.set(value, forKey: Self.appearanceKey) }
@@ -83,7 +85,7 @@ struct TextPanel: View {
             PanelNote(value.layout == .fullscreen
                       ? "全屏：文字占满画面，底下的录制画面缩一点并淡出。要让成片在这里停住，再打开下面的「画面定格」。"
                       : "分屏：录制画面退到一栏，文字占另一栏。浮在画面上的画中画会待在画面那一栏里，不跟着画面一起缩小。")
-            EditorSlider(model: model, title: "过渡时长", value: binding(id, \.layoutTransition), range: 0...3, defaultValue: 0.35)
+            EditorStepper(model: model, title: "过渡时长", value: binding(id, \.layoutTransition), range: 0...3, defaultValue: 0.35)
         }
         if value.layout.textOnLeft != nil {
             // 人像被当成画面构图一部分的那几种布局（侧边 / 在后 / 分屏 / 人像全屏）没法摘出来单独摆，
@@ -91,7 +93,7 @@ struct TextPanel: View {
             if model.hasCameraMedia, let camera = model.edit.camera, camera.enabled, !camera.isFloatingPortrait {
                 PanelNote("人像当前不是浮在画面上的画中画，它属于画面构图的一部分，会跟着画面一起缩进这一栏。想让人像保持原大小，去「人像」面板换成圆形或圆角矩形那两种叠放预设。")
             }
-            EditorSlider(model: model, title: "画面栏宽", value: binding(id, \.splitRatio), range: TextSegment.splitRatioRange,
+            EditorFill(model: model, title: "画面栏宽", value: binding(id, \.splitRatio), range: TextSegment.splitRatioRange,
                          suffix: "%", percentage: true, defaultValue: TextSegment.defaultSplitRatio, detents: [0.5])
             EditorSlider(model: model, title: "栏间距", value: binding(id, \.splitGap), range: 0...240, decimals: 0,
                          defaultValue: TextSegment.defaultSplitGap)
@@ -105,9 +107,9 @@ struct TextPanel: View {
             PanelNote("这一段是插进成片里的定格，长度在时间线上拖这一块的右缘来改，后面的所有内容跟着往后挪。")
         }
         Picker("入场动画", selection: animationBinding(id, \.enterKind)) { animationOptions }.environment(\.colorScheme, .dark)
-        EditorSlider(model: model, title: "入场时长", value: binding(id, \.enterDuration), range: 0...3, defaultValue: 0.4)
+        EditorStepper(model: model, title: "入场时长", value: binding(id, \.enterDuration), range: 0...3, defaultValue: 0.4)
         Picker("出场动画", selection: animationBinding(id, \.exitKind)) { animationOptions }.environment(\.colorScheme, .dark)
-        EditorSlider(model: model, title: "出场时长", value: binding(id, \.exitDuration), range: 0...3, defaultValue: 0.35)
+        EditorStepper(model: model, title: "出场时长", value: binding(id, \.exitDuration), range: 0...3, defaultValue: 0.35)
         if value.enterDuration + value.exitDuration > value.duration {
             PanelNote("进出时长之和超过了本段时长，已按比例压缩。")
         }
@@ -125,30 +127,31 @@ struct TextPanel: View {
                          decimals: 0, defaultValue: 500, detents: [400, 700])
             EditorSlider(model: model, title: "行距", value: binding(id, \.lineHeight), range: 0.8...2.0, defaultValue: 1.30, detents: [1.0, 1.3])
             EditorSlider(model: model, title: "字间距", value: binding(id, \.tracking), range: -2...20, decimals: 1, defaultValue: 0, detents: [0])
-            EditorSlider(model: model, title: "水平位置", value: binding(id, \.x), range: 0...1, suffix: "%", percentage: true, detents: [0.5])
-            EditorSlider(model: model, title: "垂直位置", value: binding(id, \.y), range: 0...1, suffix: "%", percentage: true, detents: [0.5])
+            // 位置在画布比例的底板上拖（也可以直接在画布上拖文字）；靠近中线吸附。
+            EditorRegion(model: model, title: "位置", shape: .point, aspect: model.edit.layout.ratio.value,
+                         region: positionBinding(id)) { EditorRegion.positionReadout($0.origin) }
             EditorSlider(model: model, title: "文本框宽度", value: binding(id, \.maxWidth), range: TextSegment.maxWidthRange, suffix: "%", percentage: true, defaultValue: 0.8)
         }
         PanelSection("外观", expanded: $appearanceExpanded) {
             SwatchRow(title: "文字颜色", selection: paletteBinding(id, \.color))
-            EditorSlider(model: model, title: "不透明度", value: binding(id, \.opacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 1)
+            EditorFill(model: model, title: "不透明度", value: binding(id, \.opacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 1)
             Toggle("文字背景", isOn: boolBinding(id, \.plate)).toggleStyle(StudioToggleStyle())
             if value.plate {
                 SwatchRow(title: "背景色", selection: paletteBinding(id, \.plateColor))
-                EditorSlider(model: model, title: "背景不透明度", value: binding(id, \.plateOpacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 0.55)
+                EditorFill(model: model, title: "背景不透明度", value: binding(id, \.plateOpacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 0.55)
                 EditorSlider(model: model, title: "内边距", value: binding(id, \.platePadding), range: 0...48, decimals: 0, defaultValue: 16)
                 EditorSlider(model: model, title: "背景圆角", value: binding(id, \.plateRadius), range: 0...32, decimals: 0, defaultValue: 8)
             }
             Toggle("阴影", isOn: boolBinding(id, \.shadow)).toggleStyle(StudioToggleStyle())
             if value.shadow {
-                EditorSlider(model: model, title: "不透明度", value: binding(id, \.shadowOpacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 0.45)
+                EditorFill(model: model, title: "不透明度", value: binding(id, \.shadowOpacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 0.45)
                 EditorSlider(model: model, title: "模糊", value: binding(id, \.shadowBlur), range: 0...60, decimals: 0, defaultValue: 18)
                 EditorSlider(model: model, title: "距离", value: binding(id, \.shadowOffset), range: -40...40, decimals: 0, defaultValue: 6, detents: [0])
             }
         }
         HStack(spacing: CaploMetrics.Spacing.s) {
-            Button("复制这段") { model.selectedText = id; model.duplicateSelection() }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
-            Button("删除这段") { model.selectedText = id; model.deleteSelection() }.buttonStyle(StudioButtonStyle(.destructive, size: .small))
+            Button("复制这段") { model.select(.text(id)); model.duplicateSelection() }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
+            Button("删除这段") { model.select(.text(id)); model.deleteSelection() }.buttonStyle(StudioButtonStyle(.destructive, size: .small))
         }
     }
 
@@ -179,6 +182,14 @@ struct TextPanel: View {
             model.edit.updateText(id: id) { $0[keyPath: key] = value }
         })
     }
+    private func selectFirstIfNeeded() {
+        if model.selectedText == nil, let first = model.edit.textList.first?.id { model.select(.text(first)) }
+    }
+    private func positionBinding(_ id: UUID) -> Binding<CGRect> {
+        Binding(get: { CGRect(x: model.edit.text(id: id)?.x ?? 0.5, y: model.edit.text(id: id)?.y ?? 0.5, width: 0, height: 0) }, set: { rect in
+            model.edit.updateText(id: id) { $0.x = rect.minX; $0.y = rect.minY }
+        })
+    }
     private func boolBinding(_ id: UUID, _ key: WritableKeyPath<TextSegment, Bool>) -> Binding<Bool> {
         Binding(get: { model.edit.text(id: id)?[keyPath: key] ?? false }, set: { value in
             model.commit { $0.updateText(id: id) { $0[keyPath: key] = value } }
@@ -187,8 +198,7 @@ struct TextPanel: View {
     private func textBinding(_ id: UUID) -> Binding<String> {
         Binding(get: { model.edit.text(id: id)?.text ?? "" }, set: { value in
             // 逐字提交会把撤销栈灌满；打字期间只改预览，停手 0.6 秒后合成一个快照。
-            model.edit.updateText(id: id) { $0.text = String(value.prefix(TextSegment.textLimit)) }
-            model.scheduleTextCommit()
+            model.typeText { $0.updateText(id: id) { $0.text = String(value.prefix(TextSegment.textLimit)) } }
         })
     }
     private func animationBinding(_ id: UUID, _ key: WritableKeyPath<TextSegment, TextSegment.Animation>) -> Binding<TextSegment.Animation> {

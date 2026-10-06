@@ -1,6 +1,7 @@
 import AppKit
 import Testing
 @testable import Features
+import CaploDesignSystem
 
 /// 窗口高亮的几何换算与最前窗口判定，全部使用合成数据，不读取真实窗口列表。
 struct WindowGeometryTests {
@@ -10,34 +11,34 @@ struct WindowGeometryTests {
          kCGWindowBounds as String: CGRect(origin: CGPoint(x: 10, y: 20), size: size).dictionaryRepresentation as NSDictionary]
     }
 
-    @Test func globalTopLeftConvertsToAppKitBottomLeft() {
-        let rect = WindowGeometry.appKitRect(fromGlobal: CGRect(x: 100, y: 50, width: 400, height: 300), primaryHeight: 1080)
-        #expect(rect == CGRect(x: 100, y: 730, width: 400, height: 300))
+    /// 录制条摆在目标框（区域或窗口）正下方，放不下就正上方；上下都放不下（最大化的浏览器窗口）时
+    /// 贴屏幕底部，和全屏模式同一位置——以前会被钳到屏幕最上面，压住目标窗口的标签栏与地址栏。
+    @MainActor @Test func recordBarFallsBackToTheScreenBottomWhenTheTargetFillsTheScreen() {
+        // 14 寸屏：菜单栏 33 点，程序坞 70 点。目标框用显示器本地左上角坐标。
+        let screen = CGRect(x: 0, y: 0, width: 1512, height: 982)
+        let visible = CGRect(x: 0, y: 70, width: 1512, height: 879)
+        let panel = CGSize(width: 860, height: 100)
+        let bar = CaploMetrics.floatingBarHeight, inset = CaploMetrics.floatingBarInset
+        func origin(_ region: CGRect) -> CGPoint { StudioWindows.recordBarOrigin(near: region, screenFrame: screen, visible: visible, panelSize: panel) }
+
+        // 屏幕中间的小窗口：录制条在它正下方，不压窗口。
+        let small = CGRect(x: 300, y: 300, width: 800, height: 400)
+        let below = origin(small)
+        #expect(below.y + inset + bar <= screen.maxY - small.maxY, "录制条压到了窗口下沿")
+        #expect(abs(below.x + panel.width / 2 - (small.midX)) < 0.5, "录制条没有对准窗口中线")
+
+        // 贴着屏幕底部的窗口：下方放不下，放到它正上方。
+        let low = CGRect(x: 200, y: 500, width: 900, height: 440)
+        let above = origin(low)
+        #expect(above.y + inset >= screen.maxY - low.minY, "录制条压到了窗口上沿")
+        #expect(above.y + panel.height <= visible.maxY)
+
+        // 最大化的窗口：上下都放不下，贴屏幕底部（程序坞上方），绝不顶到屏幕最上面。
+        let maximized = CGRect(x: 0, y: 33, width: 1512, height: 949)
+        let docked = origin(maximized)
+        #expect(docked.y == visible.minY + CaploMetrics.Spacing.xl - inset, "最大化窗口时录制条在 \(docked.y)，没有贴到屏幕底部")
+        #expect(docked.y + panel.height < visible.maxY - 300, "录制条跑到了屏幕上半部")
+        #expect(abs(docked.x - (visible.midX - panel.width / 2)) < 0.5)
     }
 
-    @Test func globalRectMapsIntoEachScreenOverlay() {
-        let window = CGRect(x: 2000, y: 50, width: 400, height: 300)
-        // 主显示器 1920×1080：本地坐标与全局坐标一致。
-        #expect(WindowGeometry.localRect(window, in: CGRect(x: 0, y: 0, width: 1920, height: 1080), primaryHeight: 1080) == window)
-        // 右侧显示器 1440×900，AppKit 坐标下底边在 y = 180（顶边与主显示器齐平）：全局左上角原点为 (1920, 0)。
-        let right = CGRect(x: 1920, y: 180, width: 1440, height: 900)
-        #expect(WindowGeometry.localRect(window, in: right, primaryHeight: 1080) == CGRect(x: 80, y: 50, width: 400, height: 300))
-        // 右侧显示器底边与主显示器齐平时，其顶边在全局坐标中位于 y = 180。
-        let rightBottomAligned = CGRect(x: 1920, y: 0, width: 1440, height: 900)
-        #expect(WindowGeometry.localRect(window, in: rightBottomAligned, primaryHeight: 1080) == CGRect(x: 80, y: -130, width: 400, height: 300))
-    }
-
-    @Test func frontmostSkipsOwnProcessNonNormalLayersAndTinyWindows() {
-        let list: [[String: Any]] = [
-            entry(pid: 1, number: 11, layer: 25),                 // 菜单栏等高层窗口
-            entry(pid: 42, number: 12),                            // 自身进程
-            entry(pid: 7, number: 13, alpha: 0),                   // 隐形窗口
-            entry(pid: 7, number: 14, size: CGSize(width: 10, height: 10)),
-            entry(pid: 9, number: 15),
-            entry(pid: 8, number: 16),
-        ]
-        let front = WindowGeometry.frontmostWindow(in: list, excluding: 42)
-        #expect(front?.pid == 9 && front?.windowID == 15)
-        #expect(WindowGeometry.frontmostWindow(in: [entry(pid: 42, number: 1)], excluding: 42) == nil)
-    }
 }

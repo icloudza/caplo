@@ -78,6 +78,7 @@ public enum ProjectTranscription {
         guard limit > 0 else { throw TranscriptionError.noAudio }
         var result: [CaptionCue] = []
         for (number, entry) in origins.enumerated() {
+            try Task.checkCancellation()
             let file = try ProjectStorage.mediaURL(entry.path, in: url)
             let share = 1.0 / Double(origins.count)
             let cues = try await engine.transcribe(file: file, locale: locale) { value in
@@ -163,8 +164,10 @@ public struct SpeechTranscriber: TranscriptionEngine {
         request.taskHint = .dictation
         let duration = (try? await AVURLAsset(url: file).load(.duration).seconds) ?? 0
 
-        let segments: [RecognizedWord] = try await withCheckedThrowingContinuation { continuation in
-            let box = ResultBox(continuation: continuation)
+        // 识别任务不认 Swift 的任务取消：取消转写时要手动把它停掉，否则它在后台把整段识别完。
+        let box = ResultBox()
+        let segments: [RecognizedWord] = try await withTaskCancellationHandler { try await withCheckedThrowingContinuation { continuation in
+            guard box.install(continuation) else { return }
             let task = recognizer.recognitionTask(with: request) { result, error in
                 if let error { box.fail(TranscriptionError.failed(error.localizedDescription)); return }
                 guard let result else { return }
@@ -179,7 +182,7 @@ public struct SpeechTranscriber: TranscriptionEngine {
                 }
             }
             box.attach(task)
-        }
+        } } onCancel: { box.fail(CancellationError()) }
         progress(1)
         return Self.sentences(from: segments)
     }
@@ -232,8 +235,17 @@ private final class ResultBox: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<[RecognizedWord], any Error>?
     private var task: SFSpeechRecognitionTask?
+    /// 还没装上 continuation 就被取消（取消处理先于挂起执行）：装上时立即以取消结束。
+    private var cancelled = false
 
-    init(continuation: CheckedContinuation<[RecognizedWord], any Error>) { self.continuation = continuation }
+    /// 返回假表示已经取消、continuation 已结束，调用方不必再建识别任务。
+    func install(_ continuation: CheckedContinuation<[RecognizedWord], any Error>) -> Bool {
+        lock.lock()
+        if cancelled { lock.unlock(); continuation.resume(throwing: CancellationError()); return false }
+        self.continuation = continuation
+        lock.unlock()
+        return true
+    }
 
     func attach(_ task: SFSpeechRecognitionTask?) {
         lock.lock(); defer { lock.unlock() }
@@ -245,7 +257,9 @@ private final class ResultBox: @unchecked Sendable {
         pending?.resume(returning: segments)
     }
     func fail(_ error: any Error) {
-        lock.lock(); let pending = continuation; continuation = nil; let running = task; task = nil; lock.unlock()
+        lock.lock(); let pending = continuation; continuation = nil; let running = task; task = nil
+        if pending == nil, error is CancellationError { cancelled = true }
+        lock.unlock()
         running?.cancel()
         pending?.resume(throwing: error)
     }

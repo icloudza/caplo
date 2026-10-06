@@ -1,17 +1,12 @@
 import Foundation
 import AVFoundation
 import Testing
+import os
 import ProjectKit
 import ExportKit
 @testable import CaptureKit
 
 private func time(_ seconds: Double) -> CMTime { CMTime(seconds: seconds, preferredTimescale: 48_000) }
-
-@Test func reverseRegionDragClampsToDisplayBounds() {
-    let rect = CaptureRegion.clampedDrag(from: CGPoint(x: 800, y: 700), to: CGPoint(x: -10, y: 100), in: CGRect(x: 0, y: 0, width: 960, height: 540))
-    #expect(rect == CGRect(x: 0, y: 100, width: 800, height: 440))
-    #expect(CaptureRegion.clampedDrag(from: CGPoint(x: -100, y: -100), to: CGPoint(x: -10, y: -10), in: CGRect(x: 0, y: 0, width: 960, height: 540)) == .zero)
-}
 
 /// 合成帧与音频通过生产采集入口写入；十秒暂停必须从工程及最终 MP4 中消失。
 @Test @MainActor func pauseProducesContinuousProjectWithTwoAudioTracksAndExport() async throws {
@@ -49,6 +44,29 @@ private func time(_ seconds: Double) -> CMTime { CMTime(seconds: seconds, prefer
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try FileManager.default.copyItem(at: url, to: directory.appendingPathComponent("demo.caplo"))
     }
+}
+
+/// 换段刚把上一段送去提交、紧接着暂停又继续：两段同时在提交。
+/// 以前继续时直接报"片段正在提交，请稍后继续录制"，走失败收尾，整段录制就此结束。
+/// 现在等提交降下来再从继续的那一刻开新段，录制不中断、时间轴不留空洞。
+@Test @MainActor func resumingWhileTwoSegmentsAreCommittingKeepsRecording() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let url = try ProjectStorage.create(in: root, name: "继续录制积压测试")
+    let failures = OSAllocatedUnfairLock(initialState: [String]())
+    let writer = SegmentedCaptureWriter(project: url, width: 320, height: 180, systemAudio: true, microphone: true, segmentSeconds: 1,
+        onStarted: {}, onFailure: { message in failures.withLock { $0.append(message) } })
+    try await samples(writer, start: 0)
+    try await samples(writer, start: 1.2)          // 越过 1 秒边界：换段，第一段送去提交
+    await writer.pause(at: time(1.5))              // 第二段也送去提交：此刻两段都在提交
+    await writer.resume(at: time(1.6))
+    try await Task.sleep(for: .milliseconds(900))  // 提交降下来后从 1.6 秒开新段
+    try await samples(writer, start: 1.7)
+    try await writer.finish(at: time(2.7))
+    #expect(failures.withLock { $0 }.isEmpty, "继续录制触发了失败收尾：\(failures.withLock { $0 })")
+    let document = try ProjectStorage.load(url)
+    #expect(document.segments.count == 3, "应当有换段前、暂停前、继续后三段，实际 \(document.segments.count) 段")
+    #expect(abs(document.duration - 2.6) < 0.05, "工程时长 \(document.duration) 秒")
 }
 
 @Test @MainActor func crossingAudioPacketIsPreservedAcrossRotation() async throws {

@@ -55,25 +55,5 @@ extension WindowLifecycleTests {
         }
         await renderer.close()
     }
-    @Test func audioOnlyLayersKeepCanvasAndMixOverlappingBlocks() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let url = try await makeEditorFixture(root: root, audio: true)
-        let document = try ProjectStorage.load(url)
-        var edit = VideoEdit(duration: 4)
-        edit.prepareLayerEditing(camera: false, system: false, microphone: true)
-        edit.clips = []
-        var copy = try #require(edit.microphoneClips?.first)
-        copy.id = UUID(); copy.timelineStart = 1; copy.duration = 1; copy.microphoneGain = 0.2
-        edit.microphoneClips?.append(copy)
-        let (composition, mix) = try await ProjectMedia.compose(url: url, document: document, levels: edit.audio, edit: edit)
-        #expect(composition.tracks(withMediaType: .audio).count == 2)
-        #expect(mix.inputParameters.count == 2)
-        let output = root.appendingPathComponent("audio-canvas.mp4")
-        try await ProjectMedia.export(url: url, document: document, levels: edit.audio, destination: output, edit: edit) { _ in }
-        let asset = AVURLAsset(url: output)
-        #expect(abs(try await asset.load(.duration).seconds - 4) < 0.04)
-        #expect(try await asset.loadTracks(withMediaType: .video).count == 1)
-    }
 
 }

@@ -7,6 +7,10 @@ import RenderKit
 struct CursorPanel: View {
     let model: VideoEditorModel
     private var editable: Bool { model.entry.document.capture?.cursorEmbedded == false }
+    /// 成片里不画光标：样式与运动参数这时没有意义，置灰；点击高亮照常（它有自己的开关）。
+    private var hidden: Bool { model.edit.pointer?.cursorVisible == false }
+    /// 旧版"片段设置"里单独隐藏过光标的片段数。那个面板已删除，这里给出提示和恢复入口。
+    private var clipsHidingCursor: Int { model.edit.clips.filter(\.cursorHidden).count }
     @State private var category: CursorStyleGroup
 
     init(model: VideoEditorModel) {
@@ -19,6 +23,23 @@ struct CursorPanel: View {
         VStack(alignment: .leading, spacing: 16) {
             if !editable {
                 PanelNote("这段素材是旧版本录的，原光标已录进视频，下面的样式与运动效果无法应用于它；点击高亮仍可调整。")
+            }
+            VStack(alignment: .leading, spacing: CaploMetrics.Spacing.s) {
+                Toggle(isOn: Binding(get: { hidden }, set: { hide in
+                    model.commit { edit in
+                        if edit.pointer == nil { var effects = PointerEffects(); effects.clicksVisible = false; edit.pointer = effects }
+                        edit.pointer?.cursorVisible = !hide
+                    }
+                })) { SettingLabel("隐藏光标", systemImage: "cursorarrow.slash") }
+                    .toggleStyle(StudioToggleStyle())
+                    .disabled(!editable)
+                if hidden { PanelNote("成片里不画光标；点击高亮仍按下面的设置显示。") }
+                if clipsHidingCursor > 0 {
+                    PanelNote("有 \(clipsHidingCursor) 个片段单独隐藏了光标（旧版片段设置留下的）。")
+                    Button("这些片段也显示光标") {
+                        model.commit { edit in for index in edit.clips.indices { edit.clips[index].cursorHidden = false } }
+                    }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
+                }
             }
             // 光标样式：上面按形状分类（箭头 / 指针 / 抓取 / 更多）切换预览，下面的格子是样式；录制始终单独保存真实光标轨迹，这里选的是回放时画成什么样。
             PanelSection("光标样式", info: "上面是样式分组，下面是组内的样式；样式只换箭头，手形、文字等其他形状保持录制时的真实光标。") {
@@ -39,22 +60,22 @@ struct CursorPanel: View {
                 }
                 // 允许小于 1×：最小值就是与录制时系统光标同大的倍率（按真实光标的点尺寸换算），并作为一个档位。
                 EditorSlider(model: model, title: "大小", value: value(\.cursorScale), range: model.systemCursorScale...3, suffix: "×", defaultValue: 1, detents: [model.systemCursorScale, 1, 2])
-                EditorSlider(model: model, title: "角度", value: value(\.angle), range: -180...180, suffix: "°", decimals: 0, defaultValue: 0, detents: [0])
-                EditorSlider(model: model, title: "随移动转向", value: value(\.directionFollow), range: 0...1, suffix: "%", percentage: true, defaultValue: 0)
+                EditorDial(model: model, title: "角度", value: value(\.angle))
+                EditorFill(model: model, title: "随移动转向", value: value(\.directionFollow), range: 0...1, suffix: "%", percentage: true, defaultValue: 0)
             }
-            .disabled(!editable)
+            .disabled(!editable || hidden)
             Group {
                 PanelSection("光标运动") {
-                    EditorSlider(model: model, title: "轨迹平滑", value: value(\.smoothing), range: 0...2, defaultValue: 0)
-                    EditorSlider(model: model, title: "点击弹跳", value: value(\.bounce), range: 0...0.4, defaultValue: 0)
+                    EditorFill(model: model, title: "轨迹平滑", value: value(\.smoothing), range: 0...2, defaultValue: 0)
+                    EditorFill(model: model, title: "点击弹跳", value: value(\.bounce), range: 0...0.4, defaultValue: 0)
                     EditorSlider(model: model, title: "弹跳速度", value: value(\.bounceSpeed), range: 0.5...2, suffix: "×", defaultValue: 1, detents: [1])
-                    EditorSlider(model: model, title: "摆动", value: value(\.sway), range: 0...1, defaultValue: 0)
-                    EditorSlider(model: model, title: "运动模糊", value: value(\.motionBlur), range: 0...1, defaultValue: 0)
+                    EditorFill(model: model, title: "摆动", value: value(\.sway), range: 0...1, defaultValue: 0)
+                    EditorFill(model: model, title: "运动模糊", value: value(\.motionBlur), range: 0...1, defaultValue: 0)
                     Toggle("静止时淡出", isOn: toggle(\.hideIdle)).toggleStyle(StudioToggleStyle())
                     Toggle("结尾回到起点", isOn: toggle(\.loop)).toggleStyle(StudioToggleStyle())
                 }
             }
-            .disabled(!editable)
+            .disabled(!editable || hidden)
             PanelSection("点击高亮") {
                 Toggle(isOn: toggle(\.clicksVisible)) { SettingLabel("点击高亮", systemImage: "circle.circle") }.toggleStyle(StudioToggleStyle())
                 Picker("点击样式", selection: choice(\.clickEffect)) {

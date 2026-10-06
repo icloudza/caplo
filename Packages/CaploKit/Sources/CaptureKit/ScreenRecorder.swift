@@ -119,7 +119,8 @@ public final class ScreenRecorder {
 
 
     public func start(sourceID: String, options: RecordingOptions) async {
-        guard !isBusy, !loadingSources else { return }
+        guard !isBusy else { return }
+        guard !loadingSources else { errorMessage = "录制来源还在读取，请稍后再按一次 REC。"; return }
         guard var content, let source = sources.first(where: { $0.id == sourceID }) else {
             errorMessage = "请先选择录制来源。"; return
         }
@@ -319,11 +320,16 @@ public final class ScreenRecorder {
             guard sessionID == id, phase != .stopping else { try? await stream.stopCapture(); return }
             output.startTimer(clock: CMClockGetHostTimeClock())
             observeMicrophone(audioPlan.microphoneDeviceID, session: id)
-            guard sessionID == id, phase == .starting else { return }
+            // 第一帧可能比 startCapture 的完成回调先到：onStarted 已经把阶段推进到录制中（甚至用户已按了暂停）。
+            // 以前这里只认 .starting，这种时序下本应用新弹出的窗口就不再追加排除，只剩 sharingType 兜底。
+            guard sessionID == id, [.starting, .recording, .pausing, .paused, .resuming].contains(phase) else { return }
             if sessionDisplayID != nil { watchOwnWindows(session: id) }
-            firstFrameTimeout = Task { [weak self] in
-                do { try await Task.sleep(for: .seconds(8)) } catch { return }
-                await self?.handleFailure("没有收到有效画面，请检查权限或重新选择来源。", sessionID: id)
+            // 首帧超时只在还没收到画面时才需要。
+            if phase == .starting {
+                firstFrameTimeout = Task { [weak self] in
+                    do { try await Task.sleep(for: .seconds(8)) } catch { return }
+                    await self?.handleFailure("没有收到有效画面，请检查权限或重新选择来源。", sessionID: id)
+                }
             }
         } catch { await handleFailure(error.localizedDescription, sessionID: id) }
     }

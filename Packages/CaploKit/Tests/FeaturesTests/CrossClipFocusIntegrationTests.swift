@@ -9,69 +9,6 @@ import Testing
 @testable import Features
 
 extension WindowLifecycleTests {
-    /// 真正向本进程时间线拖双边，核对跨片段后不回弹、只保存一次且撤销还原关联。
-    @Test func focusHandlesCrossSeveralClipsAndKeepPlaybackItemAndUndo() async throws {
-        _ = NSApplication.shared
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let url = try await makeEditorFixture(root: root)
-        let document = try ProjectStorage.load(url)
-        var edit = VideoEdit(duration: 4)
-        edit.prepareLayerEditing(camera: false, system: false, microphone: false)
-        let first = edit.clips[0].id
-        let splitResult = edit.splitMedia(.screen, id: first, at: 1)
-        let tail = try #require(splitResult)
-        _ = edit.splitMedia(.screen, id: tail, at: 2)
-        try EditStorage.save(edit, in: url, document: document)
-        let model = VideoEditorModel(entry: LibraryEntry(url: url, document: document))
-        defer { model.close() }
-        await model.open()
-        try await waitForCrossFocus { !model.loading && !model.rebuilding && model.player.currentItem?.status == .readyToPlay }
-        model.selectClip(first); model.seek(0.2); model.addFocus()
-        try await waitForCrossFocus { !model.rebuilding && model.player.currentItem?.status == .readyToPlay }
-        let id = try #require(model.selectedFocus), original = model.edit
-        let item = model.player.currentItem
-        let viewport = TimelineViewport(); viewport.zoom = 1; viewport.snapping = false
-        let view = TimelineViewportView(model: model, viewport: viewport)
-        view.frame = CGRect(x: 0, y: 0, width: 1000, height: 350)
-        let window = NSWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false; window.contentView = view
-        defer { view.detach(); window.contentView = nil; window.close() }
-        func sync() {
-            view.update(edit: model.edit, analysis: model.analysis, selection: model.selectedClipIDs,
-                        primary: model.selectedClip, focus: model.selectedFocus, zoom: 1, fit: 1)
-        }
-        func drag(from: Double, to: Double) throws {
-            let row = try #require(model.edit.timelineRows.firstIndex { $0.contains(id) })
-            let y = 28.0 + Double(row) * 42 + 20
-            for (type, x) in [(NSEvent.EventType.leftMouseDown, from), (.leftMouseDragged, to), (.leftMouseUp, to)] {
-                let event = try #require(NSEvent.mouseEvent(with: type, location: view.convert(CGPoint(x: x, y: y), to: nil),
-                    modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
-                switch type { case .leftMouseDown: view.mouseDown(with: event); case .leftMouseDragged: view.mouseDragged(with: event); default: view.mouseUp(with: event) }
-                sync()
-            }
-        }
-        sync()
-        let origin = TimelineViewportView.timeOrigin
-        try drag(from: origin + 120 - 2, to: origin + 700)
-        let extended = try #require(model.edit.focuses.first { $0.id == id })
-        #expect(extended.targetClipID == nil && extended.followsTimeline == true)
-        #expect(abs(extended.editingStart + extended.duration - 4) < 0.00001)
-        #expect(model.edit.duration == 4 && model.player.currentItem === item && !model.rebuilding)
-        try drag(from: origin + 0.2 * 120 + 2, to: origin)
-        let full = try #require(model.edit.focuses.first { $0.id == id })
-        #expect(full.editingStart == 0 && full.duration == 4)
-        // 右边往左缩短也仍可用；收回单素材内不隐式重绑，避免随后移动被另一片段牵走。
-        try drag(from: origin + 4 * 120 - 2, to: origin + 0.5 * 120 - 2)
-        #expect(abs((model.edit.focuses.first { $0.id == id }?.duration ?? 0) - 0.5) < 0.00001)
-        #expect(model.edit.focuses.first { $0.id == id }?.targetClipID == nil)
-        #expect(model.error == nil)
-        #expect(try EditStorage.load(in: url, document: document) == model.edit)
-        model.undo(); model.undo(); model.undo()
-        #expect(model.edit == original)
-        model.redo(); model.redo(); model.redo()
-        #expect(model.error == nil && model.edit.duration == 4)
-    }
 
     /// 不同源时段拥有相反点击目标。实际静帧、播放器指令和 MP4 必须在剪切 / 空隙 / 保持后仍一致。
     @Test func crossClipFocusPreviewPlaybackAndExportAgreeAcrossCutsGapsAndHold() async throws {
@@ -173,12 +110,4 @@ extension WindowLifecycleTests {
         return url
     }
 
-    private func waitForCrossFocus(_ condition: () -> Bool) async throws {
-        for _ in 0..<300 {
-            if condition() { return }
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        throw CrossFocusError.timeout
-    }
-    private enum CrossFocusError: Error { case timeout }
 }

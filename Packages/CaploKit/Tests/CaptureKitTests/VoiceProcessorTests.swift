@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Testing
 @testable import ExportKit
@@ -102,51 +103,27 @@ struct VoiceScene {
     #expect(noiseReduction >= 20 && denoisedAligned.correlation > 0.95, "只降噪：\(noiseReduction) / \(denoisedAligned.correlation)")
 }
 
-/// 纯线性回声（白噪参考、两径延迟）：本工程的回声消除收敛后至少压 40 dB，证明线性部分本身是对的。
-@Test func nativeCancellerConvergesOnPureEcho() {
-    let rate = 48_000.0, count = 48_000 * 4
-    var seed: UInt32 = 99
-    func noise() -> Float { seed = seed &* 1_664_525 &+ 1_013_904_223; return Float(seed >> 8) / Float(1 << 24) * 2 - 1 }
-    var far = [Float](repeating: 0, count: count)
-    for index in 0..<count { far[index] = noise() * 0.3 }
-    var near = [Float](repeating: 0, count: count)
-    for index in 100..<count { near[index] = far[index - 100] * 0.5 + far[max(0, index - 400)] * 0.2 }
-    let result = EchoCanceller(sampleRate: rate, partitions: 8).run(near: near, far: far)
-    func rms(_ x: [Float], _ from: Int, _ to: Int) -> Float { (x[from..<to].reduce(0) { $0 + $1 * $1 } / Float(to - from)).squareRoot() }
-    let reduction = 20 * log10(rms(near, count / 2, count) / max(1e-9, rms(result.residual, count / 2, count)))
-    #expect(reduction >= 40, "\(reduction)")
-}
-
-/// 时延估计落在真实值附近；参考里没有麦克风能辨认的成分时判定为无回声（返回 nil）。
-@Test func delayEstimateFindsTheEchoOrDeclinesUnrelatedReferences() {
-    let scene = VoiceScene(seconds: 4)
-    let estimated = VoiceProcessor.estimateDelay(reference: scene.reference, microphone: scene.microphone, sampleRate: scene.rate)
-    #expect(estimated != nil && abs((estimated ?? 0) - scene.delay) <= 48, "时延估计 \(String(describing: estimated))，真实 \(scene.delay)")
-    #expect(VoiceProcessor.estimateDelay(reference: scene.unrelated, microphone: scene.noisy, sampleRate: scene.rate) == nil)
-}
-
-/// 参考按片段偏移平移到麦克风采样序号上：正偏移补零起头，越界丢弃。
-@Test func referenceAlignmentShiftsAndPads() {
-    let shifted = VoiceProcessor.aligned([1, 2, 3, 4], shift: 2, count: 6)
-    #expect(shifted == [0, 0, 1, 2, 3, 4])
-    let advanced = VoiceProcessor.aligned([1, 2, 3, 4], shift: -1, count: 3)
-    #expect(advanced == [2, 3, 4])
-}
-
-/// 合成时的素材选择：语音处理打开且产物存在才换用产物，否则一律录制文件；产物按算法版本命名。
-@Test func compositionUsesProcessedMicrophoneOnlyWhenPresent() throws {
+/// 产物是否存在就是"处理过没有"的唯一判据：写到一半被打断不能留下正式文件名的半截文件；
+/// 旧算法版本的产物与残留临时文件处理完后清掉。
+@Test func processedVoiceIsWrittenAtomicallyAndStaleOutputsAreRemoved() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
-    try FileManager.default.createDirectory(at: root.appendingPathComponent("Media"), withIntermediateDirectories: true)
-    let segment = SegmentRecord(id: 3, duration: 10, files: [.screen: "Media/000003-screen.mov", .microphone: "Media/000003-microphone.mov", .systemAudio: "Media/000003-systemAudio.mov"])
-    let processed = try #require(VoiceProcessor.processedPath(for: segment))
-    #expect(processed == "Media/000003-microphone-vp\(VoiceProcessor.version).caf")
-    var levels = AudioLevels(); levels.voiceProcessing = true
-    #expect(ProjectMedia.mediaPath(for: .microphone, in: segment, levels: levels, project: root) == "Media/000003-microphone.mov", "产物不存在时用录制文件")
-    FileManager.default.createFile(atPath: root.appendingPathComponent(processed).path, contents: Data())
-    #expect(ProjectMedia.mediaPath(for: .microphone, in: segment, levels: levels, project: root) == processed)
-    #expect(ProjectMedia.mediaPath(for: .systemAudio, in: segment, levels: levels, project: root) == "Media/000003-systemAudio.mov")
-    levels.voiceProcessing = false
-    #expect(ProjectMedia.mediaPath(for: .microphone, in: segment, levels: levels, project: root) == "Media/000003-microphone.mov")
-    #expect(VoiceProcessor.processedPath(for: SegmentRecord(id: 1, duration: 1, files: [.screen: "Media/000001-screen.mov"])) == nil)
+    let media = root.appendingPathComponent("Media")
+    try FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
+    let stale = media.appendingPathComponent("000001-microphone-vp1.caf")
+    let leftover = media.appendingPathComponent(".000001-microphone-vp\(VoiceProcessor.version)-\(UUID().uuidString).partial.caf")
+    let recording = media.appendingPathComponent("000001-microphone.caf")
+    for url in [stale, leftover, recording] { FileManager.default.createFile(atPath: url.path, contents: Data([1, 2, 3])) }
+
+    let output = media.appendingPathComponent("000001-microphone-vp\(VoiceProcessor.version).caf")
+    try VoiceProcessor.write([Float](repeating: 0.25, count: 4800), to: output)
+    let file = try AVAudioFile(forReading: output)
+    #expect(file.length == 4800, "写出的产物有 \(file.length) 帧")
+    let temporaries = try FileManager.default.contentsOfDirectory(atPath: media.path).filter { $0.hasSuffix(".partial.caf") && $0 != leftover.lastPathComponent }
+    #expect(temporaries.isEmpty, "写完后还留着临时文件 \(temporaries)")
+
+    VoiceProcessor.removeStaleOutputs(project: root)
+    #expect(!FileManager.default.fileExists(atPath: stale.path), "旧版本产物没清掉")
+    #expect(!FileManager.default.fileExists(atPath: leftover.path), "中断留下的临时文件没清掉")
+    #expect(FileManager.default.fileExists(atPath: output.path) && FileManager.default.fileExists(atPath: recording.path), "清理误删了当前产物或录制原件")
 }

@@ -10,7 +10,7 @@ struct MaskPanel: View {
     let model: VideoEditorModel
 
     /// 新建之后直接选中它并滚进视口——面板显示的永远是时间线上选中的那一条。
-    private func select(_ id: UUID) { model.selectedMask = id; model.reveal(id) }
+    private func select(_ id: UUID) { model.select(.mask(id)); model.reveal(id) }
 
     /// 单条遮罩的参数：类型、遮挡方式与强度、形状与位置，最后是删除。起止时间只在时间线上拖。
     @ViewBuilder private func controls(for id: UUID, mask: MaskSegment) -> some View {
@@ -23,32 +23,30 @@ struct MaskPanel: View {
                 Text("模糊").tag(MaskSegment.Effect.blur)
                 Text("像素化").tag(MaskSegment.Effect.pixelate)
             }.environment(\.colorScheme, .dark)
-            EditorSlider(model: model, title: "强度", value: amountBinding(id),
+            EditorFill(model: model, title: "强度", value: amountBinding(id),
                          range: MaskSegment.amountRange, decimals: 0, defaultValue: MaskSegment.defaultAmount)
             if mask.amount < MaskSegment.weakAmount {
                 PanelNote("强度偏低，画面里的文字可能仍然认得出来。导出前建议提到 \(Int(MaskSegment.weakAmount)) 以上。")
             }
         } else {
-            EditorSlider(model: model, title: "周围压暗", value: binding(id, \.darkness),
+            EditorFill(model: model, title: "周围压暗", value: binding(id, \.darkness),
                          range: 0...0.95, suffix: "%", percentage: true, defaultValue: 0.55)
-            EditorSlider(model: model, title: "淡入", value: optionalBinding(id, \.fadeIn, fallback: 0.15), range: 0...1.5, defaultValue: 0.15)
-            EditorSlider(model: model, title: "淡出", value: optionalBinding(id, \.fadeOut, fallback: 0.15), range: 0...1.5, defaultValue: 0.15)
+            EditorStepper(model: model, title: "淡入", value: optionalBinding(id, \.fadeIn, fallback: 0.15), range: 0...1.5, defaultValue: 0.15)
+            EditorStepper(model: model, title: "淡出", value: optionalBinding(id, \.fadeOut, fallback: 0.15), range: 0...1.5, defaultValue: 0.15)
         }
         Picker("形状", selection: shapeBinding(id)) {
             Text("矩形").tag(MaskSegment.Shape.rectangle)
             Text("椭圆").tag(MaskSegment.Shape.ellipse)
         }.environment(\.colorScheme, .dark)
-        EditorSlider(model: model, title: "水平位置", value: binding(id, \.x), range: 0...1, suffix: "%", percentage: true, detents: [0.5])
-        EditorSlider(model: model, title: "垂直位置", value: binding(id, \.y), range: 0...1, suffix: "%", percentage: true, detents: [0.5])
-        EditorSlider(model: model, title: "宽度", value: binding(id, \.width), range: 0.02...1, suffix: "%", percentage: true)
-        EditorSlider(model: model, title: "高度", value: binding(id, \.height), range: 0.02...1, suffix: "%", percentage: true)
+        EditorRegion(model: model, title: "区域", shape: .box(minimumSide: 0.02), aspect: model.sourceAspect,
+                     region: regionBinding(id), readout: EditorRegion.sizeReadout)
         if mask.shape == .rectangle {
             EditorSlider(model: model, title: "圆角", value: binding(id, \.cornerRadius), range: 0...80, decimals: 0, defaultValue: 0)
         }
         if mask.kind == .sensitive {
             EditorSlider(model: model, title: "羽化", value: binding(id, \.feather), range: 0...60, decimals: 0, defaultValue: 0)
         }
-        Button("删除此遮罩") { model.selectedMask = id; model.deleteSelection() }
+        Button("删除此遮罩") { model.select(.mask(id)); model.deleteSelection() }
             .buttonStyle(StudioButtonStyle(.destructive, size: .small))
     }
 
@@ -81,14 +79,32 @@ struct MaskPanel: View {
         // 进面板时还没选中就先选第一条，免得面板空着、非得先去时间线点一下。
         .onAppear {
             model.maskEditing = true
-            if model.selectedMask == nil { model.selectedMask = model.edit.maskList.first?.id }
+            selectFirstIfNeeded()
         }
+        // 面板可能比工程先出现（直接打开到这个面板时）：载入完成再补选一次。
+        .onChange(of: model.ready) { selectFirstIfNeeded() }
         .onDisappear { model.maskEditing = false }
     }
 
     // MARK: 绑定
     // 滑块直写 model.edit，撤销快照由 EditorSlider 的 begin/endInteraction 负责；
     // 下拉这类离散动作走 commit，一次点击就是一个可撤销步骤。
+
+    private func selectFirstIfNeeded() {
+        if model.selectedMask == nil, let first = model.edit.maskList.first?.id { model.select(.mask(first)) }
+    }
+
+    /// 遮罩存的是中心与尺寸，底板用左上角与尺寸：两边在这里换算，四个值一次写进去。
+    private func regionBinding(_ id: UUID) -> Binding<CGRect> {
+        Binding(get: {
+            guard let mask = model.edit.mask(id: id) else { return CGRect(x: 0.4, y: 0.4, width: 0.2, height: 0.2) }
+            return CGRect(x: mask.x - mask.width / 2, y: mask.y - mask.height / 2, width: mask.width, height: mask.height)
+        }, set: { rect in
+            model.edit.updateMask(id: id) { mask in
+                mask.x = rect.midX; mask.y = rect.midY; mask.width = rect.width; mask.height = rect.height
+            }
+        })
+    }
 
     private func binding(_ id: UUID, _ key: WritableKeyPath<MaskSegment, Double>) -> Binding<Double> {
         Binding(get: { model.edit.mask(id: id)?[keyPath: key] ?? 0 }, set: { value in

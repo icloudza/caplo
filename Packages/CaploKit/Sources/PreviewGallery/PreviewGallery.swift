@@ -122,7 +122,7 @@ struct PreviewGallery {
             UserDefaults.standard.set(true, forKey: "editor.text.appearanceExpanded")
             try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path), time: 2.5, initialTab: "文字"), name: "editor-text", size: CGSize(width: 1360, height: 860), scheme: .dark, output: output)
             try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path), initialTab: "裁剪"), name: "editor-crop", size: CGSize(width: 1360, height: 860), scheme: .dark, output: output)
-            try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path), initialTab: "片段"), name: "editor-clip", size: CGSize(width: 1360, height: 860), scheme: .dark, output: output)
+            try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path), time: 2.4, initialTab: "光标"), name: "editor-cursor", size: CGSize(width: 1360, height: 860), scheme: .dark, output: output)
             if argument == "--pointer-demo" {
                 try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path), time: 2.4, initialTab: "光标"), name: "editor-pointer", size: CGSize(width: 1360, height: 860), scheme: .light, output: output)
                 try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path), time: 2.4, initialTab: "光标"), name: "editor-pointer-dark", size: CGSize(width: 1360, height: 860), scheme: .dark, output: output)

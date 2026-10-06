@@ -12,10 +12,7 @@ struct CropPanel: View {
     }
 
     private var crop: CropRect { model.edit.layout.crop ?? .full }
-    private var sourceAspect: Double {
-        if let size = model.entry.document.capture?.pixelSize, size.width > 0, size.height > 0 { return size.width / size.height }
-        return 16.0 / 9
-    }
+    private var sourceAspect: Double { model.sourceAspect }
     private var activePreset: Preset {
         let current = crop
         for preset in Preset.allCases where preset.aspect != nil {
@@ -36,20 +33,18 @@ struct CropPanel: View {
             })) { $0.rawValue }
         }
         PanelSection("范围") {
-            EditorSlider(model: model, title: "左边距", value: binding(\.x, maximum: { 1 - $0.width }), range: 0...(1 - CropRect.minimumSide), suffix: "%", percentage: true, defaultValue: 0)
-            EditorSlider(model: model, title: "上边距", value: binding(\.y, maximum: { 1 - $0.height }), range: 0...(1 - CropRect.minimumSide), suffix: "%", percentage: true, defaultValue: 0)
-            EditorSlider(model: model, title: "宽度", value: binding(\.width, maximum: { 1 - $0.x }), range: CropRect.minimumSide...1, suffix: "%", percentage: true, defaultValue: 1)
-            EditorSlider(model: model, title: "高度", value: binding(\.height, maximum: { 1 - $0.y }), range: CropRect.minimumSide...1, suffix: "%", percentage: true, defaultValue: 1)
+            // 在录制画面比例的底板上直接拖裁剪框：移动框、拉四角，比四条边距滑块直观。
+            EditorRegion(model: model, title: "保留区域", shape: .box(minimumSide: CropRect.minimumSide), aspect: sourceAspect,
+                         region: cropRegion, defaultRegion: CGRect(x: 0, y: 0, width: 1, height: 1), readout: EditorRegion.sizeReadout)
         }
         Button("取消裁剪") { model.commit { $0.layout.crop = nil } }
             .buttonStyle(StudioButtonStyle(.secondary)).disabled(model.edit.layout.effectiveCrop == nil)
     }
 
-    private func binding(_ key: WritableKeyPath<CropRect, Double>, maximum: @escaping (CropRect) -> Double) -> Binding<Double> {
-        Binding(get: { crop[keyPath: key] }, set: { value in
-            var next = model.edit.layout.crop ?? .full
-            next[keyPath: key] = min(max(0, value), maximum(next))
-            model.edit.layout.crop = next
+    private var cropRegion: Binding<CGRect> {
+        Binding(get: { CGRect(x: crop.x, y: crop.y, width: crop.width, height: crop.height) }, set: { rect in
+            let width = min(1, max(CropRect.minimumSide, rect.width)), height = min(1, max(CropRect.minimumSide, rect.height))
+            model.edit.layout.crop = CropRect(x: min(1 - width, max(0, rect.minX)), y: min(1 - height, max(0, rect.minY)), width: width, height: height)
         })
     }
 }

@@ -125,7 +125,7 @@ struct CameraPanel: View {
                             SettingLabel("聚焦时缩小人像", systemImage: "arrow.down.right.and.arrow.up.left")
                         }.toggleStyle(StudioToggleStyle())
                         if layout.shrinkOnFocus {
-                            EditorSlider(model: model, title: "聚焦时缩放", value: binding(\.focusedScale), range: 0.4...1, suffix: "%", percentage: true, detents: [0.7])
+                            EditorFill(model: model, title: "聚焦时缩放", value: binding(\.focusedScale), range: 0.4...1, suffix: "%", percentage: true, detents: [0.7])
                         }
                     }
                     Toggle(isOn: Binding(get: { model.edit.camera?.mirrored == true }, set: { value in model.commit { $0.camera?.mirrored = value } })) {

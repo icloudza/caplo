@@ -20,15 +20,28 @@ final class PointerRecorder {
     private var lastPosition = CGPoint.zero
     private var shape: PointerShape = .arrow
     private var captured: CapturedCursor?
-    private var lastCursorImage: Data?
+    private var lastCursorPrint: Int?
     private var lastHotspot = CGPoint.zero
     // 同步识别常用形态，并保存真实光标位图；不读取屏幕图像。
-    private lazy var knownCursors: [(PointerShape, Data?)] = [
+    private lazy var knownCursors: [(PointerShape, Int?)] = [
         (PointerShape.arrow, NSCursor.arrow), (PointerShape.pointer, NSCursor.pointingHand), (PointerShape.text, NSCursor.iBeam),
         (PointerShape.grab, NSCursor.openHand), (PointerShape.grabbing, NSCursor.closedHand), (PointerShape.crosshair, NSCursor.crosshair),
         (PointerShape.resizeEW, NSCursor.resizeLeftRight), (PointerShape.resizeNS, NSCursor.resizeUpDown),
         (PointerShape.notAllowed, NSCursor.operationNotAllowed), (PointerShape.copy, NSCursor.dragCopy), (PointerShape.alias, NSCursor.dragLink)
-    ].map { ($0.0, $0.1.image.tiffRepresentation) }
+    ].map { ($0.0, Self.fingerprint($0.1)) }
+
+    /// 光标位图的指纹：同一张图得到同一个值，换了形状就不同。
+    /// 以前每次采样都把光标图转一份 TIFF 来比（单次约 0.6 毫秒，60 Hz 下每秒占主线程几十毫秒），
+    /// 直接对位图像素取哈希约 0.14 毫秒；真正的 PNG 只在指纹变化时由 `NativeCursorCapture` 生成一次。
+    static func fingerprint(_ cursor: NSCursor) -> Int? {
+        var rect = NSRect(origin: .zero, size: cursor.image.size)
+        guard let image = cursor.image.cgImage(forProposedRect: &rect, context: nil, hints: nil),
+              let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return nil }
+        var hasher = Hasher()
+        hasher.combine(image.width); hasher.combine(image.height); hasher.combine(image.bytesPerRow)
+        hasher.combine(bytes: UnsafeRawBufferPointer(start: bytes, count: CFDataGetLength(data)))
+        return hasher.finalize()
+    }
 
     init(bounds: CGRect, windowID: CGWindowID?, clock: CMClock?, writer: SegmentedCaptureWriter) {
         self.bounds = bounds; self.windowID = windowID; self.clock = clock ?? CMClockGetHostTimeClock(); self.writer = writer
@@ -93,13 +106,13 @@ final class PointerRecorder {
         let position = CGPoint(x: (point.x - bounds.minX) / bounds.width, y: (point.y - bounds.minY) / bounds.height)
         wasInside = true; lastPosition = position
         if let cursor = NSCursor.currentSystem {
+            let print = Self.fingerprint(cursor)
             if ticks % 6 == 0 || kind == .click {
-                let image = cursor.image.tiffRepresentation
-                shape = knownCursors.first(where: { $0.1 == image })?.0 ?? .arrow
+                shape = print.flatMap { value in knownCursors.first(where: { $0.1 == value })?.0 } ?? .arrow
             }
-            let bytes = cursor.image.tiffRepresentation
-            if captured == nil || bytes != lastCursorImage || cursor.hotSpot != lastHotspot {
-                captured = NativeCursorCapture.capture(cursor); lastCursorImage = bytes; lastHotspot = cursor.hotSpot
+            // 取不到位图（指纹为空）时与上一次同样为空就视为没变：不能每次采样都重新生成一份光标 PNG。
+            if captured == nil || print != lastCursorPrint || cursor.hotSpot != lastHotspot {
+                captured = NativeCursorCapture.capture(cursor); lastCursorPrint = print; lastHotspot = cursor.hotSpot
             }
         } else { shape = .arrow; captured = nil }
         var sample = PointerSample(time: eventTime, x: position.x, y: position.y, kind: kind)

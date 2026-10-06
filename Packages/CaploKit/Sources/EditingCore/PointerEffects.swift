@@ -6,6 +6,7 @@ public struct PointerEffects: Codable, Equatable, Sendable {
     public enum Tint: String, CaseIterable, Codable, Sendable { case violet, blue, yellow }
     public enum Style: String, CaseIterable, Codable, Sendable { case captured, original, macos, tahoe, inverted, minimal }
     public enum ClickEffect: String, CaseIterable, Codable, Sendable { case ripple, spotlight, echo }
+    /// 成片里画不画光标（面板"隐藏光标"开关）。只管箭头本身，点击高亮由 `clicksVisible` 单独管。
     public var cursorVisible: Bool = true
     public var cursorScale: Double = 1.0
     public var clicksVisible: Bool = true
@@ -33,14 +34,15 @@ public struct PointerEffects: Codable, Equatable, Sendable {
         value.style = .tahoe; value.smoothing = 0.5; value.bounce = 0.2; value.motionBlur = 0.15
         return value
     }
-    private enum CodingKeys: String, CodingKey { case cursorVisible, cursorScale, clicksVisible, clickScale, tint, style, smoothing, bounce, bounceSpeed, sway, motionBlur, hideIdle, loop, clickEffect, angle, directionFollow, cursorStyle }
+    /// `cursorVisible` 存在新键 `showsCursor` 下：旧键 `cursorVisible` 是 2026-09-08 去掉的"显示光标"开关留下的，
+    /// 那之前存过的 false 早已作废（去掉开关时统一恢复显示），不能因为开关回来又把老工程的光标藏起来。
+    private enum CodingKeys: String, CodingKey { case cursorVisible = "showsCursor", cursorScale, clicksVisible, clickScale, tint, style, smoothing, bounce, bounceSpeed, sway, motionBlur, hideIdle, loop, clickEffect, angle, directionFollow, cursorStyle }
     /// 缺失字段使用旧效果默认值，已有工程不会因升级突然改变外观。
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         // 旧 shapeOverride 字段忽略：形状始终跟随录制，不保留隐藏的手动覆盖。
-        // "显示光标"开关已去掉：光标始终显示，旧文件里存过 false 的也恢复显示（按片段隐藏仍在片段设置里）。
-        _ = try c.decodeIfPresent(Bool.self, forKey: .cursorVisible)
-        cursorVisible = true
+        // 旧键 cursorVisible 不在 CodingKeys 里，解码时自然被忽略；只认 2026-10-06 起的新键。
+        cursorVisible = try c.decodeIfPresent(Bool.self, forKey: .cursorVisible) ?? true
         cursorScale = try c.decodeIfPresent(Double.self, forKey: .cursorScale) ?? 1.0
         clicksVisible = try c.decodeIfPresent(Bool.self, forKey: .clicksVisible) ?? true
         clickScale = try c.decodeIfPresent(Double.self, forKey: .clickScale) ?? 1.0
