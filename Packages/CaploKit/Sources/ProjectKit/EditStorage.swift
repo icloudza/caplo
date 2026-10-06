@@ -46,6 +46,8 @@ public enum EditStorage {
         }
         // 旧工程可能留下超出录制画面的效果尾巴，先收紧范围再验证，原文件仍保留到成功保存。
         edit.resolveLegacyAutoTextColors()
+        // 旧版"全屏卡段"（定格片段 + 全屏文字）换成卡片；成片长度与画面内容不变。
+        edit.migrateLegacyHoldCards()
         edit.constrainTimelineFocuses()
         edit.normalizeTimelineRows()
         try edit.validate(sourceDuration: document.duration)

@@ -4,7 +4,7 @@ import CoreGraphics
 /// 「画面层」在画布上的摆放：背景之上、文字与字幕之下的那一整层（卡片阴影、录屏、遮罩、光标、圆角、人像）
 /// 作为一个整体被缩放、挪位、淡出。背景恒满幅，不参与这个变换——否则缩小时会露出黑边。
 ///
-/// 全屏卡段用它把画面淡出、微微缩小；左右分屏用它把画面挤到半区。
+/// 全屏文字与卡片用它把画面淡出、微微缩小；左右分屏用它把画面挤到半区。
 /// 因为是相似变换，从常态到目标之间可以连续插值，版式过渡天然平滑。
 public struct StageTransform: Equatable, Sendable {
     /// 相对画布的缩放；1 是常态。
@@ -123,188 +123,39 @@ extension VideoEdit {
     /// 单纯"后加的压前面的"会闪：两段全屏标题首尾交叠时，前一段已经全黑、后一段刚起步（版式还没生效），
     /// 后者一覆盖，画面就在一帧里弹回满亮度再重新淡出。
     public func stage(at time: Double, spans: [TextSpan]? = nil) -> StageTransform {
-        guard !textList.isEmpty, time.isFinite else { return StageTransform() }
-        let all = spans ?? textSpans()
+        guard time.isFinite else { return StageTransform() }
+        let hasCards = clips.contains { $0.card != nil }
+        guard !textList.isEmpty || hasCards else { return StageTransform() }
         var winner: (coverage: Double, transform: StageTransform)?
-        // 一个字都没有的文字不改变画面：新建一段全屏文字、还没来得及打字，
-        // 画面不能就这么整段黑掉（activeTexts 同样不画空文字）。
-        for value in textList where value.enabled && value.layout != .overlay && !value.text.isEmpty {
-            guard let span = all.first(where: { $0.textID == value.id && time >= $0.start && time < $0.end }) else { continue }
-            let elapsed = min(max(0, time - span.start), span.duration) + span.offset
-            let progress = value.layoutProgress(elapsed: elapsed)
-            guard progress > 0.0001 else { continue }
-            let candidate = StageTransform.blend(value.stageTarget, progress: progress)
+        func offer(_ candidate: StageTransform) {
             // "露出来的画面"按面积算：不透明度乘以缩放的平方。小的那个赢。
-            if let winner, winner.coverage < candidate.alpha * candidate.scale * candidate.scale - 0.0001 { continue }
+            if let winner, winner.coverage < candidate.alpha * candidate.scale * candidate.scale - 0.0001 { return }
             winner = (candidate.alpha * candidate.scale * candidate.scale, candidate)
+        }
+        if !textList.isEmpty {
+            let all = spans ?? textSpans()
+            // 一个字都没有的文字不改变画面：新建一段全屏文字、还没来得及打字，
+            // 画面不能就这么整段黑掉（activeTexts 同样不画空文字）。
+            for value in textList where value.enabled && value.layout != .overlay && !value.text.isEmpty {
+                guard let span = all.first(where: { $0.textID == value.id && time >= $0.start && time < $0.end }) else { continue }
+                let elapsed = min(max(0, time - span.start), span.duration) + span.offset
+                let progress = value.layoutProgress(elapsed: elapsed)
+                guard progress > 0.0001 else { continue }
+                offer(StageTransform.blend(value.stageTarget, progress: progress))
+            }
+        }
+        // 卡片：进卡片前画面层缩小淡出、出卡片后再回来，与全屏文字同一个目标与曲线。
+        if hasCards {
+            let progress = cardStageProgress(at: time)
+            if progress > 0.0001 { offer(StageTransform.blend(StageTransform(scale: TextSegment.holdScale, alpha: 0), progress: progress)) }
         }
         return winner?.transform ?? StageTransform()
     }
-
-    /// 这一刻是不是处在一段全屏卡段里（画面冻结、声音静音）。时间线上要画冻结带。
-    public func holdCard(at time: Double, spans: [TextSpan]? = nil) -> TextSegment? {
-        let all = spans ?? textSpans()
-        return textList.first { value in
-            value.holdClipID != nil && all.contains { $0.textID == value.id && time >= $0.start && time < $0.end }
-        }
-    }
-    /// 工程里所有的全屏卡段，按成片时间排序。
-    public var holdCards: [TextSegment] {
-        textList.filter { $0.holdClipID != nil }.sorted { ($0.timelineStart ?? 0) < ($1.timelineStart ?? 0) }
-    }
-    /// 卡段一共插入了多少时长。面板上要告诉用户"成片被撑长了多少"。
-    public var holdCardTotal: Double { holdCards.reduce(0) { $0 + $1.duration } }
 }
 
-// MARK: - 全屏卡段的插入与删除
+// MARK: - 插入时长用的两件工具（卡片插入、删除、改时长共用）
 
 extension VideoEdit {
-    /// 卡段最短这么久；再短就只看得到过渡、看不到文字。
-    public static let minimumHoldDuration = 0.4
-
-    /// 在成片的某个时刻插入一段全屏卡段：画面冻结在这一刻、声音静音，文字浮在上面。
-    ///
-    /// 实现上它就是一条 `mediaDuration` 只有一帧的录制画面片段——合成器已有的"保持末帧"机制
-    /// （插入 1 帧再 `scaleTimeRange` 拉长）会把那一帧持续输出。因此成片总长、播放头、
-    /// 导出、时间线全都自动跟着变长，不需要另造一套时间轴。
-    ///
-    /// 返回新文字的 ID；播放头落在时间线空白处、或工程还没有画面时返回 nil。
-    @discardableResult
-    public mutating func insertHoldCard(at time: Double, duration wanted: Double, sourceDuration: Double,
-                                        preset: TextPreset = .title, text: String = "",
-                                        frameRate: Double = 30) -> UUID? {
-        guard time.isFinite, sourceDuration.isFinite, sourceDuration > 0, !clips.isEmpty else { return nil }
-        let length = max(Self.minimumHoldDuration, min(wanted, 600))
-        let anchor = max(0, min(time, duration))
-        guard let freeze = sourceTime(at: min(anchor, max(0, duration - 0.00001))) else { return nil }
-        materializeLayers()
-
-        // 插入点必须落在片段边界上：在片段中间就先切一刀，切不动（离边缘不足最小时长）就贴到最近的边界。
-        // 每切一刀都记下"原块 → 尾块"，最后要把两半按回同一行：加一段卡段不该把一条轨拆成好几行。
-        var pairs: [(head: UUID, tail: UUID)] = []
-        var point = anchor
-        let index = TimelineIndex(clips: orderedScreenClips)
-        // 插入点这一刻在放哪条片段：定格片段要认它当"冻结自"，镜头才跟得过来。
-        let anchorID = index.clipIndex(at: min(anchor, max(0, duration - 0.00001))).map { index.clips[$0].id }
-        if let number = index.clipIndex(at: anchor) {
-            let clip = index.clips[number]
-            let start = index.boundaries[number], end = start + clip.duration
-            let offset = anchor - start
-            if offset < Self.minimumClipDuration { point = start }
-            else if clip.duration - offset < Self.minimumClipDuration { point = end }
-            else if let tail = splitMedia(.screen, id: clip.id, at: anchor) { pairs.append((clip.id, tail)) }
-            else { point = start }
-        }
-
-        // 人像也要有一帧冻在那里：只给画面轨加定格的话，卡段这一段摄像头轨是空的，
-        // 画中画会在卡段开始时整个消失、结束时再弹回来，而不是跟着画面一起淡出。
-        var cameraAnchorID: UUID?
-        let cameraFreeze: Double? = {
-            let values = mediaClips(.camera)
-            guard !values.isEmpty else { return nil }
-            let cameraIndex = TimelineIndex(clips: values)
-            guard let number = cameraIndex.clipIndex(at: min(anchor, max(0, duration - 0.00001))) else { return nil }
-            let clip = cameraIndex.clips[number]
-            cameraAnchorID = clip.id
-            return clip.sourceStart + max(0, min(clip.playableDuration - 0.00001, anchor - cameraIndex.boundaries[number]))
-        }()
-
-        // 四条轨都要在插入点切开：只切画面的话，横跨插入点的声音片段会一路响进卡段里，
-        // 而 ripple 只平移"起点在插入点之后"的片段，碰不到它。
-        pairs += splitTracks(at: point)
-        rippleTimeline(from: point, by: length)
-
-        // 那一帧也要整个落在素材里：贴着片尾冻结时 sourceStart + 一帧会越过素材末尾，校验会拒收。
-        let frame = min(length, max(0.00001, 1 / max(24, frameRate)))
-        let frozenStart = max(0, min(freeze, sourceDuration - frame))
-        var frozen = VideoClip(sourceStart: frozenStart, duration: length)
-        frozen.timelineStart = point
-        frozen.holdSource = anchorID
-        // 只留一帧可用素材，其余由"保持末帧"补齐——这一帧就是被冻住的画面。
-        frozen.mediaDuration = frame
-        frozen.title = "定格卡段"
-        clips.append(frozen)
-
-        if let cameraFreeze {
-            var still = VideoClip(sourceStart: max(0, min(cameraFreeze, sourceDuration - frame)), duration: length)
-            still.timelineStart = point
-            still.mediaDuration = frame
-            still.holdSource = cameraAnchorID
-            still.title = "定格卡段"
-            cameraClips = (cameraClips ?? []) + [still]
-        }
-
-        var card = preset.segment(start: frozenStart, duration: length)
-        card.text = text.isEmpty ? preset.sample : text
-        card.layout = .fullscreen
-        card.timelineStart = point
-        card.holdClipID = frozen.id
-        addText(card)
-
-        var order = orderedLayerIDs
-        order.removeAll { $0 == frozen.id || $0 == card.id }
-        order.insert(card.id, at: 0)
-        // 定格片段排在录制画面那一侧，紧挨着插入点前面那一块。
-        if let anchorID, let position = order.firstIndex(of: anchorID) {
-            order.insert(frozen.id, at: position + 1)
-        } else { order.append(frozen.id) }
-        layerOrder = order
-
-        // 行归位：切开的两半回到同一行，定格片段插在它冻结自的那一块旁边。
-        // 不这么做的话，加一段卡段会把画面轨拆成"录制画面 01 / 定格卡段 / 录制画面 02"三行，
-        // 声音轨也各裂一行——时间线一下子多出四五行，用户看到的就是"乱七八糟"。
-        for pair in pairs { placeBlock(pair.tail, inRowContaining: pair.head) }
-        if let anchorID { placeBlock(frozen.id, inRowContaining: anchorID) }
-        if let cameraAnchorID, let still = cameraClips?.last, still.holdSource == cameraAnchorID {
-            placeBlock(still.id, inRowContaining: cameraAnchorID)
-        }
-        normalizeTimelineRows()
-        normalizeSchemaVersion(layered: true)
-        return card.id
-    }
-
-    /// 卡段在人像轨上的那一帧定格：插入时与画面定格同起点，`holdSource` 指向冻结自的人像片段。
-    /// 删卡段、改时长、撤掉插入时长都要带上它——只动画面轨的话，删掉后人像轨上留下一段静止画面
-    /// 叠在正常人像上，拉长后人像在卡段尾部断一截。用户自己挪开过的定格不再认领。
-    func holdCameraIndex(for frozen: VideoClip) -> Int? {
-        guard let values = cameraClips else { return nil }
-        let start = frozen.timelineStart ?? 0
-        return values.firstIndex { $0.holdSource != nil && abs(($0.timelineStart ?? -1) - start) < 0.001 }
-    }
-
-    /// 删掉一段卡段：画面与人像的定格片段一起删，后面的一切前移同样的时长。
-    public mutating func removeHoldCard(textID: UUID) {
-        guard let card = text(id: textID), let clipID = card.holdClipID,
-              let frozen = clips.first(where: { $0.id == clipID }) else { return }
-        let point = frozen.timelineStart ?? 0, length = frozen.duration
-        if let still = holdCameraIndex(for: frozen) { cameraClips?.remove(at: still) }
-        clips.removeAll { $0.id == clipID }
-        removeText(id: textID)
-        rippleTimeline(from: point + length, by: -length)
-        normalizeTimelineRows()
-    }
-
-    /// 改卡段时长：画面与人像的定格片段、文字一起变，后面的一切跟着挪。
-    public mutating func setHoldCardDuration(textID: UUID, duration wanted: Double) {
-        guard let card = text(id: textID), let clipID = card.holdClipID,
-              let number = clips.firstIndex(where: { $0.id == clipID }) else { return }
-        let length = max(Self.minimumHoldDuration, min(wanted, 600))
-        let old = clips[number].duration
-        let delta = length - old
-        guard abs(delta) > 0.0001 else { return }
-        let end = (clips[number].timelineStart ?? 0) + old
-        if let still = holdCameraIndex(for: clips[number]), var values = cameraClips {
-            values[still].duration = length
-            values[still].mediaDuration = min(length, values[still].mediaDuration ?? length)
-            cameraClips = values
-        }
-        clips[number].duration = length
-        clips[number].mediaDuration = min(length, clips[number].mediaDuration ?? length)
-        updateText(id: textID) { $0.duration = length }
-        rippleTimeline(from: end, by: delta)
-        normalizeTimelineRows()
-    }
-
     /// 在插入点把各条轨切开，好让接下来的平移不会漏掉横跨插入点的片段。
     /// 返回每条轨切出来的"原块 → 尾块"，调用方要把两半按回同一行。
     @discardableResult
@@ -317,7 +168,8 @@ extension VideoEdit {
             guard let number = index.clipIndex(at: point) else { continue }
             let clip = index.clips[number]
             let start = index.boundaries[number]
-            guard point > start + 0.0001, point < start + clip.duration - 0.0001 else { continue }
+            // 卡片切不得，也不该被下面那条"裁掉一小截"的兜底削短。
+            guard clip.card == nil, point > start + 0.0001, point < start + clip.duration - 0.0001 else { continue }
             if let tail = splitMedia(role, id: clip.id, at: point) { pairs.append((clip.id, tail)); continue }
             // 切不动：插入点离这一块的某一头不足最小片段时长。
             // 这时把那不到 0.25 秒的一小截**裁掉**，而不是把整块平移——
@@ -373,7 +225,7 @@ extension VideoEdit {
             // 跨过插入点的镜头拉长同样的时长，插入点两侧的画面内容仍然被它盖住。
             // 衔接进来的镜头带着 transitionOffset / transitionDuration（整条运镜包络的长度），
             // 只加 duration 会让 offset + duration 越过包络长度：validate 直接判无效，
-            // 于是插完卡段保存、播放、导出全都报"内容无效"。包络要跟着一起变长。
+            // 于是插完卡片保存、播放、导出全都报"内容无效"。包络要跟着一起变长。
             else if start + focuses[number].duration > threshold {
                 focuses[number].duration = max(1.0 / 30, focuses[number].duration + delta)
                 if let length = focuses[number].transitionDuration {
@@ -393,75 +245,5 @@ extension VideoEdit {
             guard let start = value.timelineStart, start >= threshold else { continue }
             updateMask(id: value.id) { $0.timelineStart = max(0, start + delta) }
         }
-    }
-
-    /// 这一刻是不是停在某段定格卡段上。停在卡段上新建的叠加层要钉在成片时间上：
-    /// 定格片段的源区间与它后面那条正片片段是同一段，按源域建的话会在卡段和正片上各画一次。
-    public func holdClip(atTimeline time: Double) -> VideoClip? {
-        guard !textList.isEmpty, let clip = clip(atTimeline: time) else { return nil }
-        return holdCards.contains { $0.holdClipID == clip.id } ? clip : nil
-    }
-
-    /// 让卡段文字与它的定格片段保持同步。任何一条改动片段的路径（拖边、删除、撤销）之后都要跑一遍：
-    /// 片段还在就把文字的起止对齐过去，片段没了就把文字留下来变成普通的全屏文字，不让它悬空。
-    public mutating func syncHoldCards() {
-        guard !textList.isEmpty else { return }
-        var list = textList
-        var changed = false
-        for index in list.indices {
-            guard let clipID = list[index].holdClipID else { continue }
-            guard let clip = clips.first(where: { $0.id == clipID }) else {
-                list[index].holdClipID = nil; changed = true; continue
-            }
-            let start = clip.timelineStart ?? 0
-            let length = max(0.05, clip.duration)
-            // 卡段只能是全屏版式：定格片段是按"整幅画面被文字盖住"插进去的。
-            // 哪条路径把它改成了分屏，就在这里掰回来——否则整份工程会被校验判无效、编辑整笔回滚。
-            if list[index].layout != .fullscreen { list[index].layout = .fullscreen; changed = true }
-            guard list[index].timelineStart != start || abs(list[index].duration - length) > 0.0001 else { continue }
-            list[index].timelineStart = start
-            list[index].duration = length
-            changed = true
-        }
-        if changed { textList = list }
-    }
-
-    /// 把一段已有的全屏文字转成卡段（插入真实时长），或反过来撤掉。
-    /// 返回是否真的改动了。
-    @discardableResult
-    public mutating func setHoldCard(textID: UUID, enabled: Bool, sourceDuration: Double, frameRate: Double = 30) -> Bool {
-        guard let value = text(id: textID) else { return false }
-        if enabled {
-            guard value.holdClipID == nil else { return false }
-            // 先记下它现在在成片上的位置与时长，删掉之后原地插一段卡段。
-            let spans = textSpans().filter { $0.textID == textID }
-            let start = value.timelineStart ?? spans.first?.start ?? 0
-            let length = max(Self.minimumHoldDuration, value.duration)
-            var preserved = value
-            removeText(id: textID)
-            guard let created = insertHoldCard(at: start, duration: length, sourceDuration: sourceDuration,
-                                               preset: .title, text: preserved.text, frameRate: frameRate) else {
-                addText(preserved)   // 插不进去（比如播放头在空白处）就原样放回，不能把用户的文字弄丢。
-                return false
-            }
-            preserved.id = created
-            preserved.layout = .fullscreen
-            preserved.timelineStart = text(id: created)?.timelineStart
-            preserved.duration = text(id: created)?.duration ?? length
-            preserved.holdClipID = text(id: created)?.holdClipID
-            updateText(id: created) { $0 = preserved }
-            return true
-        }
-        guard let clipID = value.holdClipID, let frozen = clips.first(where: { $0.id == clipID }) else { return false }
-        // 撤掉插入的时长，但把文字留下来（变成盖在画面上的全屏文字）。
-        var kept = value
-        kept.holdClipID = nil
-        let point = frozen.timelineStart ?? 0, length = frozen.duration
-        if let still = holdCameraIndex(for: frozen) { cameraClips?.remove(at: still) }
-        clips.removeAll { $0.id == clipID }
-        updateText(id: textID) { $0 = kept }
-        rippleTimeline(from: point + length, by: -length)
-        normalizeTimelineRows()
-        return true
     }
 }

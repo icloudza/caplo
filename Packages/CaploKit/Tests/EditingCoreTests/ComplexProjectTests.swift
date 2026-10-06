@@ -5,7 +5,7 @@ import Testing
 /// 复杂工程的不变量测试。
 ///
 /// 编辑器里每一样东西单独看都有测试，但真正出问题的地方在**它们凑在一起**的时候：
-/// 一个工程同时有多段画面、摄像头、两条声音、镜头、遮罩、文字、字幕、定格卡段、
+/// 一个工程同时有多段画面、摄像头、两条声音、镜头、遮罩、文字、字幕、卡片、
 /// 裁切、分屏版式，然后被剪、被拖、被删、被撤销。
 /// 这条测试用一串确定性的操作把这些路径走一遍，每走一步都把全部不变量重查一遍——
 /// 任何一条路径破坏了工程结构，都会在它发生的那一步当场被抓住，而不是等到用户导出时才炸。
@@ -40,21 +40,17 @@ private struct Invariants {
             }
         }
 
-        // 5. 定格卡段与它的片段必须成对，而且片段确实只有一帧可用素材。
-        for card in edit.textList where card.holdClipID != nil {
-            guard let clip = edit.clips.first(where: { $0.id == card.holdClipID }) else {
-                Issue.record("「\(step)」之后卡段「\(card.text)」指向的定格片段没了"); continue
-            }
-            #expect(clip.playableDuration < clip.duration, "「\(step)」之后定格片段变成了正常播放")
-            #expect(card.timelineStart == clip.timelineStart, "「\(step)」之后卡段文字与定格片段起点脱节")
-            #expect(abs(card.duration - clip.duration) < 0.001, "「\(step)」之后卡段文字与定格片段时长脱节")
-            #expect(card.layout == .fullscreen, "「\(step)」之后卡段不再是全屏版式")
+        // 5. 卡片不引用素材：画面上露出来的是卡片的时候，源域的遮罩、文字、字幕都不在那里，也映射不出源时间。
+        //    （别的画面块被拖过来盖住卡片时，那一段露的是那块画面，上面的叠加层照常出现。）
+        let visible = TimelineIndex(clips: edit.orderedScreenClips)
+        func onCard(_ time: Double) -> Bool { visible.clipIndex(at: time).map { visible.clips[$0].card != nil } ?? false }
+        for card in edit.clips where card.card != nil {
+            let middle = (card.timelineStart ?? 0) + card.duration / 2
+            if onCard(middle) { #expect(edit.sourceTime(at: middle) == nil, "「\(step)」之后卡片上映射出了源时间") }
         }
-        // 反过来：不该有没人认领的定格片段。
-        let claimed = Set(edit.textList.compactMap(\.holdClipID))
-        for clip in edit.clips where clip.holdSource != nil {
-            #expect(claimed.contains(clip.id), "「\(step)」之后留下了没人认领的定格片段")
-        }
+        #expect(!edit.maskSpans().contains { $0.clipID != nil && onCard($0.start + $0.duration / 2) }, "「\(step)」之后遮罩投影到了卡片上")
+        #expect(!edit.textSpans().contains { $0.clipID != nil && onCard($0.start + $0.duration / 2) }, "「\(step)」之后文字投影到了卡片上")
+        #expect(!edit.captionSpans().contains { $0.clipID != nil && onCard($0.start + $0.duration / 2) }, "「\(step)」之后字幕投影到了卡片上")
 
         // 6. 所有投影都落在成片范围内，且时长为正。
         let limit = edit.duration + 0.001
@@ -136,9 +132,8 @@ private func complexProject(sourceDuration: Double = 30) -> VideoEdit {
         stepNumber += 1
         let previous = edit
         body(&edit)
-        // 与编辑器提交路径一致：约束镜头、对齐卡段、整理行、归一化版本。
+        // 与编辑器提交路径一致：约束镜头、整理行、归一化版本。
         edit.constrainTimelineFocuses()
-        edit.syncHoldCards()
         edit.normalizeTimelineRows()
         edit.normalizeSchemaVersion()
         if edit != previous { history.record(previous) }
@@ -156,12 +151,13 @@ private func complexProject(sourceDuration: Double = 30) -> VideoEdit {
         }
     }
 
-    // —— 插入定格卡段 ——
+    // —— 插入卡片 ——
     var cardID: UUID?
-    try step("在 15 秒插入全屏卡段") { cardID = $0.insertHoldCard(at: 15, duration: 3, sourceDuration: source, text: "第二章") }
-    #expect(cardID != nil, "卡段没插进去")
-    try step("把卡段拉长到 5 秒") { edit in if let cardID { edit.setHoldCardDuration(textID: cardID, duration: 5) } }
-    try step("把卡段缩到最短") { edit in if let cardID { edit.setHoldCardDuration(textID: cardID, duration: 0.1) } }
+    try step("在 15 秒插入卡片") { cardID = $0.insertCard(at: 15, duration: 3) }
+    #expect(cardID != nil, "卡片没插进去")
+    try step("把卡片拉长到 5 秒") { edit in if let cardID { edit.setCardDuration(id: cardID, duration: 5) } }
+    try step("把卡片缩到最短") { edit in if let cardID { edit.setCardDuration(id: cardID, duration: 0.1) } }
+    try step("拖卡片右缘") { edit in if let cardID { edit.dragMedia(.screen, id: cardID, edge: .trailing, delta: 0.6, sourceDuration: source) } }
 
     // —— 拖动各类块 ——
     try step("拖画面块") { edit in
@@ -213,10 +209,10 @@ private func complexProject(sourceDuration: Double = 30) -> VideoEdit {
 
     // —— 删除 ——
     try step("删一条遮罩") { edit in if let id = edit.maskList.first?.id { edit.removeMask(id: id) } }
-    try step("删一段文字") { edit in if let id = edit.textList.first(where: { $0.holdClipID == nil })?.id { edit.removeText(id: id) } }
+    try step("删一段文字") { edit in if let id = edit.textList.first?.id { edit.removeText(id: id) } }
     try step("删一句字幕") { edit in if let id = edit.captionList.first?.id { edit.captionList.removeAll { $0.id == id } } }
     try step("删一个镜头") { edit in if let id = edit.focuses.first?.id { edit.focuses.removeAll { $0.id == id } } }
-    try step("删掉卡段") { edit in if let cardID { edit.removeHoldCard(textID: cardID) } }
+    try step("删掉卡片") { edit in if let cardID { edit.removeCard(id: cardID) } }
     try step("删一段画面") { edit in if let id = edit.clips.last?.id { edit.clips.removeAll { $0.id == id } } }
 
     // —— 撤销一路回到最初 ——

@@ -8,9 +8,8 @@ import Foundation
 ///    取值一律停在最后那一帧对应的源时刻。
 ///
 /// 第 2 条以前是把整段（含保持区）一起线性拉伸的。素材只差几十毫秒时看不出来，
-/// 但全屏卡段的定格片段只有一帧可用素材、却占着好几秒，拉伸就等于**在一张静止画面上把源素材演一遍**：
-/// 源域的文字会在卡段里重放一次（文字画在版式变换之外，画面 alpha=0 也挡不住），
-/// 源域的敏感遮罩会提前走完、在卡段两端的版式过渡里露出没打码的定格帧。
+/// 但一帧素材拉长成好几秒的定格片段，拉伸就等于**在一张静止画面上把源素材演一遍**：
+/// 源域的文字会在定格里重放一次，源域的敏感遮罩会提前走完、露出没打码的定格帧。
 extension VideoEdit {
     /// 一条投影结果：成片起点、时长、这一段起点对应叠加层自身的第几秒、是不是冻住的。
     struct SourceProjection {
@@ -25,7 +24,8 @@ extension VideoEdit {
     static func projectSource(low: Double, high: Double, clip: VideoClip, base: Double,
                               spanStart: Double, spanEnd: Double) -> [SourceProjection] {
         let s0 = spanStart - base, s1 = min(spanEnd - base, clip.duration)
-        guard s1 > s0 + 0.000_001, high > low else { return [] }
+        // 卡片不引用素材：源域的遮罩、文字、镜头都不投影到卡片上。
+        guard clip.card == nil, s1 > s0 + 0.000_001, high > low else { return [] }
         let playable = max(0, min(clip.playableDuration, clip.duration))
         var result: [SourceProjection] = []
 

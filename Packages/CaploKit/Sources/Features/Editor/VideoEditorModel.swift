@@ -102,7 +102,10 @@ final class VideoEditorModel {
     var analysis = TimelineAnalysis()
     var progress = 0.0
     var exporting = false
-    var exportSize = 1920
+    /// 导出窗口正在显示。
+    var showingExport = false
+    /// 导出设置：导出窗口里改，确认导出时记进偏好，下次打开沿用。
+    var exportSettings = ExportSettings.remembered()
     private var lease: ProjectLease?
     private var reloadTask: Task<Void, Never>?
     private var analysisTask: Task<Void, Never>?
@@ -131,8 +134,6 @@ final class VideoEditorModel {
         if let size = entry.document.capture?.pixelSize, size.width > 0, size.height > 0 { return size.width / size.height }
         return 16.0 / 9
     }
-    /// 导出帧率：与导出编码同一条规则（跟随录制，4K 封顶 60），菜单文案用它，不另写一个常数。
-    func exportFrameRate(longEdge: Int) -> Int { Int(ExportEncoder.frameRate(recorded: entry.document.frameRate, longEdge: longEdge).rounded()) }
     /// 拖边裁剪时画布正在显示的源时间（只读，供测试核对）。
     var edgePreviewSource: Double? { edgePreview?.source }
     /// 指针事件只解析一次；重建播放项不再在主线程重复解 JSON。
@@ -270,8 +271,6 @@ final class VideoEditorModel {
     private func finishChange(previous: VideoEdit) {
         guard edit != previous else { restorePlayheadFrame(); return }
         edit.constrainTimelineFocuses()
-        // 卡段文字紧跟它的定格片段：片段被拖边或删掉之后不能留下一段悬空的文字。
-        edit.syncHoldCards()
         edit.normalizeTimelineRows()
         // 兜底：任何一条编辑路径把版本号写歪，都会在这里被按内容重新算对，
         // 而不是在校验时变成一句"版本不支持"甩给用户。
@@ -360,8 +359,8 @@ final class VideoEditorModel {
             return offset >= VideoEdit.minimumClipDuration && clip.duration - offset >= VideoEdit.minimumClipDuration
         }
         if let id = selectedClip, let clip = edit.clips.first(where: { $0.id == id }) {
-            // 定格卡段切不得：切完两半各自还是定格，可文字只认得其中一半。
-            guard !edit.holdCards.contains(where: { $0.holdClipID == id }) else { return false }
+            // 卡片切不得：切开的两块各带同一段文字，一段话被拆成两次进出场。
+            guard clip.card == nil else { return false }
             let offset = time - (clip.timelineStart ?? 0)
             return offset >= VideoEdit.minimumClipDuration && clip.duration - offset >= VideoEdit.minimumClipDuration
         }
@@ -413,10 +412,6 @@ final class VideoEditorModel {
         selectedFocus = nil; selectedMask = nil; selectedText = nil; selectedCaption = nil
     }
     func deleteSelection() {
-        // 删卡段文字要连它插入的那段时长一起撤掉，否则成片里留下一段空白的定格。
-        if let selectedText, edit.text(id: selectedText)?.holdClipID != nil {
-            commit { $0.removeHoldCard(textID: selectedText) }; self.selectedText = nil; return
-        }
         if let selectedCaption {
             commit { $0.captionList.removeAll { $0.id == selectedCaption } }; self.selectedCaption = nil; return
         }
@@ -434,10 +429,8 @@ final class VideoEditorModel {
         else {
             let ids = selectedClipIDs.isEmpty ? Set([selectedClip].compactMap { $0 }) : selectedClipIDs
             commit { edit in
-                // 定格片段走卡段那条路：连同文字一起撤掉，后面的内容前移，而不是在成片里留一段空洞。
-                for card in edit.holdCards where card.holdClipID.map(ids.contains) == true {
-                    edit.removeHoldCard(textID: card.id)
-                }
+                // 卡片走自己的删除：后面的内容前移、插入时切开的片段合回去，而不是在成片里留一段空洞。
+                for card in edit.clips where card.card != nil && ids.contains(card.id) { edit.removeCard(id: card.id) }
                 edit.clips.removeAll { ids.contains($0.id) }
             }
         }
@@ -472,8 +465,6 @@ final class VideoEditorModel {
         }
         if let id = selectedText, var copy = edit.text(id: id) {
             copy.id = UUID()
-            // 副本不再是卡段：再插一段真实时长得由用户明说，不能一次 ⌘D 就把成片又拉长一截。
-            copy.holdClipID = nil
             let next = duplicatedStart(copy.timelineStart ?? copy.start, duration: copy.duration, pinned: copy.timelineStart != nil)
             if copy.timelineStart != nil { copy.timelineStart = next } else { copy.start = next }
             commit { edit in edit.addText(copy); edit.moveLayer(copy.id, before: id) }
@@ -496,6 +487,13 @@ final class VideoEditorModel {
             commit { edit in var values = edit.mediaClips(role); values.append(copy); edit.setMediaClips(role, values); edit.moveLayer(copy.id, before: id) }
             selectedMediaID = copy.id; return
         }
+        // 卡片的副本接在它后面插入（后面的内容让开），而不是叠在下一段画面上。
+        if let id = selectedClip, selectedClipIDs.count <= 1, let card = edit.clips.first(where: { $0.id == id }), let content = card.card {
+            var created: UUID?
+            commit { edit in created = edit.insertCard(at: (card.timelineStart ?? 0) + card.duration, duration: card.duration, content: content) }
+            if let created { selectClip(created) }
+            return
+        }
         let ids = selectedClipIDs.isEmpty ? Set([selectedClip].compactMap { $0 }) : selectedClipIDs
         var copies: Set<UUID> = []
         commit { edit in copies = edit.duplicateClips(ids); for id in copies { edit.moveLayer(id, before: selectedClip) } }
@@ -508,6 +506,8 @@ final class VideoEditorModel {
     /// 播放头处默认镜头的范围：2 秒，不超出所在片段。
     private func defaultFocusRange() -> (Double, Double)? {
         guard let clip = edit.clips.first(where: { $0.id == selectedClip }) ?? edit.clip(atTimeline: position) else { return nil }
+        // 卡片上没有录屏，推近没有对象。
+        guard clip.card == nil else { error = "卡片上没有录制画面，聚焦请加在录制画面上。"; return nil }
         let start = clip.timelineStart ?? 0
         let anchor = position >= start && position < start + clip.duration ? position : start
         return (anchor, min(2, start + clip.duration - anchor))
@@ -556,7 +556,7 @@ final class VideoEditorModel {
         // 不在这里对齐帧格：播放头处添加沿用精确位置（旧行为），时间线拖出的范围由时间线自己按帧格对齐。
         let start = max(0, min(edit.duration, start))
         let length = min(duration, edit.duration - start)
-        guard length > 0, let clip = edit.clip(atTimeline: start) else { return nil }
+        guard length > 0, let clip = edit.clip(atTimeline: start), clip.card == nil else { return nil }
         let clipStart = clip.timelineStart ?? 0
         let within = start + length <= clipStart + clip.duration + 0.0001
         var zoom = FocusSegment(start: clip.sourceStart + min(start - clipStart, clip.playableDuration - 0.00001), duration: length, x: 0.5, y: 0.5,
@@ -586,35 +586,37 @@ final class VideoEditorModel {
         }
         guard let created, edit.mask(id: created) != nil else {
             if edit.clip(atTimeline: anchor) == nil { error = "播放头不在任何录制画面上，请先把它移到画面块里再添加遮罩。" }
+            else if edit.card(atTimeline: anchor) != nil { error = "卡片上没有录制画面，不需要遮罩。" }
             return nil
         }
         clearSelection(); selectedMask = created
         return created
     }
 
-    /// 在播放头处插入一段全屏卡段：画面冻结在这一刻、声音静音，文字浮在上面，成片因此变长。
-    @discardableResult func addHoldCard(duration: Double = 3, preset: TextPreset = .title, text: String = "") -> UUID? {
+    /// 在成片某一时刻插入一块卡片（片头 / 章节 / 片尾），后面的一切往后挪；插完选中它，面板切到"文字"去改字。
+    @discardableResult func insertCard(at time: Double) -> UUID? {
         guard ready else { return nil }
-        let anchor = max(0, min(edit.duration, skimPosition ?? position))
+        let anchor = max(0, min(edit.duration, time))
         var created: UUID?
-        commit { edit in
-            created = edit.insertHoldCard(at: anchor, duration: duration, sourceDuration: entry.document.duration,
-                                          preset: preset, text: text, frameRate: entry.document.frameRate)
-        }
-        guard let created, edit.text(id: created) != nil else {
-            if edit.clip(atTimeline: anchor) == nil { error = "播放头不在任何录制画面上，请先把它移到画面块里再插入卡段。" }
-            return nil
-        }
-        clearSelection(); selectedText = created
+        commit { created = $0.insertCard(at: anchor) }
+        guard let created, edit.clips.contains(where: { $0.id == created }) else { return nil }
+        selectClip(created)
         return created
     }
-
-    /// 打开 / 关掉某段全屏文字的「插入时长」。
-    func setHoldCard(_ id: UUID, enabled: Bool) {
-        guard ready else { return }
-        var ok = false
-        commit { ok = $0.setHoldCard(textID: id, enabled: enabled, sourceDuration: entry.document.duration, frameRate: entry.document.frameRate) }
-        if !ok, enabled { error = "这段文字所在的位置插不进卡段，请把它移到某个录制画面块上再试。" }
+    /// 工具栏按钮：在播放头处插入。
+    @discardableResult func insertCard() -> UUID? { insertCard(at: skimPosition ?? position) }
+    /// 时间线右键：插在某块画面之前 / 之后，不切开它。
+    @discardableResult func insertCard(beside clipID: UUID, after: Bool) -> UUID? {
+        guard let clip = edit.clips.first(where: { $0.id == clipID }) else { return nil }
+        let start = clip.timelineStart ?? 0
+        return insertCard(at: after ? start + clip.duration : start)
+    }
+    /// 正在编辑的文字：选中的文字层，或选中卡片上的那段字。文字面板与画布上的文字编辑都认它。
+    var editingTextID: UUID? { selectedText ?? selectedCard?.card?.text.id }
+    /// 选中的卡片（时间线上选中的画面块恰好是卡片时）。面板据此切到卡片参数。
+    var selectedCard: VideoClip? {
+        guard let selectedClip, selectedClipIDs.count <= 1 else { return nil }
+        return edit.clips.first { $0.id == selectedClip && $0.card != nil }
     }
 
     /// 在播放头处加一段文字。
@@ -1072,17 +1074,33 @@ final class VideoEditorModel {
         if posterTask == nil { runFallbackWorker() }
     }
 
+    /// 顶栏"导出"（⌘E）：先弹导出窗口选格式、分辨率、帧率、画质、声音与保存位置。每次打开都按记住的设置重新填。
     func export() {
         endInteraction()
-        let panel = NSSavePanel(); panel.allowedContentTypes = [.mpeg4Movie]
-        panel.nameFieldStringValue = entry.document.name + ".mp4"
-        guard panel.runModal() == .OK, let destination = panel.url else { return }
-        let snapshot = edit, size = exportSize
+        guard ready, !exporting else { return }
+        exportSettings = ExportSettings.remembered()
+        showingExport = true
+    }
+    /// 导出窗口里点"导出"：保存位置与文件名已在窗口里定好（同名替换已确认过）。
+    /// 勾着"记住这些设置"就记下参数，并把这次的文件夹作为下次的默认位置；没勾就忘掉记过的参数。
+    /// 导出用的是这一刻的编辑快照，导出期间继续编辑不影响这次的成片。
+    func startExport(_ settings: ExportSettings, to destination: URL, remember: Bool) {
+        showingExport = false
+        ExportSettings.setRemembersChoices(remember)
+        if remember {
+            settings.remember()
+            ExportSettings.setDefaultFolder(destination.deletingLastPathComponent())
+        } else {
+            ExportSettings.forget()
+        }
+        exportSettings = remember ? settings : ExportSettings.remembered()
+        let snapshot = edit
         exporting = true; progress = 0; error = nil
         exportTask = Task {
             defer { exporting = false; exportTask = nil }
             do {
-                try await ProjectMedia.export(url: entry.url, document: entry.document, levels: snapshot.audio, destination: destination, edit: snapshot, longEdge: size) { self.progress = $0 }
+                try await ProjectMedia.export(url: entry.url, document: entry.document, levels: snapshot.audio, destination: destination, edit: snapshot, settings: settings) { self.progress = $0 }
+                if settings.revealsInFinder, !Task.isCancelled { NSWorkspace.shared.activateFileViewerSelecting([destination]) }
             } catch is CancellationError {} catch { if !Task.isCancelled { self.error = error.localizedDescription } }
         }
     }

@@ -295,6 +295,8 @@ extension VideoEdit {
             // 按真正可见的段投影；上界用 playableDuration，"保持末帧"那段静止画面上没人说话。
             for span in index.visibleSpans(in: visible) {
                 let clip = index.clips[span.index]
+                // 卡片不引用素材，上面没有人说话。
+                guard clip.card == nil else { continue }
                 let base = index.boundaries[span.index]
                 let shownLower = clip.sourceStart + (span.start - base)
                 let shownUpper = clip.sourceStart + min(span.end - base, clip.playableDuration)

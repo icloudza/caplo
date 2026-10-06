@@ -3,7 +3,7 @@ import SwiftUI
 import CaploDesignSystem
 import EditingCore
 
-/// 文字层：预设、文本、排版、外观与进出动画。
+/// 文字层：预设、文本、排版、外观与进出动画。时间线上选中卡片时，这里改的是卡片上的字和卡片背景。
 ///
 /// 文字定位在输出画面上，不跟着镜头推近一起放大；时间存在原素材上，剪掉中间一段文字会自己裂成两段。
 struct TextPanel: View {
@@ -21,16 +21,27 @@ struct TextPanel: View {
 
     /// 新建之后直接选中它并滚进视口——面板显示的永远是时间线上选中的那一段。
     private func select(_ id: UUID) { model.select(.text(id)); model.reveal(id) }
+    /// 正在编辑的那段文字：选中的文字层，或选中卡片上的字。预设与下面的参数都作用在它上面。
+    private var editingID: UUID? { model.editingTextID }
 
     var body: some View {
         PanelSection("预设", info: "预设只是一组排版与动画的初值，套用之后每一项都还能单独改。") {
-            let current = model.selectedText.flatMap { model.edit.text(id: $0) }
+            let current = editingID.flatMap { model.edit.text(id: $0) }
             let matched = current.flatMap { TextPreset.matching($0) }
             // 一行三个、格子矮一点：八个预设两行多就能看完，不占面板一大截。
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: CaploMetrics.Spacing.xs), count: 3),
                       spacing: CaploMetrics.Spacing.xs) {
                 ForEach(TextPreset.allCases) { preset in
                     PresetTile(preset: preset, selected: matched == preset) { apply(preset) }
+                }
+            }
+        }
+        if let card = model.selectedCard, let content = card.card, let value = model.edit.text(id: content.text.id) {
+            PanelSection("卡片") {
+                PanelSelection(symbol: "rectangle.inset.filled", title: card.title ?? content.defaultTitle,
+                               trailing: timecode(card.timelineStart ?? 0)) {
+                    cardBackground(card.id, content: content)
+                    controls(for: content.text.id, value: value, card: card.id)
                 }
             }
         }
@@ -46,12 +57,8 @@ struct TextPanel: View {
             } else {
                 PanelNote("在时间线的文字块上点一下，这里就显示那一段的参数。")
             }
-            HStack(spacing: CaploMetrics.Spacing.s) {
-                Button("添加文字") { if let id = model.addText() { select(id) } }.buttonStyle(StudioButtonStyle(.secondary))
-                Button("添加全屏卡段") { if let id = model.addHoldCard() { select(id) } }
-                    .buttonStyle(StudioButtonStyle(.secondary))
-                    .help("在播放头处插进一段定格：画面停住、声音静音，文字占满全屏，成片会因此变长。")
-            }
+            Button("添加文字") { if let id = model.addText() { select(id) } }.buttonStyle(StudioButtonStyle(.secondary))
+            PanelNote("片头、章节、片尾用卡片：时间线工具栏的“插入卡片”，或右键录制画面“在此前 / 后插入卡片”。")
         }
         // 进面板时还没选中任何一段就先选第一段，免得面板空着、非得先去时间线点一下。
         .onAppear {
@@ -65,46 +72,54 @@ struct TextPanel: View {
         .onChange(of: appearanceExpanded) { _, value in UserDefaults.standard.set(value, forKey: Self.appearanceKey) }
     }
 
+    /// 卡片背景：默认跟随画布背景（壁纸 / 渐变），也可以换成纯色。时长在时间线上拖。
+    @ViewBuilder private func cardBackground(_ id: UUID, content: TitleCard) -> some View {
+        Toggle("纯色背景", isOn: Binding(get: { content.background != nil }, set: { on in
+            model.commit { $0.updateCard(id: id) { $0.background = on ? .ink : nil } }
+        })).toggleStyle(StudioToggleStyle())
+        if content.background != nil {
+            SwatchRow(title: "背景色", selection: Binding(get: { model.selectedCard?.card?.background ?? .ink }, set: { color in
+                model.commit { $0.updateCard(id: id) { $0.background = color } }
+            }))
+        } else {
+            PanelNote("背景跟随画布（画面布局里的壁纸 / 渐变 / 纯色）。")
+        }
+        PanelNote("卡片期间不显示录屏、人像与光标，声音留空。时长在时间线上拖卡片右缘来改，后面的内容跟着挪。")
+    }
+
     /// 单段文字的参数：文本框、版式、动画，然后是收起的排版与外观。起止时间只在时间线上拖。
-    @ViewBuilder private func controls(for id: UUID, value: TextSegment) -> some View {
+    /// `card` 非空表示这是卡片上的字：没有版式可选（卡片独占整个画面），复制 / 删除作用于整块卡片。
+    @ViewBuilder private func controls(for id: UUID, value: TextSegment, card: UUID? = nil) -> some View {
         TextEditor(text: textBinding(id))
             .font(CaploFont.body).scrollContentBackground(.hidden)
             .frame(minHeight: 62)
             .padding(.horizontal, 6).padding(.vertical, 4)
             .background(CaploColor.surfaceRaised, in: RoundedRectangle(cornerRadius: CaploMetrics.Radius.control, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: CaploMetrics.Radius.control, style: .continuous).strokeBorder(CaploColor.separator, lineWidth: 1))
-        // 标题单独占一行：四个中文选项挤在标题同一行会被压成两行竖排。
-        VStack(alignment: .leading, spacing: CaploMetrics.Spacing.xs) {
-            Text("版式").font(CaploFont.body).foregroundStyle(CaploColor.textPrimary)
-            SegmentedBar(TextSegment.Layout.allCases, selection: layoutBinding(id)) { $0.title }
-                .accessibilityLabel("版式")
-        }
-        // 卡段的版式定死在全屏：那段定格是按"整幅画面都被文字盖住"插进成片的。
-        .disabled(value.holdClipID != nil)
-        if value.layout != .overlay {
-            PanelNote(value.layout == .fullscreen
-                      ? "全屏：文字占满画面，底下的录制画面缩一点并淡出。要让成片在这里停住，再打开下面的「画面定格」。"
-                      : "分屏：录制画面退到一栏，文字占另一栏。浮在画面上的画中画会待在画面那一栏里，不跟着画面一起缩小。")
-            EditorStepper(model: model, title: "过渡时长", value: binding(id, \.layoutTransition), range: 0...3, defaultValue: 0.35)
-        }
-        if value.layout.textOnLeft != nil {
-            // 人像被当成画面构图一部分的那几种布局（侧边 / 在后 / 分屏 / 人像全屏）没法摘出来单独摆，
-            // 摘了整套构图就散了。这里说清楚，免得用户以为是画中画没生效。
-            if model.hasCameraMedia, let camera = model.edit.camera, camera.enabled, !camera.isFloatingPortrait {
-                PanelNote("人像当前不是浮在画面上的画中画，它属于画面构图的一部分，会跟着画面一起缩进这一栏。想让人像保持原大小，去「人像」面板换成圆形或圆角矩形那两种叠放预设。")
+        if card == nil {
+            // 标题单独占一行：四个中文选项挤在标题同一行会被压成两行竖排。
+            VStack(alignment: .leading, spacing: CaploMetrics.Spacing.xs) {
+                Text("版式").font(CaploFont.body).foregroundStyle(CaploColor.textPrimary)
+                SegmentedBar(TextSegment.Layout.allCases, selection: layoutBinding(id)) { $0.title }
+                    .accessibilityLabel("版式")
             }
-            EditorFill(model: model, title: "画面栏宽", value: binding(id, \.splitRatio), range: TextSegment.splitRatioRange,
-                         suffix: "%", percentage: true, defaultValue: TextSegment.defaultSplitRatio, detents: [0.5])
-            EditorSlider(model: model, title: "栏间距", value: binding(id, \.splitGap), range: 0...240, decimals: 0,
-                         defaultValue: TextSegment.defaultSplitGap)
-        }
-        if value.layout == .fullscreen {
-            Toggle("画面定格", isOn: holdBinding(id)).toggleStyle(StudioToggleStyle())
-                .help("打开之后成片会在这里停住：画面定格、声音静音，这一段是真实增加的时长。")
-        }
-        if value.holdClipID != nil {
-            // 起止时间一律在时间线上拖，面板不再放重复的卡尺。
-            PanelNote("这一段是插进成片里的定格，长度在时间线上拖这一块的右缘来改，后面的所有内容跟着往后挪。")
+            if value.layout != .overlay {
+                PanelNote(value.layout == .fullscreen
+                          ? "全屏：文字占满画面，底下的录制画面缩一点并淡出，视频照常往下播。要让成片在这里停一会儿，用时间线上的“插入卡片”。"
+                          : "分屏：录制画面退到一栏，文字占另一栏。浮在画面上的画中画会待在画面那一栏里，不跟着画面一起缩小。")
+                EditorStepper(model: model, title: "过渡时长", value: binding(id, \.layoutTransition), range: 0...3, defaultValue: 0.35)
+            }
+            if value.layout.textOnLeft != nil {
+                // 人像被当成画面构图一部分的那几种布局（侧边 / 在后 / 分屏 / 人像全屏）没法摘出来单独摆，
+                // 摘了整套构图就散了。这里说清楚，免得用户以为是画中画没生效。
+                if model.hasCameraMedia, let camera = model.edit.camera, camera.enabled, !camera.isFloatingPortrait {
+                    PanelNote("人像当前不是浮在画面上的画中画，它属于画面构图的一部分，会跟着画面一起缩进这一栏。想让人像保持原大小，去「人像」面板换成圆形或圆角矩形那两种叠放预设。")
+                }
+                EditorFill(model: model, title: "画面栏宽", value: binding(id, \.splitRatio), range: TextSegment.splitRatioRange,
+                             suffix: "%", percentage: true, defaultValue: TextSegment.defaultSplitRatio, detents: [0.5])
+                EditorSlider(model: model, title: "栏间距", value: binding(id, \.splitGap), range: 0...240, decimals: 0,
+                             defaultValue: TextSegment.defaultSplitGap)
+            }
         }
         Picker("入场动画", selection: animationBinding(id, \.enterKind)) { animationOptions }.environment(\.colorScheme, .dark)
         EditorStepper(model: model, title: "入场时长", value: binding(id, \.enterDuration), range: 0...3, defaultValue: 0.4)
@@ -150,8 +165,13 @@ struct TextPanel: View {
             }
         }
         HStack(spacing: CaploMetrics.Spacing.s) {
-            Button("复制这段") { model.select(.text(id)); model.duplicateSelection() }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
-            Button("删除这段") { model.select(.text(id)); model.deleteSelection() }.buttonStyle(StudioButtonStyle(.destructive, size: .small))
+            if let card {
+                Button("复制卡片") { model.selectClip(card); model.duplicateSelection() }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
+                Button("删除卡片") { model.selectClip(card); model.deleteSelection() }.buttonStyle(StudioButtonStyle(.destructive, size: .small))
+            } else {
+                Button("复制这段") { model.select(.text(id)); model.duplicateSelection() }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
+                Button("删除这段") { model.select(.text(id)); model.deleteSelection() }.buttonStyle(StudioButtonStyle(.destructive, size: .small))
+            }
         }
     }
 
@@ -164,9 +184,9 @@ struct TextPanel: View {
         Text("打字机").tag(TextSegment.Animation.type)
     }
 
-    /// 点预设：已经选中一段就把预设套上去（文本、时间、版式、卡段归属都保留），否则新建一段。
+    /// 点预设：已经选中一段（或一块卡片）就把预设套上去（文本、时间、版式都保留），否则新建一段。
     private func apply(_ preset: TextPreset) {
-        guard let id = model.selectedText, model.edit.text(id: id) != nil else {
+        guard let id = editingID, model.edit.text(id: id) != nil else {
             if let created = model.addText(preset: preset) { select(created) }
             return
         }
@@ -183,7 +203,8 @@ struct TextPanel: View {
         })
     }
     private func selectFirstIfNeeded() {
-        if model.selectedText == nil, let first = model.edit.textList.first?.id { model.select(.text(first)) }
+        // 选中的是卡片时不抢：面板是因为卡片才切过来的。
+        if model.selectedText == nil, model.selectedCard == nil, let first = model.edit.textList.first?.id { model.select(.text(first)) }
     }
     private func positionBinding(_ id: UUID) -> Binding<CGRect> {
         Binding(get: { CGRect(x: model.edit.text(id: id)?.x ?? 0.5, y: model.edit.text(id: id)?.y ?? 0.5, width: 0, height: 0) }, set: { rect in
@@ -213,13 +234,8 @@ struct TextPanel: View {
     }
     private func layoutBinding(_ id: UUID) -> Binding<TextSegment.Layout> {
         Binding(get: { model.edit.text(id: id)?.layout ?? .overlay }, set: { value in
-            // 卡段的版式必须留在全屏：定格片段是按"整幅画面都被文字盖住"插进去的。
-            guard model.edit.text(id: id)?.holdClipID == nil else { return }
             model.commit { $0.updateText(id: id) { $0.layout = value } }
         })
-    }
-    private func holdBinding(_ id: UUID) -> Binding<Bool> {
-        Binding(get: { model.edit.text(id: id)?.holdClipID != nil }, set: { model.setHoldCard(id, enabled: $0) })
     }
     private func paletteBinding(_ id: UUID, _ key: WritableKeyPath<TextSegment, TextSegment.Palette>) -> Binding<TextSegment.Palette> {
         Binding(get: { model.edit.text(id: id)?[keyPath: key] ?? .white }, set: { value in

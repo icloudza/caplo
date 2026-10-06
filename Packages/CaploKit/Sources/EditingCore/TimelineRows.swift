@@ -55,7 +55,7 @@ extension VideoEdit {
     /// 行分组只描述编辑器布局；行内成员仍按 layerOrder 保留合成优先级。
     ///
     /// **默认同级**：同一类、时间又不重叠的块自动并到一行——剪一刀不会把一条轨劈成两行，
-    /// 加一段卡段也不会多出一行。`rowGroups` 是用户拖出来的显式行，覆盖自动结果；
+    /// 插一块卡片也不会多出一行。`rowGroups` 是用户拖出来的显式行，覆盖自动结果；
     /// 只有一个成员的显式行表示"这一块自己占一行"，正是"从别人那一行拖出来"的意思。
     public var timelineRows: [[UUID]] { timelineRows(using: timelineBlockRanges) }
 

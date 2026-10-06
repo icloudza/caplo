@@ -106,8 +106,8 @@ public struct TextSegment: Codable, Equatable, Sendable, Identifiable {
     public var splitGap: Double = TextSegment.defaultSplitGap
     /// 分屏时画面占两栏可用宽度的比例（0.25…0.75），剩下的给文字。0.5 是等分，默认 0.75 让画面占大头。
     public var splitRatio: Double = TextSegment.defaultSplitRatio
-    /// 全屏卡段：非空表示这段文字在成片里独占一段真实时长，画面冻结、声音静音。
-    /// 指向实现它的那条"定格片段"，两者一起生灭、一起改时长。
+    /// 旧版"全屏卡段"留下的字段：指向那条定格片段。读取时由 `VideoEdit.migrateLegacyHoldCards()` 换成卡片
+    /// （`VideoClip.card`），之后恒为 nil、不再写出。
     public var holdClipID: UUID?
 
     // MARK: 排版（尺寸都按 1080 参考高度）
@@ -254,8 +254,6 @@ public struct TextSegment: Codable, Equatable, Sendable, Identifiable {
               layoutTransition.isFinite, (0...3).contains(layoutTransition),
               splitGap.isFinite, (0...240).contains(splitGap),
               splitRatio.isFinite, TextSegment.splitRatioRange.contains(splitRatio),
-              // 卡段必须钉在成片时间上：它的时长就是那条定格片段的时长。
-              (holdClipID == nil || (timelineStart != nil && layout == .fullscreen)),
               (timelineStart.map { $0.isFinite && $0 >= 0 } ?? true) else { return false }
         return true
     }
@@ -366,37 +364,47 @@ extension VideoEdit {
     }
     public mutating func addText(_ value: TextSegment) { textList.append(value) }
     public mutating func removeText(id: UUID) { textList.removeAll { $0.id == id } }
+    /// 改一段文字。卡片里的那段文字也走这里（面板、画布拖动共用一套），只是时间与版式由卡片决定、改了也不算数。
     public mutating func updateText(id: UUID, _ change: (inout TextSegment) -> Void) {
         var list = textList
-        guard let index = list.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = list.firstIndex(where: { $0.id == id }) else {
+            if let card = cardID(forText: id) { updateCard(id: card) { change(&$0.text) } }
+            return
+        }
         change(&list[index]); textList = list
     }
-    public func text(id: UUID) -> TextSegment? { textList.first { $0.id == id } }
+    /// 按 ID 找文字；找不到再看是不是某块卡片里的文字（时间换成卡片在成片上的起止）。
+    public func text(id: UUID) -> TextSegment? {
+        if let value = textList.first(where: { $0.id == id }) { return value }
+        return clips.first { $0.card?.text.id == id }.flatMap(cardText)
+    }
 
     /// 在成片某一时刻新建文字，时间换算回源素材域。
     @discardableResult
     public mutating func insertText(at time: Double, duration wanted: Double = 3, sourceDuration: Double,
                                     preset: TextPreset = .title, text: String = "") -> UUID? {
         guard time.isFinite, sourceDuration.isFinite, sourceDuration > 0 else { return nil }
+        let clamped = max(0, min(time, max(0, self.duration - 0.00001)))
+        // 停在卡片上：卡片没有源时刻，这段文字钉在成片时间上（卡片自己的字在卡片里改，这里是再叠一段）。
+        if let card = card(atTimeline: clamped) {
+            let anchor = max(0, min(time, (card.timelineStart ?? 0) + card.duration - 1.0 / 30))
+            var value = preset.segment(start: 0, duration: max(1.0 / 30, min(wanted, self.duration - anchor)))
+            value.text = text.isEmpty ? preset.sample : text
+            value.timelineStart = anchor
+            addText(value)
+            return value.id
+        }
         // 与遮罩同理：播放头在时间线空白处时映射不出源时间，不能拿成片秒数顶替。
-        guard let source = sourceTime(at: max(0, min(time, max(0, self.duration - 0.00001)))) else { return nil }
+        guard let source = sourceTime(at: clamped) else { return nil }
         let start = max(0, min(source, max(0, sourceDuration - 1.0 / 30)))
         var value = preset.segment(start: start, duration: max(1.0 / 30, min(wanted, sourceDuration - start)))
         value.text = text.isEmpty ? preset.sample : text
-        // 停在定格卡段上就钉在成片时间：卡段的源区间和它后面那条正片片段是同一段，
-        // 按源域建的话这段文字会在卡段里和卡段之后各画一次。
-        if let hold = holdClip(atTimeline: max(0, min(time, max(0, duration - 0.00001)))) {
-            let anchor = max(0, min(time, (hold.timelineStart ?? 0) + hold.duration - 1.0 / 30))
-            value.timelineStart = anchor
-            value.duration = max(1.0 / 30, min(value.duration, self.duration - anchor))
-        }
         addText(value)
         return value.id
     }
 
     /// 文字在成片时间轴上的可见段。与遮罩同构：保持末帧的那段画面上仍然应该有标题，
-    /// 但那一截是**冻住**的（见 `projectSource`）——否则在定格卡段里，
-    /// 源域的文字会被拉伸重放一遍，与卡段自己的标题叠在一起。
+    /// 但那一截是**冻住**的（见 `projectSource`）——否则在定格画面里，源域的文字会被拉伸重放一遍。
     public func textSpans(in range: Range<Double>? = nil, using existingIndex: TimelineIndex? = nil) -> [TextSpan] {
         let index = existingIndex ?? TimelineIndex(clips: orderedScreenClips)
         let visible = range ?? 0..<duration
@@ -424,10 +432,12 @@ extension VideoEdit {
         return result
     }
 
-    /// 这一刻要画的文字，按数组顺序（后加的盖在上面）。
+    /// 这一刻要画的文字，按数组顺序（后加的盖在上面）。卡片的文字排在最前，压在普通文字之下。
     public func activeTexts(at time: Double, spans: [TextSpan]? = nil) -> [TextState] {
+        let cards = clips.contains { $0.card != nil } ? cardTextStates(at: time) : []
+        guard !textList.isEmpty else { return cards }
         let all = spans ?? textSpans()
-        return textList.compactMap { value in
+        return cards + textList.compactMap { value in
             guard value.enabled, !value.text.isEmpty else { return nil }
             guard let span = all.first(where: { $0.textID == value.id && time >= $0.start && time < $0.end }) else { return nil }
             // 动画相位按文字自身的时间算：剪辑把它切成两段，第二段不会重放进场动画。
@@ -469,16 +479,6 @@ extension VideoEdit {
         let limit = pinned ? max(duration, value.duration) : sourceDuration
         let start = value.timelineStart ?? value.start
         guard start.isFinite, value.duration.isFinite, value.duration > 0 else { return }
-        // 卡段的文字块和它底下的定格片段是一体的：拖右缘就是改卡段时长，得让文字与冻结片段一起变、
-        // 后面的内容一起挪。只改这里的 duration 的话，下一次 syncHoldCards 会照着片段把它掰回去，
-        // 表现是右缘拖完自己弹回原位。左缘没有对应语义（同 dragMedia），不动。
-        if let clipID = value.holdClipID, clips.contains(where: { $0.id == clipID }) {
-            switch edge {
-            case .body: break
-            case .leading: return
-            case .trailing: setHoldCardDuration(textID: id, duration: value.duration + delta); return
-            }
-        }
         let minimum = min(0.2, limit)
         switch edge {
         case .body:
@@ -565,7 +565,7 @@ public enum TextPreset: String, CaseIterable, Sendable, Identifiable {
     ///
     /// **反过来写**：这里列举的是"预设要改哪些"，而不是"要保留哪些"。
     /// 后者每给文字加一个新参数就会漏一次，而且漏了完全不报错，只表现为
-    /// "点一下预设，刚调好的分屏占比 / 卡段归属被打回默认"——版式那几项已经这样漏过一次。
+    /// "点一下预设，刚调好的分屏占比被打回默认"——版式那几项已经这样漏过一次。
     /// 反着写的话，新加的参数默认就是保留，忘了登记最多是"预设管不到它"，无害得多。
     public func applied(to value: TextSegment) -> TextSegment {
         let sample = segment(start: value.start, duration: value.duration)

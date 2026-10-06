@@ -54,7 +54,7 @@ final class MaskCanvasView: NSView {
     /// 而且坐标已经换算到裁切区域（cropResolved）——少任何一步，
     /// 聚焦一推近编辑框就和真正被遮住的区域分家。
     private var focusState: FocusState { SceneEvaluator.focus(edit: model.renderEdit.cropResolved(), time: time) }
-    /// 全屏卡段 / 分屏时画面层被整体缩放挪位，编辑框也要跟着。
+    /// 全屏文字 / 卡片 / 分屏时画面层被整体缩放挪位，编辑框也要跟着。
     private var stageTransform: StageTransform { model.edit.stage(at: time) }
 
     /// 当前时刻该画的遮罩，从下到上；每项带它在视图里的外接矩形。

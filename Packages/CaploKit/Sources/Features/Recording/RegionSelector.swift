@@ -188,7 +188,7 @@ private final class RegionOverlay: NSView {
                     CaploNSColor.accent.setStroke(); dot.lineWidth = 1.5; dot.stroke()
                 }
             }
-            drawBadges()
+            drawSizeBadge()
         }
         if drag != nil { drawLoupe() }
         drawHint()
@@ -203,22 +203,15 @@ private final class RegionOverlay: NSView {
          .bottomLeft: CGPoint(x: selection.minX, y: selection.maxY), .left: CGPoint(x: selection.minX, y: selection.midY)]
     }
 
-    /// 选区上方：模式标签与像素尺寸。
-    private func drawBadges() {
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
-        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white]
+    /// 选区左上角上方：只标像素尺寸。模式不再单独标出——方式条上已选中"自定义区域"，框选时再写一遍是噪音。
+    private func drawSizeBadge() {
+        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.white]
         let size = "\(Int(selection.width * scale)) × \(Int(selection.height * scale))"
-        let mode = "自定义区域"
-        let sizeWidth = (size as NSString).size(withAttributes: attributes).width + 20
-        let modeWidth = (mode as NSString).size(withAttributes: attributes).width + 20
         var y = selection.minY - 34
         if y < 8 { y = selection.minY + 8 }
-        let modeRect = CGRect(x: selection.minX, y: y, width: modeWidth, height: 26)
-        let sizeRect = CGRect(x: modeRect.maxX + 6, y: y, width: sizeWidth, height: 26)
-        for (rect, text, fill) in [(modeRect, mode, CaploNSColor.accent), (sizeRect, size, NSColor.black.withAlphaComponent(0.75))] {
-            fill.setFill(); NSBezierPath(roundedRect: rect, xRadius: 7, yRadius: 7).fill()
-            (text as NSString).draw(at: CGPoint(x: rect.minX + 10, y: rect.minY + 5), withAttributes: attributes)
-        }
+        let rect = CGRect(x: selection.minX, y: y, width: (size as NSString).size(withAttributes: attributes).width + 20, height: 26)
+        NSColor.black.withAlphaComponent(0.75).setFill(); NSBezierPath(roundedRect: rect, xRadius: 7, yRadius: 7).fill()
+        (size as NSString).draw(at: CGPoint(x: rect.minX + 10, y: rect.minY + 5), withAttributes: attributes)
     }
 
     /// 像素级放大镜：以一次性截图为源，围绕光标取 24×24 点放大 6 倍，带网格线与十字线。

@@ -10,7 +10,7 @@ import RenderKit
 ///    所以先要过一遍 `crop.remap`；
 /// 2. 内容按 `geometry(...)` 摆进成片矩形，固定取景时还在框内按 `focus.scale` 推近；
 /// 3. 整体推近时整幅画面被 `sceneZoom` 变换；
-/// 4. 全屏卡段 / 分屏时画面层再被 `StageTransform` 缩放挪位（分屏还会把留白收掉，几何按收掉后的留白算）。
+/// 4. 全屏文字 / 卡片 / 分屏时画面层再被 `StageTransform` 缩放挪位（分屏还会把留白收掉，几何按收掉后的留白算）。
 ///
 /// 传进来的 `focus` 必须由 `edit.cropResolved()` 求得，和渲染端同一个口径。
 enum MaskCanvasMath {

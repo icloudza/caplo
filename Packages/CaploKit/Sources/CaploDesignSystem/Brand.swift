@@ -3,10 +3,10 @@ import SwiftUI
 
 /// 品牌图形资源。菜单栏图标为单色模板图，由系统按菜单栏明暗与强调色着色，不放文字。
 public enum CaploBrand {
-    /// 菜单栏常态图标（18×18 pt）。
+    /// 菜单栏常态图标（18×18 pt）：粗环字母 C 包着录制点，与应用图标同一图形（2026-10-07 定稿，源稿见 Docs/图标方案/定稿）。
     public static var menuBarIcon: Image { templateImage("MenuBarIcon") }
 
-    /// 菜单栏录制中图标：丝带右下角带实心圆点。
+    /// 菜单栏录制中图标：右下角加实心圆点，圆点四周挖出一圈空隙。
     public static var menuBarRecordingIcon: Image { templateImage("MenuBarIconRecording") }
 
     /// Xcode 构建把资源目录编译进 Assets.car；`swift build`（离屏预览、窗口回归）只拷贝原始目录，

@@ -9,12 +9,14 @@ struct FocusCoverage {
 
     init(clips: [VideoClip]) {
         var cursor = 0.0
-        // 定格卡段算在它冻结自的那条片段名下：镜头被拉长盖住卡段之后仍然"没跨出原片段"，
+        // 定格片段算在它冻结自的那条片段名下：镜头被拉长盖住定格之后仍然"没跨出原片段"，
         // 否则 normalizeTimelineScope 会把它改成智能跟随、顺手清掉烘焙好的运镜路径。
         var holds: [(UUID, ClosedRange<Double>)] = []
         for clip in clips {
             let start = clip.timelineStart ?? cursor, end = start + clip.duration
             cursor = end
+            // 卡片不是录屏：镜头不能"覆盖"到它上面，也不能靠它把屏幕包络撑长。
+            guard clip.card == nil else { continue }
             let sourceEnd = clip.sourceStart + clip.playableDuration
             guard start.isFinite, end.isFinite, start >= 0, end > start,
                   clip.sourceStart.isFinite, sourceEnd.isFinite, clip.sourceStart >= 0, sourceEnd > clip.sourceStart else { continue }

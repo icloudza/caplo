@@ -82,7 +82,7 @@ final class TextCanvasView: NSView {
         return canvas.insetBy(dx: padding, dy: padding)
     }
 
-    /// 另一块可吸附的东西：当前时刻画面层所在的矩形（全屏卡段淡出、分屏退到一栏都算进去）。
+    /// 另一块可吸附的东西：当前时刻画面层所在的矩形（全屏文字与卡片淡出、分屏退到一栏都算进去）。
     private func snapTargets(_ canvas: CGRect) -> [CGRect] {
         let full = model.entry.document.capture?.pixelSize ?? CGSize(width: 1920, height: 1080)
         let source = SceneRenderer.croppedSourceSize(full.width > 0 && full.height > 0 ? full : CGSize(width: 1920, height: 1080),
@@ -100,12 +100,12 @@ final class TextCanvasView: NSView {
 
     private func target(at point: CGPoint) -> (id: UUID, handle: Handle, rect: CGRect)? {
         let items = visible()
-        if let selected = model.selectedText, let item = items.first(where: { $0.id == selected }),
+        if let selected = model.editingTextID, let item = items.first(where: { $0.id == selected }),
            let handle = TextCanvasMath.handle(at: point, textFrame: item.rect, carryFrame: item.carry,
                                               cornerSize: Self.cornerSize, slop: Self.hitSlop) {
             return (item.id, handle, item.rect)
         }
-        for item in items.reversed() where item.id != model.selectedText {
+        for item in items.reversed() where item.id != model.editingTextID {
             if TextCanvasMath.handleFrame(item.rect).insetBy(dx: -4, dy: -4).contains(point) { return (item.id, .body, item.rect) }
         }
         return nil
@@ -121,8 +121,9 @@ final class TextCanvasView: NSView {
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         guard active, let hit = target(at: point) else { return }
-        if model.selectedText != hit.id {
-            model.select(.text(hit.id))
+        if model.editingTextID != hit.id {
+            // 卡片上的字点中的是整块卡片：时间线与面板都按卡片来，而不是把它当成一段普通文字。
+            if let card = model.edit.cardID(forText: hit.id) { model.selectClip(card) } else { model.select(.text(hit.id)) }
             needsDisplay = true
             if hit.handle == .body { return }
         }
@@ -236,7 +237,7 @@ final class TextCanvasView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard active else { return }
-        let selected = model.selectedText
+        let selected = model.editingTextID
         for item in visible() {
             let isSelected = item.id == selected
             let rect = TextCanvasMath.handleFrame(item.rect)

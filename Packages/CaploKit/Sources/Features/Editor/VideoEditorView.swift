@@ -80,7 +80,11 @@ struct VideoEditorView: View {
         .onChange(of: model.selectedFocus) { if model.selectedFocus != nil { tab = "聚焦" } }
         .onChange(of: model.selectedMask) { if model.selectedMask != nil { tab = "遮罩" } }
         .onChange(of: model.selectedText) { if model.selectedText != nil { tab = "文字" } }
+        // 卡片的字与背景在文字面板里改。
+        .onChange(of: model.selectedClip) { if model.selectedCard != nil { tab = "文字" } }
         .onChange(of: model.selectedCaption) { if model.selectedCaption != nil { tab = "字幕" } }
+        // 导出窗口：格式、分辨率、帧率、画质、声音。
+        .sheet(isPresented: Binding(get: { model.showingExport }, set: { model.showingExport = $0 })) { ExportSheet(model: model) }
         // 要添加的时间段已经有镜头：问一下，可以勾"不再提示"。
         .sheet(item: Binding(get: { model.pendingFocus }, set: { if $0 == nil { model.cancelPendingFocus() } })) { pending in
             StudioConfirmSheet(title: "这段时间已有镜头",
@@ -131,7 +135,7 @@ struct VideoEditorView: View {
     }
 }
 
-/// 顶栏：左侧为原生红黄绿预留位、项目中心与项目名；右侧导出分辨率与导出。撤销重做在时间线工具栏。
+/// 顶栏：左侧为原生红黄绿预留位、项目中心与项目名；右侧导出（格式、分辨率等在导出窗口里选）。撤销重做在时间线工具栏。
 private struct EditorTopBar: View {
     let model: VideoEditorModel
     let back: () -> Void
@@ -151,13 +155,8 @@ private struct EditorTopBar: View {
                 Text("\(Int(model.progress * 100))%").font(CaploFont.value).foregroundStyle(CaploColor.textSecondary)
                 Button("取消") { model.cancelExport() }.buttonStyle(StudioButtonStyle(.quiet))
             } else {
-                SourceDropdown(symbol: "film", title: model.exportSize == 1920 ? "1080p" : (model.edit.layout.ratio == .square ? "2160p" : "4K"), accessibilityName: "导出分辨率") { [
-                    // 导出跟随录制帧率（默认 60），文案按工程实际帧率写，不再固定写 30 fps。
-                    .item("1080p · \(model.exportFrameRate(longEdge: 1920)) fps", checked: model.exportSize == 1920) { model.exportSize = 1920 },
-                    .item("4K / 2160p · \(model.exportFrameRate(longEdge: 3840)) fps", checked: model.exportSize == 3840) { model.exportSize = 3840 },
-                ] }
                 Button { model.export() } label: { Label("导出", systemImage: "square.and.arrow.up") }
-                    .buttonStyle(StudioButtonStyle(.primary, size: .large))
+                    .buttonStyle(StudioButtonStyle(.primary, size: .large)).keyboardShortcut("e", modifiers: .command)
                     .disabled(!model.ready || (model.edit.duration <= 0) || model.loading)
             }
         }

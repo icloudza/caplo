@@ -43,7 +43,7 @@ extension WindowLifecycleTests {
         try harness.mouse(.leftMouseUp, x: origin + 20, y: 49)
         #expect(model.selectedClip == ids[0])
         // 旧写法点在 y = 230，落在导航条那一带、根本没进轨道区，断言"选中不变"因此空转。
-        let belowRows = 28 + Double(model.edit.timelineRows.count) * 42 + 12
+        let belowRows = 28 + Double(model.edit.timelineRows.count) * TimelineViewportView.rowHeight + 12
         try harness.mouse(.leftMouseDown, x: origin + 1.6 * 60, y: belowRows)
         try harness.mouse(.leftMouseUp, x: origin + 1.6 * 60, y: belowRows)
         #expect(model.selectedClip == nil, "点所有行下方的空白没有取消选中")

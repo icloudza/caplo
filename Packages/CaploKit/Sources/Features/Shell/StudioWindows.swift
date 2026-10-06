@@ -395,3 +395,22 @@ public struct VideoEditorPreview: View {
         }.onDisappear { model?.close() }
     }
 }
+
+/// 导出窗口的离屏预览（PreviewGallery 用）：载入工程后直接画导出窗口本身。
+public struct ExportSheetPreview: View {
+    @State private var model: VideoEditorModel?
+    let projectURL: URL
+    public init(projectURL: URL) { self.projectURL = projectURL }
+    public var body: some View {
+        Group {
+            if let model { ExportSheet(model: model) } else { ProgressView("载入预览…") }
+        }.task {
+            if let document = try? ProjectStorage.load(projectURL) {
+                // 编辑器视图会自己调 open()；这里没有编辑器视图，手动打开工程，"导出"按钮与时长才是载入后的样子。
+                let created = VideoEditorModel(entry: LibraryEntry(url: projectURL, document: document))
+                await created.open()
+                model = created
+            }
+        }.onDisappear { model?.close() }
+    }
+}

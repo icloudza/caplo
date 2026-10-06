@@ -25,6 +25,8 @@ public enum ProjectMedia {
           let separateAudio = !role.isVideo && (role == .systemAudio ? snapshot.systemClips != nil : snapshot.microphoneClips != nil)
           let media = separateAudio ? snapshot.mediaClips(logical) : snapshot.resolvedMedia(logical)
           for original in media {
+            // 卡片不引用素材：这段画面轨留空，合成器按卡片画背景与文字。
+            if original.card != nil { continue }
             // 普通区间保持原速；超出源结尾的视频使用末帧的单帧区间扩展，音频不补内容。
             var jobs: [(VideoClip, Double?)] = []
             let playable = original.playableDuration
@@ -159,7 +161,7 @@ public enum ProjectMedia {
         let (composition, mix) = try await compose(url: url, document: document, levels: levels, edit: edit)
         let item = AVPlayerItem(asset: composition)
         item.audioMix = mix
-        if let edit { item.videoComposition = try videoComposition(composition: composition, edit: edit, longEdge: 1920, pointers: pointers ?? loadPointers(url: url, document: document), backgroundImage: backgroundImage(for: edit.layout, in: url), frameRate: document.frameRate) }
+        if let edit { item.videoComposition = try videoComposition(composition: composition, edit: edit, shortEdge: 1080, pointers: pointers ?? loadPointers(url: url, document: document), backgroundImage: backgroundImage(for: edit.layout, in: url), frameRate: document.frameRate) }
         return item
     }
 
@@ -176,7 +178,7 @@ public enum ProjectMedia {
             let existing = item.videoComposition?.instructions.first as? SceneInstruction
             let background = previous.layout.backgroundImage == edit.layout.backgroundImage ? existing?.backgroundImage : url.flatMap { backgroundImage(for: edit.layout, in: $0) }
             let rate = item.videoComposition.map { 1 / $0.frameDuration.seconds } ?? 30
-            item.videoComposition = try videoComposition(composition: composition, edit: edit, longEdge: 1920, pointers: existing?.pointers ?? PointerTimeline(events: []), backgroundImage: background, frameRate: rate.isFinite && rate > 0 ? rate : 30, reusing: existing)
+            item.videoComposition = try videoComposition(composition: composition, edit: edit, shortEdge: 1080, pointers: existing?.pointers ?? PointerTimeline(events: []), backgroundImage: background, frameRate: rate.isFinite && rate > 0 ? rate : 30, reusing: existing)
         }
         if previous.audio != edit.audio {
             let mix = AVMutableAudioMix()
@@ -254,7 +256,7 @@ public enum ProjectMedia {
         return CIImage(cgImage: image)
     }
 
-    private static func videoComposition(composition: AVMutableComposition, edit: VideoEdit, longEdge: Int, pointers: PointerTimeline, backgroundImage: CIImage? = nil, frameRate: Double = 30, reusing previous: SceneInstruction? = nil) throws -> AVVideoComposition {
+    private static func videoComposition(composition: AVMutableComposition, edit: VideoEdit, shortEdge: Int, pointers: PointerTimeline, backgroundImage: CIImage? = nil, frameRate: Double = 30, reusing previous: SceneInstruction? = nil) throws -> AVVideoComposition {
         guard let track = composition.track(withTrackID: trackID(for: .screen)), edit.duration > 0 else { throw ProjectError.invalid("时间线为空，请先恢复一个片段。") }
         let video = AVMutableVideoComposition()
         video.customVideoCompositorClass = VideoCompositor.self
@@ -264,11 +266,12 @@ public enum ProjectMedia {
         let screens = routes.filter { $0.trackID == 1 || ($0.trackID >= 5 && $0.trackID % 2 == 1) }
         let cameras = edit.camera?.enabled == true ? routes.filter { $0.trackID >= 4 && $0.trackID % 2 == 0 } : []
         video.instructions = [SceneInstruction(trackID: track.trackID, edit: edit, screenRoutes: screens, cameraRoutes: cameras, pointers: pointers, backgroundImage: backgroundImage, reusing: previous)]
-        // 短边固定 1080 / 2160，长边按比例伸展：方形以此为边长，横竖屏保持标准 1080p / UHD 尺寸，避免预设静默缩小超大方形画布。
-        let size = edit.layout.ratio.outputSize(shortEdge: longEdge == 3840 ? 2160 : 1080)
+        // 短边按所选分辨率（720 / 1080 / 1440 / 2160），长边按比例伸展：方形以此为边长，横竖屏得到标准尺寸。
+        let size = edit.layout.ratio.outputSize(shortEdge: shortEdge)
         video.renderSize = CGSize(width: size.width, height: size.height)
         // 输出帧率与录制帧率一致（旧工程 30）；60 fps 素材不再被折半。
-        video.frameDuration = CMTime(value: 1, timescale: Int32(max(24, min(120, frameRate.rounded()))))
+        // 下限 5 而不是 24：GIF 按 10 / 15 帧出图，钳到 24 会白白多出六成的帧（体积跟着涨）。视频帧率由调用方保证 ≥ 24。
+        video.frameDuration = CMTime(value: 1, timescale: Int32(max(5, min(120, frameRate.rounded()))))
         video.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
         video.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
         video.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
@@ -276,15 +279,24 @@ public enum ProjectMedia {
     }
 
     /// 固定工程快照导出；取消仅清理本次临时文件，不触碰用户原有目标或原素材。
+    /// 旧入口：`longEdge` 1920 / 3840 对应 1080p / 4K 的 H.264（测试与旧调用方用）。
     public static func export(url: URL, document: ProjectDocument, levels: AudioLevels, destination: URL, edit: VideoEdit? = nil, longEdge: Int = 1920,
+                              progress: @escaping @MainActor (Double) -> Void) async throws {
+        var settings = ExportSettings()
+        settings.resolution = longEdge >= 3840 ? .p2160 : .p1080
+        try await export(url: url, document: document, levels: levels, destination: destination, edit: edit, settings: settings, progress: progress)
+    }
+
+    /// 按导出设置导出：格式、分辨率、帧率、画质、声音见 `ExportSettings`。
+    public static func export(url: URL, document: ProjectDocument, levels: AudioLevels, destination: URL, edit: VideoEdit? = nil, settings: ExportSettings,
                               progress: @escaping @MainActor (Double) -> Void) async throws {
         let (composition, mix) = try await compose(url: url, document: document, levels: levels, edit: edit)
         // 码率与帧率自己定（见 ExportEncoder）：系统预设在 4K 上只给约 10 Mbps 且降到 30 fps。
-        let rate = ExportEncoder.frameRate(recorded: document.frameRate, longEdge: longEdge)
-        let video = try edit.map { try videoComposition(composition: composition, edit: $0, longEdge: longEdge, pointers: loadPointers(url: url, document: document), backgroundImage: backgroundImage(for: $0.layout, in: url), frameRate: rate) }
-        let temporary = destination.deletingLastPathComponent().appendingPathComponent(".caplo-export-\(UUID()).mp4")
+        let rate = settings.outputFrameRate(recorded: document.frameRate)
+        let video = try edit.map { try videoComposition(composition: composition, edit: $0, shortEdge: settings.resolution.rawValue, pointers: loadPointers(url: url, document: document), backgroundImage: backgroundImage(for: $0.layout, in: url), frameRate: rate) }
+        let temporary = destination.deletingLastPathComponent().appendingPathComponent(".caplo-export-\(UUID()).\(settings.format.fileExtension)")
         defer { try? FileManager.default.removeItem(at: temporary) }
-        try await ExportEncoder.encode(asset: composition, videoComposition: video, audioMix: mix, destination: temporary) { value in
+        try await ExportEncoder.encode(asset: composition, videoComposition: video, audioMix: mix, destination: temporary, settings: settings) { value in
             Task { @MainActor in progress(value) }
         }
         try Task.checkCancellation()

@@ -2,7 +2,7 @@ import SwiftUI
 import EditingCore
 import CaploDesignSystem
 
-/// 时间线工具栏：剪辑动作 ｜ 撤销重做 ｜ 播放与时间 ｜ 吸附与缩放。作为固定高度的宿主视图放在时间线窗格顶部。
+/// 时间线工具栏：剪辑动作（分割、删除、聚焦、卡片） ｜ 撤销重做 ｜ 播放与时间 ｜ 吸附与缩放。作为固定高度的宿主视图放在时间线窗格顶部。
 struct TimelineToolbar: View {
     let model: VideoEditorModel
     let viewport: TimelineViewport
@@ -22,6 +22,11 @@ struct TimelineToolbar: View {
             Button(action: addFocus) { Image(systemName: "plus.viewfinder") }
                 .buttonStyle(StudioIconButtonStyle()).hoverTip("在播放头添加聚焦").accessibilityLabel("添加聚焦")
                 .disabled(!model.ready || model.edit.clips.isEmpty)
+            // 卡片：片头 / 章节 / 片尾。插在播放头处，落在画面中间会在那里切开，后面的内容往后挪。
+            Button { model.insertCard() } label: { Image(systemName: "rectangle.badge.plus") }
+                .buttonStyle(StudioIconButtonStyle()).hoverTip("在播放头插入卡片（片头 / 章节 / 片尾），后面的内容往后挪")
+                .accessibilityLabel("插入卡片")
+                .disabled(!model.ready)
             toolbarDivider
             // 静音 / 仅播放此轨作用于时间线上选中的音频块所在的轨道；轨头只留图标。
             audioToggle(solo: false)

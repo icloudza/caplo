@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import ExportKit
 import Features
 import CaptureKit
 import CaploDesignSystem
@@ -57,6 +58,23 @@ struct PreviewGallery {
             try await render(VideoEditorPreview(projectURL: url, time: 2.4, initialTab: "光标"), name: "cursor-embedded", size: CGSize(width: 1360, height: 860), scheme: .light, output: output)
             return
         }
+        if CommandLine.arguments.contains("--export-demo") {
+            // 官网首屏的演示视频：按真实录制合成的工程（60 fps、连续指针轨迹、默认自动聚焦）用 Caplo 自己的导出管线导出，不做任何后期。
+            let url = try await PreviewFixture.demo()
+            let document = try ProjectStorage.load(url)
+            let edit = try EditStorage.load(in: url, document: document)
+            var settings = ExportSettings()
+            settings.resolution = .p1080; settings.quality = .standard; settings.includesAudio = false
+            let target = output.appendingPathComponent("caplo-demo.mp4")
+            try await ProjectMedia.export(url: url, document: document, levels: edit.audio, destination: target, edit: edit, settings: settings) { _ in }
+            print(target.path)
+            // 官网各板块的动画插画用同一张桌面壁纸当背景。
+            if let wallpaper = DesktopWallpaper.currentURL().flatMap({ DesktopWallpaper.decode($0, maximumPixelSize: 2400) }),
+               let jpeg = NSBitmapImageRep(cgImage: wallpaper).representation(using: .jpeg, properties: [.compressionFactor: 0.92]) {
+                try jpeg.write(to: output.appendingPathComponent("wallpaper.jpg"))
+            }
+            return
+        }
         if CommandLine.arguments.contains("--performance") {
             try await EditorBenchmark.run(output: output)
             return
@@ -101,6 +119,7 @@ struct PreviewGallery {
         try await render(StudioConfirmSheet(title: "删除 3 个工程？", message: "“录制 2026年9月7日 4:30”、“录制 2026年9月7日 3:34”、“录制 2026年9月7日 3:25”会移到废纸篓，可从访达恢复。", confirmTitle: "删除 3 项", danger: true, confirm: {}, cancel: {}).background(CaploColor.surfaceCanvasWell), name: "confirm-sheet", size: CGSize(width: 380, height: 190), scheme: .dark, output: output)
         try await render(CaploSettingsView(), name: "settings", size: CaploSettingsView.size, scheme: .light, output: output)
         try await render(CaploSettingsView(), name: "settings-dark", size: CaploSettingsView.size, scheme: .dark, output: output)
+        try await render(CaploSettingsView(previewSection: "导出"), name: "settings-export", size: CaploSettingsView.size, scheme: .dark, output: output)
         if let argument = CommandLine.arguments.dropFirst(2).first {
             let path: String
             if ["--demo", "--camera-demo", "--pointer-demo"].contains(argument) { path = try await PreviewFixture.create(camera: argument != "--demo", pointer: argument == "--pointer-demo").path; print("合成工程：" + path) }
@@ -122,6 +141,9 @@ struct PreviewGallery {
             UserDefaults.standard.set(true, forKey: "editor.text.appearanceExpanded")
             try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path), time: 2.5, initialTab: "文字"), name: "editor-text", size: CGSize(width: 1360, height: 860), scheme: .dark, output: output)
             try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path), initialTab: "裁剪"), name: "editor-crop", size: CGSize(width: 1360, height: 860), scheme: .dark, output: output)
+            try await render(ExportSheetPreview(projectURL: URL(fileURLWithPath: path)), name: "export-sheet", size: CGSize(width: 500, height: 760), scheme: .dark, output: output, settle: 5)
+            // 卡片正中：画面层完全退场，只有背景与卡片上的字（演示工程第 9 秒插了一块 3 秒的章节卡片）。
+            try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path), time: 10.5), name: "editor-card", size: CGSize(width: 1360, height: 860), scheme: .dark, output: output)
             try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path), time: 2.4, initialTab: "光标"), name: "editor-cursor", size: CGSize(width: 1360, height: 860), scheme: .dark, output: output)
             if argument == "--pointer-demo" {
                 try await render(VideoEditorPreview(projectURL: URL(fileURLWithPath: path), time: 2.4, initialTab: "光标"), name: "editor-pointer", size: CGSize(width: 1360, height: 860), scheme: .light, output: output)
@@ -131,7 +153,7 @@ struct PreviewGallery {
     }
 
     @MainActor
-    private static func render<V: View>(_ view: V, name: String, size: CGSize, scheme: ColorScheme, output: URL) async throws {
+    private static func render<V: View>(_ view: V, name: String, size: CGSize, scheme: ColorScheme, output: URL, settle: Double = 2) async throws {
         // 使用 NSHostingView 绘制，避免 ImageRenderer 遗漏 AppKit 控件与滚动容器。
         let host = NSHostingView(rootView: view
             .frame(width: size.width, height: size.height)
@@ -143,7 +165,7 @@ struct PreviewGallery {
         host.frame = CGRect(origin: .zero, size: size)
         host.layoutSubtreeIfNeeded()
         // 给原生控件一次布局机会；短暂等待仅用于离屏工具，不代表真实界面已稳定。
-        try await Task.sleep(for: .seconds(2))
+        try await Task.sleep(for: .seconds(settle))
         host.layoutSubtreeIfNeeded()
         guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { throw PreviewError.renderFailed(name) }
         host.cacheDisplay(in: host.bounds, to: bitmap)

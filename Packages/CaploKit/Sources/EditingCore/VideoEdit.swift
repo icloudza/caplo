@@ -14,18 +14,21 @@ public struct VideoClip: Codable, Equatable, Sendable, Identifiable {
     /// 片段级增益，乘在全局音量之上；1 为不变。
     public var systemGain: Float = 1
     public var microphoneGain: Float = 1
-    /// 这是一段"定格卡段"，冻结自哪条片段。
+    /// 这是一段定格画面，冻结自哪条片段（旧版"全屏卡段"留下的；2026-10-06 起卡段改为 `card`，读取时迁移）。
     /// 镜头是绑在片段 ID 上的（`FocusSegment.targetClipID`），定格片段的 ID 是新的，
-    /// 不认这门亲就会在卡段里把镜头整个丢掉——1.8× 的推近在卡段两端各硬跳一次。
+    /// 不认这门亲就会在定格里把镜头整个丢掉——1.8× 的推近在两端各硬跳一次。
     public var holdSource: UUID?
     /// 本片段不绘制光标与点击效果。
     public var cursorHidden = false
     /// 用户自定义的块名称；为空时时间线按"录制画面 01"这类默认规则命名。
     public var title: String?
+    /// 非空表示这是一块卡片：画面轨上自带内容（背景 + 文字）的一段，不引用任何素材，
+    /// `sourceStart` / `mediaDuration` 对它没有意义。见 `TitleCard`。
+    public var card: TitleCard?
 
     public init(sourceStart: Double, duration: Double) { self.sourceStart = sourceStart; self.duration = duration }
 
-    private enum CodingKeys: String, CodingKey { case id, sourceStart, duration, timelineStart, mediaDuration, systemGain, microphoneGain, cursorHidden, title, holdSource }
+    private enum CodingKeys: String, CodingKey { case id, sourceStart, duration, timelineStart, mediaDuration, systemGain, microphoneGain, cursorHidden, title, holdSource, card }
 
     /// 旧文件没有片段级字段，按默认值解码。
     public init(from decoder: Decoder) throws {
@@ -40,6 +43,7 @@ public struct VideoClip: Codable, Equatable, Sendable, Identifiable {
         cursorHidden = try container.decodeIfPresent(Bool.self, forKey: .cursorHidden) ?? false
         title = try container.decodeIfPresent(String.self, forKey: .title)
         holdSource = try container.decodeIfPresent(UUID.self, forKey: .holdSource)
+        card = try container.decodeIfPresent(TitleCard.self, forKey: .card)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -54,6 +58,7 @@ public struct VideoClip: Codable, Equatable, Sendable, Identifiable {
         if cursorHidden { try container.encode(cursorHidden, forKey: .cursorHidden) }
         try container.encodeIfPresent(title, forKey: .title)
         try container.encodeIfPresent(holdSource, forKey: .holdSource)
+        try container.encodeIfPresent(card, forKey: .card)
     }
 
     public func gain(for track: AudioTrack) -> Float { track == .system ? systemGain : microphoneGain }
@@ -232,6 +237,8 @@ public struct VideoEdit: Codable, Equatable, Sendable {
         let candidates = clipID.flatMap { id in clips.firstIndex { $0.id == id } }.map { [$0] } ?? Array(clips.indices)
         for number in candidates {
             let clip = clips[number]
+            // 卡片不引用素材，任何源时刻都不落在它上面。
+            guard clip.card == nil else { continue }
             if source >= clip.sourceStart, source <= clip.sourceStart + clip.playableDuration {
                 return index.boundaries[number] + min(clip.playableDuration - 0.00001, source - clip.sourceStart)
             }
@@ -290,15 +297,18 @@ public struct VideoEdit: Codable, Equatable, Sendable {
                                        && (cue.timelineStart.map { $0 + cue.sourceDuration <= editedDuration + 0.001 } ?? true) }),
               textList.count <= 500, Set(textList.map(\.id)).count == textList.count,
               // 钉在成片时间上的叠加层只查成片域：它的 start 是源域的残留，没有任何一处读它。
-              // 全屏卡段就靠这一条——在片尾附近插一段 3 秒卡段，源域上必然越界，
-              // 按源域查等于整笔编辑回滚，用户只看到一句"内容无效"。
+              // 片尾附近钉上去的文字（含停在卡片上新加的）就靠这一条：按源域查可能越界，
+              // 越界等于整笔编辑回滚，用户只看到一句"内容无效"。
               textList.allSatisfy({ value in value.isValid && (value.timelineStart.map { $0 + value.duration <= editedDuration + 0.001 }
                                                                ?? (value.start + value.duration <= sourceDuration + 0.001)) }),
               maskList.count <= 500, Set(maskList.map(\.id)).count == maskList.count,
               maskList.allSatisfy({ mask in mask.isValid && (mask.timelineStart.map { $0 + mask.duration <= editedDuration + 0.001 }
                                                              ?? (mask.start + mask.duration <= sourceDuration + 0.001)) }),
               layerOrder.map({ Set($0).count == $0.count }) != false, focusStyle?.isValid != false, camera?.isValid != false, pointer?.isValid != false, clips.count <= 100_000, Set(clips.map(\.id)).count == clips.count,
-              clips.allSatisfy({ $0.sourceStart.isFinite && $0.duration.isFinite && $0.sourceStart >= 0 && $0.duration >= 1.0 / 60 && $0.sourceStart + $0.playableDuration <= sourceDuration + 0.001
+              // 卡片不引用素材：只查时长与卡片内容，不查源范围（几秒的片头卡片放进一段更短的录制里也合法）。
+              clips.allSatisfy({ clip in clip.card.map { card in card.isValid && clip.duration.isFinite && clip.duration >= Self.minimumCardDuration - 0.0001
+                                                      && (clip.timelineStart.map { $0.isFinite && $0 >= 0 } ?? true) } ?? true }),
+              clips.allSatisfy({ $0.card != nil || $0.sourceStart.isFinite && $0.duration.isFinite && $0.sourceStart >= 0 && $0.duration >= 1.0 / 60 && $0.sourceStart + $0.playableDuration <= sourceDuration + 0.001
                                  && ($0.timelineStart.map { $0.isFinite && $0 >= 0 } ?? true) && ($0.mediaDuration.map { $0.isFinite && $0 > 0 } ?? true)
                                  && $0.systemGain.isFinite && (0...2).contains($0.systemGain) && $0.microphoneGain.isFinite && (0...2).contains($0.microphoneGain) }),
               layout.padding.isFinite, (0...120).contains(layout.padding), layout.cornerRadius.isFinite, (0...40).contains(layout.cornerRadius),
@@ -404,7 +414,7 @@ public enum SceneEvaluator {
         let links = suppliedLinks ?? links(edit: edit)
         struct Layer { let zoom: FocusSegment; let elapsed: Double; let envelope: Double; let order: Int? }
         var layers: [Layer] = []
-        // 定格片段认它冻结自的那条片段，镜头才不会在卡段里掉档。
+        // 定格片段认它冻结自的那条片段，镜头才不会在定格里掉档。
         let visibleClip = timeline.clipIndex(at: time).map { timeline.clips[$0].holdSource ?? timeline.clips[$0].id }
         for zoom in edit.focuses where !zoom.automatic || edit.automaticFocus {
             if let target = zoom.targetClipID, target != visibleClip { continue }

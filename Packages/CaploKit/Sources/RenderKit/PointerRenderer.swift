@@ -74,12 +74,27 @@ enum PointerRenderer {
                     .concatenating(CGAffineTransform(translationX: center.x, y: center.y))
                 return image.transformed(by: placement).applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: opacity)])
             }
-            var cursor = glyph(shape: frame.shape, opacity: frame.opacity * (effects.style == .original ? 1 : frame.shapeMix))
+            // "透明玻璃"不贴图：箭头形状时在画面上做一枚 Liquid Glass 透镜（见 LiquidGlass），其他形状照常用素材。
+            let glass = effects.cursorStyle == LiquidGlass.styleID && LiquidGlass.isAvailable
+            let currentOpacity = frame.opacity * (effects.style == .original ? 1 : frame.shapeMix)
+            var lensOpacity = 0.0
+            var cursor: CIImage
+            if glass, frame.shape == .arrow { lensOpacity = currentOpacity; cursor = CIImage.empty() }
+            else { cursor = glyph(shape: frame.shape, opacity: currentOpacity) }
             if effects.style != .original, let previous = frame.previousShape {
-                // 两张图都围绕自己的热点放置，交叉淡化时点击位置不漂移。
-                cursor = cursor.applyingFilter("CIAdditionCompositing", parameters: [
-                    kCIInputBackgroundImageKey: glyph(shape: previous, opacity: frame.opacity * (1 - frame.shapeMix))
-                ])
+                let previousOpacity = frame.opacity * (1 - frame.shapeMix)
+                if glass, previous == .arrow { lensOpacity += previousOpacity }
+                else {
+                    // 两张图都围绕自己的热点放置，交叉淡化时点击位置不漂移。
+                    cursor = cursor.applyingFilter("CIAdditionCompositing", parameters: [
+                        kCIInputBackgroundImageKey: glyph(shape: previous, opacity: previousOpacity)
+                    ])
+                }
+            }
+            if lensOpacity > 0.001 {
+                // 与其他样式同一可见大小：外接尺寸 32 点 × 光标大小 × 点击缩放。
+                let radius = 16 * unit * effects.cursorScale * frame.scale
+                result = LiquidGlass.lens(over: result, center: point(position), radius: radius, opacity: min(1, lensOpacity))
             }
             // 按速度方向做运动模糊：固定参考帧率、强度 2；Core Image 实现连续核。
             // 只模糊光标层，点击高亮和视频保持清晰；限制快速跳变的最大拖尾。

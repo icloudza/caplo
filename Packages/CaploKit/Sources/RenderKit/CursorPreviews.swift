@@ -22,7 +22,14 @@ import Observation
     }
     /// 用户绘制样式的预览。
     public func image(customStyle id: String, height: CGFloat = 44) -> NSImage? {
-        image(key: customKey(id, height), height: height) { [store] in CursorAssets.custom(id, in: store) }
+        image(key: customKey(id, height), height: height) { [store] in Self.customAsset(id, store: store, height: height) }
+    }
+    /// 自绘样式的预览素材；"透明玻璃"是实时透镜，没有静态图可贴，画一枚放在几行文字条上的透镜。
+    private nonisolated static func customAsset(_ id: String, store: CursorAssets.Store, height: CGFloat) -> CursorAssets.Asset? {
+        if id == LiquidGlass.styleID, LiquidGlass.isAvailable {
+            return CursorAssets.Asset(image: LiquidGlass.preview(size: height * 2), hotspot: CGPoint(x: 0.5, y: 0.5))
+        }
+        return CursorAssets.custom(id, in: store)
     }
     /// 预热：进入编辑器时在后台低优先级把一组样式（面板会先显示的那组）画好，切到光标面板时直接命中缓存；其他组等切到时再按需加载。
     public func warmUp(group: CursorStyle.Group, height: CGFloat = 44) {
@@ -30,7 +37,7 @@ import Observation
             enqueue(key: themeKey(.tahoe, .arrow, height), height: height, qos: .utility) { [store] in CursorAssets.asset(style: .tahoe, shape: .arrow, in: store) }
         }
         for style in CursorStyle.styles(in: group) {
-            enqueue(key: customKey(style.id, height), height: height, qos: .utility) { [store] in CursorAssets.custom(style.id, in: store) }
+            enqueue(key: customKey(style.id, height), height: height, qos: .utility) { [store] in Self.customAsset(style.id, store: store, height: height) }
         }
     }
 

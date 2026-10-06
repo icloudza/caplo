@@ -222,8 +222,14 @@ public struct ProjectLibraryView: View {
                     Button { requestTrash(selectedEntries) } label: { Image(systemName: "trash").foregroundStyle(CaploColor.record) }
                         .buttonStyle(StudioIconButtonStyle())
                         .help("删除选中的 \(selection.count) 项 ⌫").accessibilityLabel("删除选中的 \(selection.count) 项")
+                }
+                // 全选：常驻顶栏（列表为空时禁用）；当前列表（含搜索结果）已全部选中时禁用。
+                Button { selectAll() } label: { Image(systemName: "checkmark.circle") }
+                    .buttonStyle(StudioIconButtonStyle()).help("全选 ⌘A").accessibilityLabel("全选")
+                    .disabled(filtered.isEmpty || filtered.allSatisfy { selection.contains($0.url) })
+                if !selection.isEmpty {
                     Button { selection.removeAll() } label: { Image(systemName: "xmark.circle") }
-                        .buttonStyle(StudioIconButtonStyle()).help("取消选择 · 全选 ⌘A").accessibilityLabel("取消选择")
+                        .buttonStyle(StudioIconButtonStyle()).help("取消选择 · Esc").accessibilityLabel("取消选择")
                 }
                 Button { Task { await model.refresh() } } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(StudioIconButtonStyle()).help("刷新项目").accessibilityLabel("刷新项目")
@@ -261,7 +267,10 @@ public struct ProjectLibraryView: View {
                 }
                 .contentShape(Rectangle())
                 .focusable().focusEffectDisabled().focused($focus, equals: .list)
-                .onTapGesture { selection.removeAll(); focus = .list }
+                // 点列表空白只把键盘焦点拿回列表，不清选择：批量选好之后点一下别处就全丢了，得重新选（2026-10-06 用户指出）。
+                // 取消选择走顶栏的 ⊗ 按钮或 Esc。
+                .onTapGesture { focus = .list }
+                .onExitCommand { selection.removeAll() }
                 .onKeyPress("f", phases: .down) { press in
                     guard press.modifiers.contains(.command) else { return .ignored }
                     focus = .search; return .handled
@@ -273,7 +282,7 @@ public struct ProjectLibraryView: View {
                 }
                 .onKeyPress("a", phases: .down) { press in
                     guard press.modifiers.contains(.command) else { return .ignored }
-                    selection = Set(filtered.map(\.url)); return .handled
+                    selectAll(); return .handled
                 }
             }
             if let error = model.error {
@@ -312,6 +321,8 @@ public struct ProjectLibraryView: View {
                 }
                 if let error = model.error { Text(error).font(CaploFont.caption).foregroundStyle(CaploColor.warning) }
             }.padding(CaploMetrics.Spacing.xl).frame(width: 360)
+                // 点弹窗外面等于"取消"；正在保存时不打断。
+                .onOutsideClick { if !savingName { renaming = nil } }
                 .foregroundStyle(CaploColor.textPrimary)
                 // 独立弹层拥有自己的采样层，清除系统默认底色，内部输入框仅叠加轻量表面。
                 .background(CaploMaterialBackground(.window))
@@ -362,6 +373,12 @@ public struct ProjectLibraryView: View {
         let deletable = entries.filter { VideoEditorSessions.current?.entry.url != $0.url }
         guard !deletable.isEmpty else { if !entries.isEmpty { model.error = "工程正在编辑，请先关闭编辑器。" }; return }
         trashing = TrashRequest(entries: deletable)
+    }
+
+    /// 选中当前列表里的全部工程（有搜索词时只选搜索结果）。
+    private func selectAll() {
+        selection = Set(filtered.map(\.url))
+        focus = .list
     }
 
     /// 行首圆圈：不用修饰键的多选入口。

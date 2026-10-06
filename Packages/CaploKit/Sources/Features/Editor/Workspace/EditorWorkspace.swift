@@ -143,7 +143,7 @@ final class EditorWorkspaceView: NSSplitView, NSSplitViewDelegate {
             maskEditor.refreshFor(edit: model.edit, time: model.skimPosition ?? model.position,
                                   selection: model.selectedMask, editing: model.maskEditing, playing: model.playing)
             textEditor.refreshFor(edit: model.edit, time: model.skimPosition ?? model.position,
-                                  selection: model.selectedText, editing: model.textEditing, playing: model.playing)
+                                  selection: model.editingTextID, editing: model.textEditing, playing: model.playing)
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in self?.observeModel() }
         }

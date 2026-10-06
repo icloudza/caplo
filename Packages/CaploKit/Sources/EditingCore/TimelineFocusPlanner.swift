@@ -161,6 +161,8 @@ private struct TimelineFocusPlanner {
             let span = timeline.spans[number]
             guard span.start < end else { break }
             let clip = timeline.clips[span.index]
+            // 卡片上没有指针，也不画镜头。
+            if clip.card != nil { continue }
             // 定格片段冻结自哪条片段就跟着哪条走，与 SceneEvaluator.focus 同一口径。
             if let target, target != clip.id, target != clip.holdSource { continue }
             let lower = max(start, span.start), upper = min(end, span.end)

@@ -72,7 +72,8 @@ public final class SceneInstruction: NSObject, AVVideoCompositionInstructionProt
     }
     public func pointerFrame(at time: Double) -> PointerFrame {
         // 片段级隐藏：该片段内不绘制箭头与点击。
-        if let index = timeline.clipIndex(at: time), timeline.clips[index].cursorHidden { return PointerFrame() }
+        // 卡片上没有录屏，也就没有光标。
+        if let index = timeline.clipIndex(at: time), timeline.clips[index].cursorHidden || timeline.clips[index].card != nil { return PointerFrame() }
         return pointers.frame(at: time, timeline: timeline, effects: edit.pointer)
     }
 
@@ -80,9 +81,15 @@ public final class SceneInstruction: NSObject, AVVideoCompositionInstructionProt
     public func cameraVisible(at time: CMTime) -> Bool {
         cameraSource(at: time) != nil
     }
-    public func screenSource(at time: CMTime) -> CMPersistentTrackID? { timeline.clipIndex(at: time.seconds) == nil ? nil : source(at: time, routes: screenRoutes) }
+    public func screenSource(at time: CMTime) -> CMPersistentTrackID? {
+        guard let index = timeline.clipIndex(at: time.seconds), timeline.clips[index].card == nil else { return nil }
+        return source(at: time, routes: screenRoutes)
+    }
+    /// 卡片期间人像不显示：卡片是片头、章节、片尾，独占整个画面。
     public func cameraSource(at time: CMTime) -> CMPersistentTrackID? {
-        edit.camera?.enabled == true ? source(at: time, routes: cameraRoutes) : nil
+        guard edit.camera?.enabled == true else { return nil }
+        if let index = timeline.clipIndex(at: time.seconds), timeline.clips[index].card != nil { return nil }
+        return source(at: time, routes: cameraRoutes)
     }
     private func source(at time: CMTime, routes: [VideoTrackRange]) -> CMPersistentTrackID? {
         var lower = 0, upper = routes.count
@@ -340,8 +347,8 @@ public enum SceneRenderer {
         // 必须连着 `staged` 一起判断——版式刚起步的那一两帧变换还约等于恒等（staged 仍是 false），
         // 只看 split 的话画中画既没跟着画面画、也没被单独画，会整帧消失。
         let lifted = staged && stage.split && edit.camera?.isFloatingPortrait == true
-        // 卡段正中画面层已经完全淡出。整条画面管线（解码、遮罩、圆角、光标、人像、两次重采样）
-        // 再走一遍也只是乘上 0：直接画背景加文字。3 秒卡段里有 2.3 秒落在这一档。
+        // 卡片与全屏文字正中，画面层已经完全淡出。整条画面管线（解码、遮罩、圆角、光标、人像、两次重采样）
+        // 再走一遍也只是乘上 0：直接画背景加文字。
         if stage.alpha < 0.002 {
             return withText(background(edit.layout, image: backgroundImage, size: size),
                             edit: edit, time: time, size: size, spans: textSpans)
@@ -460,8 +467,17 @@ public enum SceneRenderer {
     /// 字幕与文字层画在最上面，而且在输出画面坐标里：它们不跟着镜头推近一起放大，
     /// 否则标题会被推出画外。字幕在下、文字层在上。都没有时原样返回，一次滤镜都不建。
     static func withText(_ image: CIImage, edit: VideoEdit, time: Double, size: CGSize, spans: [TextSpan]) -> CIImage {
-        guard time.isFinite, !edit.textList.isEmpty || !edit.captionList.isEmpty else { return image }
+        let hasCards = edit.clips.contains { $0.card != nil }
+        guard time.isFinite, hasCards || !edit.textList.isEmpty || !edit.captionList.isEmpty else { return image }
         var result = image
+        // 卡片自己的背景色：与画面层淡出同一进度盖上去，进出卡片时背景跟着画面一起换，不在边界上硬切。
+        if hasCards, let backdrop = edit.cardBackground(at: time) {
+            let rgb = backdrop.color.rgb
+            let fill = CIImage(color: CIColor(red: rgb.0, green: rgb.1, blue: rgb.2, alpha: 1, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) ?? CIColor(red: rgb.0, green: rgb.1, blue: rgb.2))
+                .cropped(to: CGRect(origin: .zero, size: size))
+                .applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(backdrop.amount))])
+            result = fill.composited(over: result)
+        }
         let style = edit.captionStyleOrDefault
         // 只投影播放头附近这一段：一条 25 分钟的录音可能有四百句，逐帧全量投影会把播放拖垮。
         // 往前留够一句最长的显示时长，往后留一点好让"接上下一句"的规则算得出来。
@@ -480,7 +496,7 @@ public enum SceneRenderer {
                 result = layer.composited(over: result)
             }
         }
-        if !edit.textList.isEmpty {
+        if hasCards || !edit.textList.isEmpty {
             for state in edit.activeTexts(at: time, spans: spans) {
                 guard let layer = TextRenderer.shared.image(for: state, canvas: size) else { continue }
                 result = layer.composited(over: result)

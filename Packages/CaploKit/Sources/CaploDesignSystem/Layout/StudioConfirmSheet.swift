@@ -36,6 +36,8 @@ public struct StudioConfirmSheet: View {
             }
         }
         .padding(CaploMetrics.Spacing.xl).frame(width: 380)
+        // 点弹窗外面等于"取消"。
+        .onOutsideClick(perform: cancel)
         .foregroundStyle(CaploColor.textPrimary)
         .background(CaploMaterialBackground(.window))
         .presentationBackground(.clear)

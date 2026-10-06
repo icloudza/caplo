@@ -236,17 +236,12 @@ extension VideoEdit {
         // 播放头落在时间线的空白处（删掉中间一块、或把块整体挪开之后就会有空白）时映射不出源时间。
         // 这时绝不能把成片秒数当成源秒数用：那样建出来的遮罩会钉在一段和用户意图无关的素材上，
         // 甚至投影不出任何一段——列表里有它、画面上没有，用户却以为已经打上码了。
+        // 停在卡片上同样映射不出源时间：卡片上没有录屏，没有要遮的东西。
         guard let source = sourceTime(at: max(0, min(time, max(0, self.duration - 0.00001)))) else { return nil }
         let start = max(0, min(source, max(0, sourceDuration - 1.0 / 30)))
         let length = max(1.0 / 30, min(wanted, sourceDuration - start))
         var mask = MaskSegment(start: start, duration: length, x: 0.5, y: 0.5, width: 0.3, height: 0.16, kind: kind)
         if kind == .highlight { mask.width = 0.5; mask.height = 0.4 }
-        // 与文字同理：停在定格卡段上建的遮罩钉在成片时间，不然它会在卡段和正片上各出现一次。
-        if let hold = holdClip(atTimeline: max(0, min(time, max(0, duration - 0.00001)))) {
-            let anchor = max(0, min(time, (hold.timelineStart ?? 0) + hold.duration - 1.0 / 30))
-            mask.timelineStart = anchor
-            mask.duration = max(1.0 / 30, min(mask.duration, duration - anchor))
-        }
         addMask(mask)
         return mask.id
     }
@@ -278,7 +273,7 @@ extension VideoEdit {
     /// 遮罩在成片时间轴上的可见段。形状与 `focusSpans` 一致，但有一处关键差别：
     /// "保持末帧"的那段画面上仍然印着密钥，照样要遮（聚焦相反，只在真有画面的区间生效）。
     /// 那一截由 `projectSource` 产出一条 `frozen` 段——**冻住而不是拉伸**，
-    /// 否则几秒长的定格卡段会把源素材的好几秒在一张静止画面上演完，遮罩提前撤掉。
+    /// 否则几秒长的定格会把源素材的好几秒在一张静止画面上演完，遮罩提前撤掉。
     public func maskSpans(in range: Range<Double>? = nil, using existingIndex: TimelineIndex? = nil) -> [MaskSpan] {
         let index = existingIndex ?? TimelineIndex(clips: orderedScreenClips)
         let visible = range ?? 0..<duration

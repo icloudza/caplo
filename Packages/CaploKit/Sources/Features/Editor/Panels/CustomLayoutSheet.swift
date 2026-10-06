@@ -72,6 +72,8 @@ struct CustomLayoutSheet: View {
         }
         .padding(CaploMetrics.Spacing.l)
         .frame(width: 900, height: 600)
+        // 点弹窗外面等于"取消"：不应用这次的拖动。
+        .onOutsideClick { dismiss() }
         .background(CaploColor.surfaceOpaqueWindow)
         .opacity(revealed ? 1 : 0)
         .onAppear { withAnimation(.easeOut(duration: 0.22)) { revealed = true } }

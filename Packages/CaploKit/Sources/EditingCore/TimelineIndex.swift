@@ -47,8 +47,12 @@ public struct TimelineIndex: Sendable {
         guard lo > 0, time < spans[lo - 1].end else { return nil }
         return spans[lo - 1].index
     }
+    /// 成片时刻对应的源时刻。落在卡片上没有源时刻（卡片不引用素材），返回 nil：镜头、光标、遮罩都不会画上去。
     public func sourceTime(at time: Double) -> Double? {
-        if let index = clipIndex(at: time) { return clips[index].sourceStart + min(time - boundaries[index], clips[index].playableDuration - 0.00001) }
+        if let index = clipIndex(at: time) {
+            guard clips[index].card == nil else { return nil }
+            return clips[index].sourceStart + min(time - boundaries[index], clips[index].playableDuration - 0.00001)
+        }
         if time.isFinite, duration > 0, abs(time - duration) < 0.0001 { return sourceTime(at: duration - 0.00001) }
         return nil
     }
@@ -123,7 +127,8 @@ extension VideoEdit {
     }
     @discardableResult public mutating func duplicateClips(_ ids: Set<UUID>) -> Set<UUID> {
         guard let last = clips.lastIndex(where: { ids.contains($0.id) }) else { return [] }
-        let copies = clips.filter { ids.contains($0.id) }.map { original in
+        // 卡片的复制走 `insertCard`（要把后面的内容挪开），这里只复制录制画面。
+        let copies = clips.filter { ids.contains($0.id) && $0.card == nil }.map { original in
             var copy = original; copy.id = UUID()
             if let start = original.timelineStart { copy.timelineStart = start + original.duration }
             copy.systemGain = original.systemGain; copy.microphoneGain = original.microphoneGain; copy.cursorHidden = original.cursorHidden

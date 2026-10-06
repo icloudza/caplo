@@ -146,8 +146,9 @@ struct CanvasPanel: View {
 
     private var outputCaption: String {
         let ratio = model.edit.layout.ratio
-        let hd = ratio.outputSize(shortEdge: 1080), uhd = ratio.outputSize(shortEdge: 2160)
-        return "导出 1080p 为 \(hd.width)×\(hd.height)，4K 为 \(uhd.width)×\(uhd.height)"
+        let hd = ratio.outputSize(shortEdge: 1080)
+        // 分辨率在导出窗口里选（2026-10-06 从顶栏挪过去）；这里只说明比例对应的尺寸。
+        return "1080p 下为 \(hd.width)×\(hd.height)，导出时可选 720p 至 4K"
     }
 
     private func presetMatches(_ preset: CanvasPreset) -> Bool {

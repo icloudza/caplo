@@ -5,7 +5,12 @@ public enum TimelineMedia: String, Sendable { case screen, camera, system, micro
 
 extension VideoEdit {
     public func mediaClips(_ role: TimelineMedia) -> [VideoClip] {
-        switch role { case .screen: orderedScreenClips; case .camera: orderedCameraClips; case .system: systemClips ?? clips; case .microphone: microphoneClips ?? clips }
+        // 旧工程的声音轨没有独立列表时跟着画面片段走；卡片没有声音，不能被当成一段声音带过去。
+        switch role { case .screen: orderedScreenClips; case .camera: orderedCameraClips; case .system: systemClips ?? mediaOnlyClips; case .microphone: microphoneClips ?? mediaOnlyClips }
+    }
+    /// 去掉卡片之后的画面片段：声音、人像轨按旧规则"跟随画面"时只能跟随真正引用素材的片段。
+    var mediaOnlyClips: [VideoClip] {
+        clips.contains { $0.card != nil } ? clips.filter { $0.card == nil } : clips
     }
     public mutating func setMediaClips(_ role: TimelineMedia, _ values: [VideoClip]) {
         switch role { case .screen: clips = values; case .camera: cameraClips = values; case .system: systemClips = values; case .microphone: microphoneClips = values }
@@ -31,7 +36,7 @@ extension VideoEdit {
         for number in clips.indices { clips[number].timelineStart = index.boundaries[number] }
         for role in [TimelineMedia.camera, .system, .microphone] {
             let absent = role == .camera ? cameraClips == nil : role == .system ? systemClips == nil : microphoneClips == nil
-            if absent { setMediaClips(role, clips.map { var copy = $0; copy.id = UUID(); return copy }) }
+            if absent { setMediaClips(role, mediaOnlyClips.map { var copy = $0; copy.id = UUID(); return copy }) }
         }
     }
     /// 画面会不会不一样。**除了音量之外的任何差别都算**——这条判定必须是"反过来"写的：
@@ -44,7 +49,18 @@ extension VideoEdit {
     }
     public func hasSameMedia(as other: VideoEdit) -> Bool {
         // 语音处理开关换的是麦克风素材文件本身，也算素材变化（要重建播放项）。
-        layerOrder == other.layerOrder && clips == other.clips && cameraClips == other.cameraClips && systemClips == other.systemClips && microphoneClips == other.microphoneClips && duration == other.duration && audio.voiceProcessing == other.audio.voiceProcessing
+        // 卡片的文字与背景是合成器画的，改它们不用重建播放项（逐字重建会让打字时画面一闪一闪）；
+        // 卡片的增删、时长、位置仍算素材变化。
+        layerOrder == other.layerOrder && Self.mediaShape(clips) == Self.mediaShape(other.clips) && cameraClips == other.cameraClips && systemClips == other.systemClips && microphoneClips == other.microphoneClips && duration == other.duration && audio.voiceProcessing == other.audio.voiceProcessing
+    }
+    /// 比较素材用的片段列表：卡片只留"它在这里、多长"，内容抹掉。
+    static func mediaShape(_ values: [VideoClip]) -> [VideoClip] {
+        guard values.contains(where: { $0.card != nil }) else { return values }
+        return values.map { clip in
+            guard clip.card != nil else { return clip }
+            var copy = clip; copy.card = TitleCard(text: TextSegment(start: 0, duration: 1)); copy.title = nil
+            return copy
+        }
     }
     /// 只改变选中块的起止，不推挤相邻图层；左边缘受源起点限制，右边缘可进入末帧保持区。
     public mutating func dragMedia(_ role: TimelineMedia, id: UUID, edge: FocusDragEdge, delta: Double, sourceDuration: Double) {
@@ -54,14 +70,13 @@ extension VideoEdit {
         guard let number = values.firstIndex(where: { $0.id == id }) else { return }
         var clip = values[number]
         let start = clip.timelineStart ?? 0, minimum = Self.minimumClipDuration
-        // 定格卡段不是普通片段：它只有一帧可用素材，下面两个分支会按"源里还剩多少"重算 mediaDuration，
-        // 一重算定格就没了，那一段变成正常播放的录屏（而声音早被挪空），成了一段有画面没声音的鬼片。
-        // 拖右缘等于改卡段时长，走专用那条路：文字一起变、后面的内容一起挪；左缘没有对应语义，不动。
-        if role == .screen, let card = holdCards.first(where: { $0.holdClipID == id }) {
+        // 卡片不引用素材，下面两个分支按"源里还剩多少"重算 mediaDuration 对它没有意义。
+        // 拖右缘就是改卡片时长，后面的内容跟着挪；左缘没有对应语义，不动。
+        if clip.card != nil {
             switch edge {
             case .body: break
             case .leading: return
-            case .trailing: setHoldCardDuration(textID: card.id, duration: clip.duration + delta); return
+            case .trailing: setCardDuration(id: id, duration: clip.duration + delta); return
             }
         }
         switch edge {
@@ -89,8 +104,8 @@ extension VideoEdit {
         guard time.isFinite, let number = values.firstIndex(where: { $0.id == id }) else { return nil }
         let clip = values[number], offset = time - index.boundaries[number]
         guard offset >= Self.minimumClipDuration, clip.duration - offset >= Self.minimumClipDuration else { return nil }
-        // 定格卡段切不得：切完两半各自还是定格，可文字只认得其中一半，另一半就成了没人管的空定格。
-        guard role != .screen || !holdCards.contains(where: { $0.holdClipID == id }) else { return nil }
+        // 卡片切不得：切开的两块卡片各自带着同一段文字，一段话被拆成两次进出场，没有意义。
+        guard clip.card == nil else { return nil }
         let previousOrder = orderedLayerIDs
         // 只看用户显式指定的行：自动排出来的行不该因为切一刀就被写死成显式行，
         // 那样以后新加的同类块就再也并不进来了。头在显式行里，尾就跟着进去；
@@ -259,7 +274,7 @@ extension VideoEdit {
         return saved + all.filter { !existing.contains($0) }
     }
     public var orderedCameraClips: [VideoClip] {
-        let values = cameraClips ?? clips
+        let values = cameraClips ?? mediaOnlyClips
         guard let layerOrder, cameraClips != nil else { return values }
         let ranks = Dictionary(uniqueKeysWithValues: layerOrder.enumerated().map { ($0.element, $0.offset) })
         return values.sorted { (ranks[$0.id] ?? Int.max) < (ranks[$1.id] ?? Int.max) }

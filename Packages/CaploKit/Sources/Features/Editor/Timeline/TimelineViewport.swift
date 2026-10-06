@@ -132,7 +132,9 @@ final class TimelineViewportView: NSView {
         let start: Double
         let duration: Double
         let span: FocusSpan?
-        /// 全屏卡段的定格片段：它是画面轨上的块，但不是用户录的画面。
+        /// 卡片：画面轨上的块，但不是用户录的画面（片头 / 章节 / 片尾）。
+        var card = false
+        /// 旧版留下的定格片段：画面轨上的一段静止画面。
         var hold = false
         /// 遮罩块。`role == nil` 原本只表示聚焦，遮罩与文字也走这条分支，靠这两个标志区分。
         var mask = false
@@ -142,7 +144,11 @@ final class TimelineViewportView: NSView {
     private var blocks: [Block] = []
     private var rows: [[Block]] = []
     private var rowByBlock: [UUID: Int] = [:]
-    private let rowHeight = 42.0
+    /// 行高与块的上下留白：块高 = 行高 − 2 × 留白。2026-10-06 块从 30 点加高到 36 点（行高 42 → 44、留白 6 → 4），
+    /// 标题带下面的波形与胶片条多出地方；行只高 2 点，默认时间线高度下四行仍然放得下。
+    static let rowHeight = 44.0
+    static let blockInset = 4.0
+    private var rowHeight: Double { Self.rowHeight }
     private var totalHeight: Double { Double(rows.count) * rowHeight }
     /// 时间线到内容结尾为止，只留 48 点让末尾的把手好抓；不再在片子后面拖出半屏空白。
     /// 交互期间范围只可向外扩展；裁短时收缩视口会反向改变拖动增量。
@@ -152,9 +158,8 @@ final class TimelineViewportView: NSView {
     private func rowY(_ number: Int) -> Double { 28 + Double(number) * rowHeight - verticalOffset }
     private func rebuildBlocks() {
         var values: [UUID: Block] = [:]
-        // 定格卡段不参与"录制画面 0N"的编号：它不是用户录下来的画面，占一个号只会把后面的都推后。
-        let holdClips = Set(edit.holdCards.compactMap(\.holdClipID))
-        let screenNumbers = Dictionary(uniqueKeysWithValues: edit.clips.filter { !holdClips.contains($0.id) }
+        // 卡片与定格不参与"录制画面 0N"的编号：它们不是用户录下来的画面，占一个号只会把后面的都推后。
+        let screenNumbers = Dictionary(uniqueKeysWithValues: edit.clips.filter { $0.card == nil && $0.holdSource == nil }
             .enumerated().map { ($0.element.id, $0.offset) })
         for role in [TimelineMedia.screen, .camera, .system, .microphone] {
             if role == .camera, !model.entry.document.segments.contains(where: { $0.files[.camera] != nil }) { continue }
@@ -162,13 +167,13 @@ final class TimelineViewportView: NSView {
             if role == .microphone, !model.audioTracks.contains(.microphone) { continue }
             let clips = edit.mediaClips(role), timing = TimelineIndex(clips: clips)
             for (number, clip) in clips.enumerated() {
-                let hold = holdClips.contains(clip.id) || clip.holdSource != nil
+                let hold = clip.holdSource != nil
                 let title = role == .screen ? "录制画面" : role == .camera ? "摄像头" : role == .system ? "系统声音" : "麦克风"
                 let labelNumber = role == .screen ? (screenNumbers[clip.id] ?? number) : number
-                // 卡段块清掉自定义名之后也要回到"定格卡段"，不能变成一句"录制画面 0N"。
-                let defaultTitle = hold ? "定格卡段" : title + String(format: " %02d", labelNumber + 1)
+                // 卡片默认叫它的第一行字；清掉自定义名之后回到这里，不能变成一句"录制画面 0N"。
+                let defaultTitle = clip.card?.defaultTitle ?? (hold ? "定格画面" : title + String(format: " %02d", labelNumber + 1))
                 values[clip.id] = Block(id: clip.id, role: role, title: clip.title ?? defaultTitle, defaultTitle: defaultTitle,
-                                        start: timing.boundaries[number], duration: clip.duration, span: nil, hold: hold)
+                                        start: timing.boundaries[number], duration: clip.duration, span: nil, card: clip.card != nil, hold: hold)
             }
         }
         // 四类投影各算一次、共用一个索引；编号也吃同一份 spans。
@@ -608,18 +613,19 @@ final class TimelineViewportView: NSView {
     }
     private func blockRect(_ block: Block, row: Int) -> CGRect {
         TimelineInteractionGeometry.blockRect(start: block.start, duration: block.duration, scale: scale, offset: offset,
-            header: timeOrigin, y: rowY(row) + 6, height: rowHeight - 12)
+            header: timeOrigin, y: rowY(row) + Self.blockInset, height: rowHeight - 2 * Self.blockInset)
     }
     private func color(for block: Block) -> NSColor {
         if block.caption { return CaploNSColor.caption }
-        // 卡段是文字层插进画面轨的一段，按文字层的颜色画，一眼看得出它不是录下来的画面。
-        if block.text || block.hold { return CaploNSColor.textLayer }
+        // 卡片是插进画面轨的一段文字画面，按文字层的颜色画，一眼看得出它不是录下来的画面。
+        if block.text || block.card || block.hold { return CaploNSColor.textLayer }
         if block.mask { return CaploNSColor.mask }
         switch block.role { case .system, .microphone: return CaploNSColor.audio; case .camera: return CaploNSColor.warning; case .screen: return accent; case nil: return CaploNSColor.zoom }
     }
     /// 轨道类别图标：实心、圆润的符号，轨头里再垫一块类别色的圆角小徽章，与块的颜色对应。
     private func symbol(for block: Block) -> String {
         if block.caption { return "captions.bubble.fill" }
+        if block.card { return "rectangle.inset.filled" }
         if block.hold { return "pause.rectangle.fill" }
         if block.text { return "text.alignleft" }
         if block.mask { return "rectangle.dashed" }
@@ -728,7 +734,7 @@ final class TimelineViewportView: NSView {
             if case .reorder = drag.kind { fromHeader = true } else { fromHeader = false }
             ghostGrabOffset = CGPoint(x: fromHeader ? -32 : min(width - 10, max(10, drag.origin.x - max(timeOrigin, rect.minX))), y: min(26, max(4, drag.origin.y - rect.minY)))
             CATransaction.begin(); CATransaction.setDisableActions(true)
-            dragGhost.bounds = CGRect(x: 0, y: 0, width: width, height: rowHeight - 12)
+            dragGhost.bounds = CGRect(x: 0, y: 0, width: width, height: rowHeight - 2 * Self.blockInset)
             dragGhostTitle.frame = CGRect(x: 10, y: 8, width: width - 20, height: 16)
             dragGhostTitle.string = block.title
             updateGhostColors()
@@ -1029,18 +1035,20 @@ final class TimelineViewportView: NSView {
         let rect = blockRect(block, row: row)
         guard rect.maxX > timeOrigin, rect.minX < bounds.width else { return }
         let color = color(for: block)
-        // 标题在左上角一条 14 点高的标题带里（像 Logic 的片段名）：贴着块在视口里可见部分的左缘，
+        // 标题在左上角（像 Logic 的片段名）：贴着块在视口里可见部分的左缘，
         // 块从视口左边外开始时名字也看得见；块比名字窄就截断。以前标题固定在整块正中，
         // 长块的名字跑到几十秒之外，看不到是哪一块。
-        let titleBand = rect.width >= 72 ? 14.0 : 0
+        var drewWaveform = false
         if block.role == .system || block.role == .microphone,
            let role = block.role, let clip = edit.mediaClips(role).first(where: { $0.id == block.id }) {
             let samples = role == .system ? analysis.system : analysis.microphone
             if !samples.isEmpty {
-                // 上下对称的填充包络，画在标题带下面。每 1 点取这一点覆盖时间段的峰值（金字塔查询，缩得再小也不漏短促的声音）。
+                // 上下对称的填充包络，以整块的垂直中线为轴（标题叠在上面，带一层阴影保证读得清）。
+                // 以前画在标题带下面那一截里，标题带没有底色，看上去整条波形偏下（2026-10-06 用户指出）。
+                // 每 1 点取这一点覆盖时间段的峰值（金字塔查询，缩得再小也不漏短促的声音）。
                 // 幅度按分贝映射（-48 dBFS 以下为 0、0 dBFS 满格）：按线性幅度画的话，-18 dBFS 的讲话只有一两点高，
                 // 整条看起来像一串点线。
-                let top = rect.minY + titleBand + 1, bottom = rect.maxY - 2
+                let top = rect.minY + 3, bottom = rect.maxY - 3
                 let center = (top + bottom) / 2, half = max(1, (bottom - top) / 2)
                 let left = max(timeOrigin, rect.minX + 2), right = min(bounds.width, rect.maxX - 2)
                 var upper: [CGPoint] = []
@@ -1064,6 +1072,7 @@ final class TimelineViewportView: NSView {
                     // 中线：静音处也看得出这是一条声音。
                     color.withAlphaComponent(0.45).setFill()
                     CGRect(x: upper[0].x, y: center - 0.25, width: upper[upper.count - 1].x - upper[0].x, height: 0.5).fill()
+                    drewWaveform = true
                 }
             }
         }
@@ -1074,8 +1083,16 @@ final class TimelineViewportView: NSView {
             let available = max(0, rect.maxX - 8 - visibleLeft)
             // 贴可见左缘，但块快要滚出去时不越过块的右端（名字整段跟着块走）。
             let x = min(visibleLeft, max(rect.minX + 8, rect.maxX - 8 - width))
-            label(block.title, in: CGRect(x: x, y: rect.minY + 2, width: min(width, max(available, rect.maxX - 8 - x)), height: 12),
-                  color: CaploNSColor.textPrimary, size: 10, bold: true)
+            let frame = CGRect(x: x, y: rect.minY + 2, width: min(width, max(available, rect.maxX - 8 - x)), height: 12)
+            if drewWaveform, let context = textDrawingContext {
+                // 标题压在波形上：加一圈柔和的暗影，浅色波形上的白字也读得清。
+                context.saveGState()
+                context.setShadow(offset: .zero, blur: 2.5, color: NSColor.black.withAlphaComponent(0.7).cgColor)
+                label(block.title, in: frame, color: CaploNSColor.textPrimary, size: 10, bold: true)
+                context.restoreGState()
+            } else {
+                label(block.title, in: frame, color: CaploNSColor.textPrimary, size: 10, bold: true)
+            }
         }
         if block.duration * scale < TimelineInteractionGeometry.minimumBlockWidth {
             color.withAlphaComponent(0.6).setFill()
@@ -1122,7 +1139,7 @@ final class TimelineViewportView: NSView {
             return
         }
         // 行内空白处：把播放头挪过来，并取消当前选中——点空白就是"我不要选它了"。
-        // 一行上现在可能同时有画面、卡段、镜头，"点空白就选中这一行的第一块"会选到八竿子打不着的东西。
+        // 一行上现在可能同时有画面、卡片、镜头，"点空白就选中这一行的第一块"会选到八竿子打不着的东西。
         guard let hit else {
             retainedExtent = 0; model.seek(time(point.x)); deselect()
             return
@@ -1162,7 +1179,7 @@ final class TimelineViewportView: NSView {
             ?? hits.min { abs($0.0.start - value) < abs($1.0.start - value) }
     }
     /// 右键菜单按块的种类给各自用得上的操作，先选中被点的块。分组从上到下：
-    /// 分割（只有画面、摄像头、声音与字幕能切）→ 在此处添加（只在录制画面上）→ 复制 / 重命名 → 整轨的静音与独奏 → 同行块 → 删除。
+    /// 分割（只有画面、摄像头、声音与字幕能切）→ 在此处添加与插入卡片（只在录制画面上）→ 复制 / 重命名 → 整轨的静音与独奏 → 同行块 → 删除。
     /// 做不了的操作直接不列，而不是列一排灰掉的项；删除放最后、单独一组。
     /// 行内空白处右键：叠加层行（聚焦 / 遮罩 / 文字）给"在此处添加"，有重叠块时再给"同行块"。
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -1187,8 +1204,8 @@ final class TimelineViewportView: NSView {
         let header = NSMenuItem(title: block.title + " · " + TimelineTime.code(block.start), action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
-        // 分割：右键落点处，以及播放头处；两侧留不下最小时长就禁用。聚焦、遮罩、文字与定格卡段切不得，不列。
-        let splittable = block.caption || (block.role != nil && !block.hold)
+        // 分割：右键落点处，以及播放头处；两侧留不下最小时长就禁用。聚焦、遮罩、文字与卡片切不得，不列。
+        let splittable = block.caption || (block.role != nil && !block.card)
         if splittable {
             menu.addItem(.separator())
             let here = NSMenuItem(title: "在此处分割 · " + TimelineTime.code(clicked), action: #selector(splitBlockHere(_:)), keyEquivalent: "")
@@ -1198,8 +1215,9 @@ final class TimelineViewportView: NSView {
             atPlayhead.target = self; atPlayhead.isEnabled = model.canSplit
             menu.addItem(atPlayhead)
         }
-        // 在录制画面上右键：从落点起加聚焦（2 秒）、遮罩（2 秒）、文字（3 秒），收成一个子菜单。
-        if block.role == .screen, !block.hold {
+        // 在录制画面上右键：从落点起加聚焦（2 秒）、遮罩（2 秒）、文字（3 秒），收成一个子菜单；
+        // 卡片插在这块之前或之后，不切开它（要插在中间用工具栏按钮，在播放头处切开插入）。
+        if block.role == .screen, !block.card {
             menu.addItem(.separator())
             let add = NSMenuItem(title: "在此处添加", action: nil, keyEquivalent: "")
             let submenu = NSMenu(title: "在此处添加")
@@ -1210,13 +1228,16 @@ final class TimelineViewportView: NSView {
             }
             add.submenu = submenu
             menu.addItem(add)
+            for after in [false, true] {
+                let item = NSMenuItem(title: after ? "在此后插入卡片" : "在此前插入卡片", action: #selector(insertCardBeside(_:)), keyEquivalent: "")
+                item.target = self; item.representedObject = block.id; item.tag = after ? 1 : 0
+                menu.addItem(item)
+            }
         }
         menu.addItem(.separator())
-        // 定格卡段的副本会变成普通的一段定格画面，没有意义；其余种类都能就地复制一份接在后面。
-        if !block.hold {
-            let duplicate = NSMenuItem(title: "复制", action: #selector(duplicateBlock(_:)), keyEquivalent: "d")
-            duplicate.target = self; menu.addItem(duplicate)
-        }
+        // 所有种类都能就地复制一份接在后面；卡片的副本插在它后面，后面的内容让开。
+        let duplicate = NSMenuItem(title: "复制", action: #selector(duplicateBlock(_:)), keyEquivalent: "d")
+        duplicate.target = self; menu.addItem(duplicate)
         // 字幕块的名字就是它的台词，改名没有意义；文本在字幕面板里编辑。
         if !block.caption {
             let rename = NSMenuItem(title: "重命名…", action: #selector(renameBlock(_:)), keyEquivalent: "")
@@ -1241,8 +1262,8 @@ final class TimelineViewportView: NSView {
             menu.addItem(rowMembersItem(siblings))
         }
         menu.addItem(.separator())
-        // 删定格卡段会连同它插入的时长一起撤掉、后面的内容前移，标题说清楚。
-        let delete = NSMenuItem(title: block.hold ? "删除卡段" : "删除", action: #selector(deleteBlock(_:)), keyEquivalent: "\u{8}")
+        // 删卡片会连同它占的时长一起撤掉、后面的内容前移，标题说清楚。
+        let delete = NSMenuItem(title: block.card ? "删除卡片" : "删除", action: #selector(deleteBlock(_:)), keyEquivalent: "\u{8}")
         delete.keyEquivalentModifierMask = []; delete.target = self; menu.addItem(delete)
         return menu
     }
@@ -1272,6 +1293,10 @@ final class TimelineViewportView: NSView {
     @objc private func splitBlockHere(_ sender: NSMenuItem) { if let time = sender.representedObject as? Double { model.split(at: time) } }
     @objc private func addFocusHere(_ sender: NSMenuItem) { if let time = sender.representedObject as? Double { model.requestAddFocus(start: time, duration: 2) } }
     @objc private func addMaskHere(_ sender: NSMenuItem) { if let time = sender.representedObject as? Double { model.addMask(start: time, duration: 2) } }
+    @objc private func insertCardBeside(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID else { return }
+        model.insertCard(beside: id, after: sender.tag == 1)
+    }
     @objc private func addTextHere(_ sender: NSMenuItem) { if let time = sender.representedObject as? Double { model.addText(start: time, duration: 3) } }
     /// 在块下方弹出改名框；确定或回车写入模型，留空恢复默认名称。
     @objc private func renameBlock(_ sender: NSMenuItem) {
@@ -1368,7 +1393,8 @@ final class TimelineViewportView: NSView {
     /// 拖录制画面的边裁剪时，画布显示正在拖的那条边的画面：左边是新的第一帧，右边是新的最后一帧。
     /// 片段变化不重建播放项，模型拿这个源时间去定位或离线渲染；以前这里没传，拖边时画布一直停在播放头那一帧。
     private func edgePreviewSource(of block: Block, edge: VideoEdit.FocusDragEdge, in edit: VideoEdit) -> Double? {
-        guard block.role == .screen, edge != .body, let clip = edit.clips.first(where: { $0.id == block.id }) else { return nil }
+        // 卡片没有素材，拖它的边只是改时长，画布照常显示卡片本身。
+        guard block.role == .screen, edge != .body, let clip = edit.clips.first(where: { $0.id == block.id }), clip.card == nil else { return nil }
         if edge == .leading { return clip.sourceStart }
         let frame = 1 / max(24, model.entry.document.frameRate)
         return clip.sourceStart + max(0, clip.playableDuration - frame)
