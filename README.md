@@ -1,10 +1,34 @@
-# Caplo
+<div align="center">
 
-macOS 原生录屏与视频编辑工具。录完即进入编辑器，自动镜头、光标美化、画布与字幕处理后导出成片。
+<img src="App/Assets.xcassets/AppIcon.appiconset/icon_256x256@2x.png" width="128" height="128" alt="Caplo">
 
-[官网](https://caplo.app) · [下载最新版](https://download.caplo.app/Caplo.dmg) · [版本发布](https://github.com/icloudza/caplo/releases) · 需要 macOS 15 及以上，支持 Apple 芯片与 Intel
+<h1>Caplo</h1>
 
-个人与非营利用途免费，禁止商用，详见[许可证](#许可证)。
+<p>macOS 原生录屏与视频编辑工具。录完即进入编辑器，自动镜头、光标美化、画布与字幕处理后导出成片。</p>
+
+<p>
+  <a href="https://github.com/icloudza/caplo/releases/latest"><img src="https://img.shields.io/github/v/release/icloudza/caplo?style=flat-square&label=release&color=065DFC" alt="Release"></a>
+  <img src="https://img.shields.io/badge/macOS-15%2B-111111?style=flat-square&logo=apple&logoColor=white" alt="macOS 15+">
+  <img src="https://img.shields.io/badge/Apple%20Silicon%20%7C%20Intel-555555?style=flat-square" alt="Apple Silicon | Intel">
+  <img src="https://img.shields.io/badge/Swift-6-F05138?style=flat-square&logo=swift&logoColor=white" alt="Swift 6">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-555555?style=flat-square" alt="License"></a>
+</p>
+
+<p>
+  <a href="https://download.caplo.app/Caplo.dmg"><img src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD%E6%9C%80%E6%96%B0%E7%89%88-065DFC?style=for-the-badge&logo=apple&logoColor=white" alt="下载最新版"></a>
+</p>
+
+<p>
+  <a href="https://caplo.app">官网</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/icloudza/caplo/releases">版本发布</a>
+  &nbsp;·&nbsp;
+  <a href="ReleaseNotes">更新说明</a>
+</p>
+
+</div>
+
+<br>
 
 ## 功能
 
