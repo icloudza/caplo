@@ -36,6 +36,7 @@ final class UpdateDriver: NSObject, SPUUserDriver {
         let release = UpdateRelease(item: appcastItem)
         let offer = { [flow] in
             flow.offer(release, downloaded: state.stage != .notDownloaded, userInitiated: state.userInitiated) { choice in
+                UpdateNotifier.shared.withdraw()
                 switch choice {
                 case .install: reply(.install)
                 case .later: reply(.dismiss)
@@ -47,7 +48,14 @@ final class UpdateDriver: NSObject, SPUUserDriver {
             offer()
             UpdateWindow.shared.present(activate: true)
         } else {
-            presentWhenIdle(version: release.version) { offer(); UpdateWindow.shared.present(activate: false) }
+            // 后台发现：发系统通知（带"查看"），点了才拉出更新窗口；没有通知权限时退回直接显示窗口（不抢焦点）。
+            // 录制、导出期间先不发，横幅会被录进画面。
+            presentWhenIdle(version: release.version) {
+                offer()
+                Task { @MainActor in
+                    if await !UpdateNotifier.shared.notify(version: release.version) { UpdateWindow.shared.present(activate: false) }
+                }
+            }
         }
     }
 
@@ -108,6 +116,7 @@ final class UpdateDriver: NSObject, SPUUserDriver {
     }
 
     func dismissUpdateInstallation() {
+        UpdateNotifier.shared.withdraw()
         deferred = nil
         stopIdleWatch()
         flow.reset()

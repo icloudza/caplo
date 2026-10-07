@@ -15,7 +15,7 @@ struct PermissionsView: View {
     var onContinue: () -> Void = {}
     var onLater: () -> Void = {}
 
-    static let size = CGSize(width: 540, height: 420)
+    static let size = CGSize(width: 540, height: 480)
 
     var body: some View {
         VStack(alignment: .leading, spacing: CaploMetrics.Spacing.l) {

@@ -122,6 +122,9 @@ struct PreviewGallery {
         try await render(CaploSettingsView(previewSection: "导出"), name: "settings-export", size: CaploSettingsView.size, scheme: .dark, output: output)
         try await render(CaploSettingsView(previewSection: "快捷键"), name: "settings-shortcuts", size: CaploSettingsView.size, scheme: .dark, output: output)
         try await render(CaploSettingsView(previewSection: "关于"), name: "settings-about", size: CaploSettingsView.size, scheme: .dark, output: output)
+        let dockIcon = NSImage(contentsOf: URL(fileURLWithPath: "App/Assets.xcassets/AppIcon.appiconset/icon_128x128@2x.png", relativeTo: URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../..")))
+        try await render(HStack(spacing: 16) { ForEach([0.0, 0.35, 0.8, 1.0], id: \.self) { DockProgressPreview(fraction: $0, icon: dockIcon).frame(width: 128, height: 128) } }
+            .padding(16).background(Color(white: 0.85)), name: "dock-progress", size: CGSize(width: 608, height: 160), scheme: .light, output: output)
         for state in ["first", "denied", "relaunch", "granted"] {
             try await render(PermissionsPreview(state: state), name: "permissions-\(state)", size: PermissionsPreview.size, scheme: .dark, output: output)
         }

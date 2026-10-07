@@ -103,6 +103,10 @@ final class MenuBarPulse {
 /// 正常退出先完成文件收尾；启动中的退出暂缓，避免异步启动与销毁互相竞争。
 public final class RecordingAppDelegate: NSObject, NSApplicationDelegate {
     private var openedFromFile = false
+    public func applicationWillFinishLaunching(_ notification: Notification) {
+        // 通知的代理要在启动完成前设好：应用被点"有新版本"通知拉起时，这次点击才不会丢。
+        UpdateNotifier.shared.start()
+    }
     public func applicationDidFinishLaunching(_ notification: Notification) {
         // 产品只有深色玻璃一套主题：系统弹窗、菜单与文件面板也统一按深色外观呈现。
         NSApp.appearance = NSAppearance(named: .darkAqua)

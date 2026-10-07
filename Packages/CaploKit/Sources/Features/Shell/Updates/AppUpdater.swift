@@ -51,6 +51,16 @@ public final class AppUpdater: NSObject, SPUUpdaterDelegate {
             MainActor.assumeIsolated { self?.canCheck = updater.canCheckForUpdates }
         }
         syncSettings()
+        // 通知里的"查看"：新版本已在会话里就直接拉出窗口，否则重新检查一次（Sparkle 会把进行中的会话带到前面）。
+        UpdateNotifier.shared.onView = { [weak self] in
+            guard let self else { return }
+            switch self.flow.phase {
+            case .available, .ready, .downloading, .extracting: UpdateWindow.shared.present(activate: true)
+            default: self.checkForUpdates()
+            }
+        }
+        // 每次启动都查一次（之后按 Info.plist 的间隔每小时一次）。Sparkle 建议在启动后立刻调用，不会打乱它的调度。
+        if updater.automaticallyChecksForUpdates { updater.checkForUpdatesInBackground() }
     }
 
     /// 菜单与设置里的"检查更新"。会话进行中（例如推迟着的提醒、正在下载）时 Sparkle 会改为把那个会话带到前面。

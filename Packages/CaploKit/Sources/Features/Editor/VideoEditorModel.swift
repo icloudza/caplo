@@ -1159,12 +1159,14 @@ final class VideoEditorModel {
         exportSettings = remember ? settings : ExportSettings.remembered()
         let snapshot = edit
         exporting = true; progress = 0; error = nil
+        DockProgress.update(0)
         exportTask = Task {
-            defer { exporting = false; exportTask = nil }
+            // Dock 图标上的进度条随导出结束（完成、取消、失败）一起撤掉。
+            defer { exporting = false; exportTask = nil; DockProgress.hide() }
             do {
                 let pointers = await loadPointers()
                 try Task.checkCancellation()
-                try await ProjectMedia.export(url: entry.url, document: entry.document, levels: snapshot.audio, destination: destination, edit: snapshot, settings: settings, pointers: pointers) { self.progress = $0 }
+                try await ProjectMedia.export(url: entry.url, document: entry.document, levels: snapshot.audio, destination: destination, edit: snapshot, settings: settings, pointers: pointers) { self.progress = $0; DockProgress.update($0) }
                 if settings.revealsInFinder, !Task.isCancelled { NSWorkspace.shared.activateFileViewerSelecting([destination]) }
             } catch is CancellationError {} catch { if !Task.isCancelled { self.error = error.localizedDescription } }
         }

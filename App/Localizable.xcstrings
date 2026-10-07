@@ -430,6 +430,17 @@
     "Caplo %@": {
       "extractionState": "manual"
     },
+    "Caplo %@ 已发布": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Caplo %@ Is Available"
+          }
+        }
+      }
+    },
     "Caplo · 录制中": {
       "extractionState": "manual",
       "localizations": {
@@ -3512,13 +3523,13 @@
         }
       }
     },
-    "屏幕录制、麦克风、摄像头、语音识别": {
+    "屏幕录制、麦克风、摄像头、语音识别、通知": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Screen recording, microphone, camera, speech recognition"
+            "value": "Screen recording, microphone, camera, speech recognition, notifications"
           }
         }
       }
@@ -6267,6 +6278,17 @@
         }
       }
     },
+    "有新版本时提醒": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notify you about new versions"
+          }
+        }
+      }
+    },
     "有遮罩的强度低于 %lld，导出前请确认它确实盖住了内容。": {
       "extractionState": "manual",
       "localizations": {
@@ -6850,13 +6872,13 @@
         }
       }
     },
-    "每天检查一次。": {
+    "每小时检查一次。": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Checks once a day."
+            "value": "Checks every hour."
           }
         }
       }
@@ -7275,6 +7297,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Spark"
+          }
+        }
+      }
+    },
+    "点“查看”了解更新内容并安装。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Click View to see what's new and install."
           }
         }
       }
@@ -10025,6 +10058,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "General"
+          }
+        }
+      }
+    },
+    "通知": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notifications"
           }
         }
       }

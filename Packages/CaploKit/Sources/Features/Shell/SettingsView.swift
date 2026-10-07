@@ -165,7 +165,7 @@ public struct CaploSettingsView: View {
     }
 
     private var lastCheckCaption: String {
-        guard let date = updater.lastCheck else { return String(localized: "每天检查一次。") }
+        guard let date = updater.lastCheck else { return String(localized: "每小时检查一次。") }
         return String(localized: "上次检查：") + date.formatted(.relative(presentation: .named).locale(AppLocale.current))
     }
 
@@ -368,7 +368,7 @@ public struct CaploSettingsView: View {
                 }
             }
             SettingsRow(String(localized: "构建")) { Text(Self.build).font(CaploFont.value).foregroundStyle(CaploColor.textSecondary) }
-            SettingsRow(String(localized: "权限"), caption: String(localized: "屏幕录制、麦克风、摄像头、语音识别")) {
+            SettingsRow(String(localized: "权限"), caption: String(localized: "屏幕录制、麦克风、摄像头、语音识别、通知")) {
                 Button("查看") { PermissionsWindow.shared.show(.standalone) }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
             }
             SettingsRow(String(localized: "系统要求")) { Text("macOS 15 及以上").font(CaploFont.value).foregroundStyle(CaploColor.textSecondary) }
