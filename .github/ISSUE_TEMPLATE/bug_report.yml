@@ -1,0 +1,59 @@
+name: 缺陷反馈 / Bug Report
+description: 报告崩溃、录制或导出异常、界面错误等问题
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 感谢反馈！提交前请先搜索是否已有相同的问题。信息越具体，修得越快。
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述 / Description
+      description: 发生了什么，和你预期的有什么不同。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤 / Steps to Reproduce
+      placeholder: |
+        1. 选择自定义区域录制
+        2. 打开麦克风后按 REC
+        3. 停止录制，编辑器里……
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Caplo 版本 / Version
+      description: 设置 › 关于 里可以看到。
+      placeholder: "0.1.3"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS 版本 / macOS Version
+      placeholder: "macOS 26.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: chip
+    attributes:
+      label: 芯片 / Chip
+      options:
+        - Apple 芯片 / Apple Silicon
+        - Intel
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / Logs
+      description: 可选。打开"控制台"应用，搜索"Caplo："，把出问题前后的几行贴在这里。
+      render: text
+  - type: textarea
+    id: media
+    attributes:
+      label: 截图或录屏 / Screenshots
+      description: 可选。直接拖进来即可。

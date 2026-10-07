@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 官网 / Website
+    url: https://caplo.app
+    about: 下载最新版、查看功能介绍
+  - name: 商业授权 / Commercial License
+    url: mailto:cloudza@vip.qq.com
+    about: 在公司或商业产品中使用 Caplo，请邮件联系

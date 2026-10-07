@@ -24,6 +24,8 @@
   <a href="https://github.com/icloudza/caplo/releases">版本发布</a>
   &nbsp;·&nbsp;
   <a href="ReleaseNotes">更新说明</a>
+  &nbsp;·&nbsp;
+  <a href="CONTRIBUTING.md">参与贡献</a>
 </p>
 
 </div>
@@ -120,6 +122,16 @@ ReleaseNotes/             各版本更新说明
 ```
 
 修改 `Shaders/CaploKernels.metal` 后执行 `zsh Scripts/build-kernels.sh` 重新生成 `CaploKernels.metallib`；`LiquidGlass.swift` 中的 CIKL 兜底实现需同步修改。
+
+## 参与贡献
+
+欢迎提交 PR！缺陷修复、体验打磨、翻译校对和文档补充都很有价值。
+
+- 发现问题或有想法，先开一个 [Issue](https://github.com/icloudza/caplo/issues/new/choose)，按模板填写。
+- 新功能或较大的改动请先在 Issue 里讨论，确认方向后再动手。
+- 提交前运行 `Scripts/check.sh`，改了界面文字再运行 `Scripts/localize.sh`。
+
+开发约定与贡献授权见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 许可证
 
