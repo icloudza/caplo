@@ -11,7 +11,7 @@ import ServiceManagement
 enum AppPresence {
     static let hidesDockIconKey = "app.hidesDockIcon"
     /// 需要 Dock 与 ⌘Tab 的窗口。
-    static let managedWindows: Set<String> = ["caplo-video-editor", "caplo-project-library", "caplo-settings"]
+    static let managedWindows: Set<String> = ["caplo-video-editor", "caplo-project-library", "caplo-settings", "caplo-permissions"]
 
     static var hidesDockIcon: Bool {
         get { UserDefaults.standard.bool(forKey: hidesDockIconKey) }
@@ -52,13 +52,22 @@ enum AppPresence {
 
     enum LoginItemState: Equatable { case off, on, needsApproval, unavailable }
 
+    /// 未注册时系统可能报 `.notFound` 而不是 `.notRegistered`（实测：从 DMG 拖进"应用程序"的发布包首次打开即如此），
+    /// 这时照样可以注册。只有应用确实不在"应用程序"文件夹（例如直接从 DMG 或下载目录运行）才判定为不可用。
     static var loginItemState: LoginItemState {
         switch SMAppService.mainApp.status {
         case .enabled: .on
         case .requiresApproval: .needsApproval
-        case .notRegistered: .off
-        default: .unavailable
+        case .notRegistered, .notFound: isInApplicationsFolder ? .off : .unavailable
+        @unknown default: isInApplicationsFolder ? .off : .unavailable
         }
+    }
+
+    /// 应用位于 /Applications 或 ~/Applications（含子文件夹）。
+    static var isInApplicationsFolder: Bool {
+        let path = Bundle.main.bundleURL.resolvingSymlinksInPath().path
+        let user = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path
+        return path.hasPrefix("/Applications/") || path.hasPrefix(user + "/")
     }
 
     /// 打开或关闭登录时启动；失败返回给用户看的原因。

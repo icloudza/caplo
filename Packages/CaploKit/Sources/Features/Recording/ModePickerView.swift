@@ -84,10 +84,22 @@ public struct ModePickerView: View {
 
     private func pick(_ mode: RecordingMode) {
         guard !busy else { return }
+        // 屏幕录制未授权：打开权限窗口并高亮这一项，代替系统询问框与报错文字。
+        PermissionCenter.shared.refresh()
+        if PermissionsWindow.enforced, !PermissionCenter.shared.screenGranted {
+            PermissionsWindow.shared.show(.standalone, focus: .screen); return
+        }
         busy = true
         Task {
             defer { busy = false }
             await recorder.refreshSources()
+            // 预检说已授权、实际仍读不到（授权后还没重新打开应用）：同样交给权限窗口，那里有"重新打开"。
+            if recorder.errorMessage != nil, PermissionsWindow.enforced {
+                recorder.dismissError()
+                PermissionCenter.shared.markScreenNeedsRelaunch()
+                PermissionsWindow.shared.show(.standalone, focus: .screen)
+                return
+            }
             guard recorder.errorMessage == nil else { return }
             switch mode {
             case .display:

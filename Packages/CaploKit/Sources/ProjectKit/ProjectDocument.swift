@@ -84,9 +84,11 @@ public final class ProjectLease: @unchecked Sendable {
 /// 素材先完成写入，片段日志再原子提交，最后更新索引；恢复时以日志补齐索引。
 /// 写入方必须持有 ProjectLease，读取方只能看见已提交的片段。
 public enum ProjectStorage {
+    /// 调试版（包标识以 .dev 结尾）用单独的 "Caplo Dev" 目录：开发中的格式迁移不会改坏正式版的工程。
     public static var libraryURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Caplo/Projects", isDirectory: true)
+        let folder = Bundle.main.bundleIdentifier?.hasSuffix(".dev") == true ? "Caplo Dev" : "Caplo"
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("\(folder)/Projects", isDirectory: true)
     }
 
     public static func create(in root: URL = libraryURL, name: String) throws -> URL {

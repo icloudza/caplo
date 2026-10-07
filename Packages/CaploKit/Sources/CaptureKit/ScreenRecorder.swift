@@ -89,6 +89,9 @@ public final class ScreenRecorder {
     private var exclusionWatcher: Task<Void, Never>?
     private init() {}
 
+    /// 错误已由界面另行处理（例如改为打开权限窗口）时清掉提示条。
+    public func dismissError() { errorMessage = nil }
+
     /// 仅由用户点击触发枚举，打开窗口或生成界面预览不会访问屏幕。
     public func refreshSources() async {
         guard !isBusy, !loadingSources else { return }

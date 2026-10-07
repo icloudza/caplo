@@ -148,6 +148,13 @@ public final class RecordBarModel {
         // 所选设备不在线就不带这路输入，而不是报错拦住录制。
         if options.microphone, !Self.microphoneEnabled(defaults: defaults) { options.microphone = false }
         if options.camera, !Self.cameraEnabled(defaults: defaults) { options.camera = false }
+        // 打开着麦克风 / 摄像头但权限被拒过：系统不会再弹询问框，直接带用户去权限窗口里那一行。
+        if PermissionsWindow.enforced {
+            let center = PermissionCenter.shared
+            center.refresh()
+            if options.microphone, center.status(.microphone) == .denied { PermissionsWindow.shared.show(.standalone, focus: .microphone); return }
+            if options.camera, center.status(.camera) == .denied { PermissionsWindow.shared.show(.standalone, focus: .camera); return }
+        }
         guard StudioWindows.prepareForRecording() else { return }
         localError = nil
         // 试听与预览不停：录制器直接借用正在跑的麦克风采集与摄像头会话（只加写盘出口），设备从打开到录完一直亮着。

@@ -122,6 +122,9 @@ struct PreviewGallery {
         try await render(CaploSettingsView(previewSection: "导出"), name: "settings-export", size: CaploSettingsView.size, scheme: .dark, output: output)
         try await render(CaploSettingsView(previewSection: "快捷键"), name: "settings-shortcuts", size: CaploSettingsView.size, scheme: .dark, output: output)
         try await render(CaploSettingsView(previewSection: "关于"), name: "settings-about", size: CaploSettingsView.size, scheme: .dark, output: output)
+        for state in ["first", "denied", "relaunch", "granted"] {
+            try await render(PermissionsPreview(state: state), name: "permissions-\(state)", size: PermissionsPreview.size, scheme: .dark, output: output)
+        }
         for state in ["available", "downloading", "ready", "checking", "latest", "failed"] {
             try await render(UpdateWindowPreview(state: state), name: "update-\(state)", size: UpdateWindowPreview.size(for: state), scheme: .dark, output: output)
         }

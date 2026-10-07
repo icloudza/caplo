@@ -68,12 +68,17 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(CAPLO_APP_IDENTIFIER)
         PRODUCT_NAME: $(CAPLO_APP_NAME)
         # 发布时由流水线按标签覆盖：vX.Y.Z → MARKETING_VERSION=X.Y.Z、CURRENT_PROJECT_VERSION=X*1000000+Y*1000+Z。
-        MARKETING_VERSION: 0.1.0
+        MARKETING_VERSION: 0.1.1
         CURRENT_PROJECT_VERSION: 1
         CAPLO_UPDATE_FEED_URL: ""
         CAPLO_UPDATE_PUBLIC_KEY: ""
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.video
         INFOPLIST_KEY_CFBundleDisplayName: Caplo
+      # 调试版与正式版隔离：独立的包标识与名称，权限、设置、登录项和工程库互不影响（工程库见 ProjectStorage.libraryURL）。
+      configs:
+        Debug:
+          CAPLO_APP_IDENTIFIER: com.caplo.app.dev
+          CAPLO_APP_NAME: Caplo Dev
     scheme:
       gatherCoverageData: true

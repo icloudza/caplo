@@ -725,7 +725,10 @@ final class VideoEditorModel {
             case .ready: break
             case .needsPermission:
                 guard await SpeechTranscriber.requestPermission() else {
-                    self?.error = TranscriptionError.denied.localizedDescription; return
+                    // 拒绝过的语音识别只能到系统设置里开：打开权限窗口并高亮这一项。
+                    if PermissionsWindow.enforced { PermissionCenter.shared.refresh(); PermissionsWindow.shared.show(.standalone, focus: .speech) }
+                    else { self?.error = TranscriptionError.denied.localizedDescription }
+                    return
                 }
             case .unavailable(let reason):
                 self?.error = reason; return

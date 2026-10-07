@@ -180,7 +180,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(CAPLO_APP_IDENTIFIER)";
 				PRODUCT_NAME = "$(CAPLO_APP_NAME)";
 				SDKROOT = macosx;
@@ -192,8 +192,8 @@
 			baseConfigurationReference = C48ECE4C20E3E6B1D0355F03 /* Debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CAPLO_APP_IDENTIFIER = com.caplo.app;
-				CAPLO_APP_NAME = Caplo;
+				CAPLO_APP_IDENTIFIER = com.caplo.app.dev;
+				CAPLO_APP_NAME = "Caplo Dev";
 				CAPLO_UPDATE_FEED_URL = "";
 				CAPLO_UPDATE_PUBLIC_KEY = "";
 				CODE_SIGN_ENTITLEMENTS = App/Caplo.entitlements;
@@ -207,7 +207,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(CAPLO_APP_IDENTIFIER)";
 				PRODUCT_NAME = "$(CAPLO_APP_NAME)";
 				SDKROOT = macosx;

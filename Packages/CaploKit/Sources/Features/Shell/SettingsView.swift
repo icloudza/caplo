@@ -337,6 +337,9 @@ public struct CaploSettingsView: View {
                 }
             }
             SettingsRow("构建") { Text(Self.build).font(CaploFont.value).foregroundStyle(CaploColor.textSecondary) }
+            SettingsRow("权限", caption: "屏幕录制、麦克风、摄像头、语音识别") {
+                Button("查看") { PermissionsWindow.shared.show(.standalone) }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
+            }
             SettingsRow("系统要求") { Text("macOS 15 及以上").font(CaploFont.value).foregroundStyle(CaploColor.textSecondary) }
         }
     }

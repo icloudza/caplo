@@ -46,6 +46,7 @@ public enum WindowSmokeTest {
             ("设置", { StudioWindows.showSettings() }),
             // 更新窗口：大窗（新版本说明）→ 小窗（已是最新），走一遍尺寸切换。
             ("软件更新", { UpdateWindow.showSmokeSample() }),
+            ("权限", { PermissionsWindow.shared.show(.standalone, focus: .microphone) }),
             ("项目中心", { ProjectLibraryWindow.shared.show() }),
             ("录制条", { StudioWindows.showRecordBar(.preview()) }),
             ("摄像头画中画", { CameraPreviewSession.show(feed: CameraFeed(queue: DispatchQueue(label: "smoke.camera")), on: NSScreen.main ?? NSScreen.screens[0]) }),

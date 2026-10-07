@@ -119,7 +119,12 @@ public final class RecordingAppDelegate: NSObject, NSApplicationDelegate {
         // 文件打开事件可能紧随启动到达；延后一轮，避免直接打开工程时闪现准备窗口。
         Task { @MainActor in
             await Task.yield()
-            if !quietLaunch, !openedFromFile, !VideoEditorWindow.shared.opening, !VideoEditorWindow.shared.isVisible { StudioWindows.showRecorder() }
+            guard !quietLaunch, !openedFromFile, !VideoEditorWindow.shared.opening, !VideoEditorWindow.shared.isVisible else { return }
+            // 屏幕录制还没授权：先出权限窗口，关掉后再出录制方式条（不再让系统询问框和"无法读取来源"的报错直接冒出来）。
+            PermissionCenter.shared.refresh()
+            // 引导没走完（包括系统为屏幕录制授权重启应用之后）也继续显示，让用户接着授权麦克风、摄像头。
+            if PermissionsWindow.enforced, !PermissionCenter.shared.screenGranted || !PermissionCenter.onboardingDone { PermissionsWindow.shared.show(.launch) }
+            else { StudioWindows.showRecorder() }
         }
     }
 
