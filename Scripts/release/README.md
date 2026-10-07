@@ -5,8 +5,8 @@
 1. 按标签换算版本号与构建号（`version.sh`）
 2. 归档、以 Developer ID 导出、重签 Sparkle 组件（`build.sh`）
 3. 公证并装订应用，用 dmgbuild 打包 DMG（背景、图标布局与卷图标见 `dmg/`），再公证并装订 DMG
-4. 创建 GitHub Release，附上 DMG 与更新说明（`notes.sh`）
-5. 签名安装包，生成并签名 `appcast.xml` 与 `latest.json`，上传到 Cloudflare R2（`publish.sh`）
+4. 签名安装包，生成并签名 `appcast.xml` 与 `latest.json`，上传到 Cloudflare R2（`publish.sh`）
+5. 创建 GitHub Release，附上 DMG 与更新说明（`notes.sh`）；GitHub 接口出错时自动重试，最终失败也不影响已上传的版本
 
 应用内更新使用 [Sparkle](https://sparkle-project.org)：每天检查一次 `appcast.xml`，在录制或导出期间不弹窗。安装包和 appcast 都经过 EdDSA 签名校验。
 

@@ -1,5 +1,5 @@
 # 发布 Caplo：推送 vX.Y.Z 标签即触发（预发布用 vX.Y.Z-beta.N / vX.Y.Z-rc.N）。
-# 流程：Developer ID 签名 → 公证 → DMG → GitHub Release → 上传 Cloudflare R2（官网下载与应用内在线更新）。
+# 流程：Developer ID 签名 → 公证 → DMG → 上传 Cloudflare R2（官网下载与应用内在线更新）→ GitHub Release。
 # 需要的 Secrets / Variables 见 Scripts/release/README.md。
 name: Release
 
@@ -68,19 +68,6 @@ jobs:
       - name: 更新说明
         run: Scripts/release/notes.sh "$TAG" > "$RUNNER_TEMP/notes.md" && cat "$RUNNER_TEMP/notes.md"
 
-      - name: GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          dmg="build/release/Caplo-$VERSION.dmg"
-          if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" "$dmg" --clobber
-          else
-            flags=()
-            [ "$PRERELEASE" = true ] && flags+=(--prerelease)
-            gh release create "$TAG" "$dmg" --verify-tag --title "Caplo $VERSION" --notes-file "$RUNNER_TEMP/notes.md" "${flags[@]}"
-          fi
-
       - name: 上传 Cloudflare R2
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
@@ -92,6 +79,31 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ vars.R2_BUCKET }}
         run: Scripts/release/publish.sh "$TAG"
+
+      # 放在 R2 之后：GitHub 偶发 5xx 时用户照样能从官网与应用内更新拿到新版本，Release 页可以之后重跑补上。
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dmg="build/release/Caplo-$VERSION.dmg"
+          publish() {
+            if gh release view "$TAG" > /dev/null 2>&1; then
+              gh release upload "$TAG" "$dmg" --clobber
+            else
+              flags=()
+              [ "$PRERELEASE" = true ] && flags+=(--prerelease)
+              gh release create "$TAG" "$dmg" --verify-tag --title "Caplo $VERSION" --notes-file "$RUNNER_TEMP/notes.md" "${flags[@]}"
+            fi
+          }
+          # GitHub 接口偶尔返回 500：间隔逐次加长重试，总共约 10 分钟。
+          for wait in 30 60 120 180 240 0; do
+            publish && exit 0
+            [ "$wait" -eq 0 ] && break
+            echo "创建 Release 失败，${wait} 秒后重试"
+            sleep "$wait"
+          done
+          echo "::error::多次重试仍无法创建 GitHub Release；安装包已上传 R2，用户不受影响，可稍后重跑本任务补上。"
+          exit 1
 
       - name: 清理钥匙串与密钥
         if: always()
