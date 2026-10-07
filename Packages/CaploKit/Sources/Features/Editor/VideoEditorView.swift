@@ -9,16 +9,16 @@ import RenderKit
 /// 项目图标打开独立管理窗口，编辑会话继续保留；分组切换只换面板内容，不重建画布与时间线。
 struct VideoEditorView: View {
     static let panels: [RailItem] = [
-        RailItem(id: "布局", title: "布局", symbol: "rectangle.on.rectangle", shortcut: "1"),
-        RailItem(id: "光标", title: "光标", symbol: "cursorarrow", shortcut: "2"),
-        RailItem(id: "聚焦", title: "聚焦", symbol: "viewfinder", shortcut: "3"),
-        RailItem(id: "人像", title: "人像", symbol: "person.crop.square", shortcut: "4"),
-        RailItem(id: "音频", title: "音频", symbol: "waveform", shortcut: "5"),
-        RailItem(id: "裁剪", title: "裁剪", symbol: "crop", shortcut: "6"),
+        RailItem(id: "布局", title: String(localized: "布局"), symbol: "rectangle.on.rectangle", shortcut: "1"),
+        RailItem(id: "光标", title: String(localized: "光标"), symbol: "cursorarrow", shortcut: "2"),
+        RailItem(id: "聚焦", title: String(localized: "聚焦"), symbol: "viewfinder", shortcut: "3"),
+        RailItem(id: "人像", title: String(localized: "人像"), symbol: "person.crop.square", shortcut: "4"),
+        RailItem(id: "音频", title: String(localized: "音频"), symbol: "waveform", shortcut: "5"),
+        RailItem(id: "裁剪", title: String(localized: "裁剪"), symbol: "crop", shortcut: "6"),
         // "片段设置"已删除（2026-10-06）：声音块的单块音量并进"音频"，片段级光标隐藏由"光标"面板的全局开关代替。
-        RailItem(id: "遮罩", title: "遮罩", symbol: "rectangle.dashed", shortcut: "7"),
-        RailItem(id: "文字", title: "文字", symbol: "text.alignleft", shortcut: "8"),
-        RailItem(id: "字幕", title: "字幕", symbol: "captions.bubble", shortcut: "9"),
+        RailItem(id: "遮罩", title: String(localized: "遮罩"), symbol: "rectangle.dashed", shortcut: "7"),
+        RailItem(id: "文字", title: String(localized: "文字"), symbol: "text.alignleft", shortcut: "8"),
+        RailItem(id: "字幕", title: String(localized: "字幕"), symbol: "captions.bubble", shortcut: "9"),
     ]
 
     @State private var model: VideoEditorModel
@@ -41,7 +41,7 @@ struct VideoEditorView: View {
                     Image(systemName: "exclamationmark.circle").foregroundStyle(CaploColor.warning)
                     Text(error).font(CaploFont.caption).textSelection(.enabled)
                     Spacer()
-                    if model.saveStatus == "保存失败" { Button("重试保存") { model.retrySave() }.buttonStyle(StudioButtonStyle(.secondary, size: .small)) }
+                    if model.saveFailed { Button("重试保存") { model.retrySave() }.buttonStyle(StudioButtonStyle(.secondary, size: .small)) }
                     Button("关闭提示") { model.error = nil }.buttonStyle(StudioButtonStyle(.quiet, size: .small))
                 }
                 .padding(.horizontal, CaploMetrics.Spacing.l).frame(height: 32)
@@ -87,9 +87,9 @@ struct VideoEditorView: View {
         .sheet(isPresented: Binding(get: { model.showingExport }, set: { model.showingExport = $0 })) { ExportSheet(model: model) }
         // 要添加的时间段已经有镜头：问一下，可以勾"不再提示"。
         .sheet(item: Binding(get: { model.pendingFocus }, set: { if $0 == nil { model.cancelPendingFocus() } })) { pending in
-            StudioConfirmSheet(title: "这段时间已有镜头",
-                               message: "\(TimelineTime.code(pending.start)) 到 \(TimelineTime.code(pending.start + pending.duration)) 之间已经有一个镜头。再添加一个的话，两个镜头会叠在一起，后添加的在上。",
-                               confirmTitle: "仍然添加", suppression: $suppressOverlapPrompt,
+            StudioConfirmSheet(title: String(localized: "这段时间已有镜头"),
+                               message: String(localized: "\(TimelineTime.code(pending.start)) 到 \(TimelineTime.code(pending.start + pending.duration)) 之间已经有一个镜头。再添加一个的话，两个镜头会叠在一起，后添加的在上。"),
+                               confirmTitle: String(localized: "仍然添加"), suppression: $suppressOverlapPrompt,
                                confirm: { model.confirmPendingFocus(suppressFurtherPrompts: suppressOverlapPrompt) },
                                cancel: { model.cancelPendingFocus() })
         }
@@ -107,15 +107,15 @@ struct VideoEditorView: View {
 
     private var panelTitle: String {
         switch tab {
-        case "布局": "画面布局"
-        case "光标": "光标与点击"
-        case "聚焦": "镜头聚焦"
-        case "人像": "摄像头画中画"
-        case "音频": "声音混合"
-        case "裁剪": "裁剪画面"
-        case "遮罩": "画面遮罩"
-        case "文字": "文字层"
-        case "字幕": "字幕"
+        case "布局": String(localized: "画面布局")
+        case "光标": String(localized: "光标与点击")
+        case "聚焦": String(localized: "镜头聚焦")
+        case "人像": String(localized: "摄像头画中画")
+        case "音频": String(localized: "声音混合")
+        case "裁剪": String(localized: "裁剪画面")
+        case "遮罩": String(localized: "画面遮罩")
+        case "文字": String(localized: "文字层")
+        case "字幕": String(localized: "字幕")
         default: tab
         }
     }

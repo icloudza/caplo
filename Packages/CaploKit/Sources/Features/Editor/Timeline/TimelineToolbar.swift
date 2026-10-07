@@ -14,18 +14,18 @@ struct TimelineToolbar: View {
             // 工具栏只放图标，名称与快捷键都在悬停提示里。
             Button { model.split() } label: { SplitGlyph() }
                 .buttonStyle(StudioIconButtonStyle())
-                .shortcut(.split).hoverTip(model.canSplit ? "分割 \(shortcuts.display(.split))" : "两侧需各留 0.25 秒")
+                .shortcut(.split).hoverTip(model.canSplit ? String(localized: "分割 \(shortcuts.display(.split))") : String(localized: "两侧需各留 0.25 秒"))
                 .accessibilityLabel("分割")
                 .disabled(!model.canSplit)
             Button { model.deleteSelection() } label: { Image(systemName: "trash") }
-                .buttonStyle(StudioIconButtonStyle()).hoverTip("删除 ⌫").accessibilityLabel("删除选中")
+                .buttonStyle(StudioIconButtonStyle()).hoverTip(String(localized: "删除 ⌫")).accessibilityLabel("删除选中")
                 .disabled(!model.ready || (model.selectedClip == nil && model.selectedFocus == nil && model.selectedMediaID == nil))
             Button(action: addFocus) { Image(systemName: "plus.viewfinder") }
-                .buttonStyle(StudioIconButtonStyle()).hoverTip("添加聚焦").accessibilityLabel("添加聚焦")
+                .buttonStyle(StudioIconButtonStyle()).hoverTip(String(localized: "添加聚焦")).accessibilityLabel("添加聚焦")
                 .disabled(!model.ready || model.edit.clips.isEmpty)
             // 卡片：片头 / 章节 / 片尾。插在播放头处，落在画面中间会在那里切开，后面的内容往后挪。
             Button { model.insertCard() } label: { Image(systemName: "rectangle.badge.plus") }
-                .buttonStyle(StudioIconButtonStyle()).hoverTip("插入卡片")
+                .buttonStyle(StudioIconButtonStyle()).hoverTip(String(localized: "插入卡片"))
                 .accessibilityLabel("插入卡片")
                 .disabled(!model.ready)
             toolbarDivider
@@ -35,14 +35,14 @@ struct TimelineToolbar: View {
             toolbarDivider
             Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }
                 .buttonStyle(StudioIconButtonStyle()).disabled(!model.history.canUndo)
-                .hoverTip("撤销 \(shortcuts.display(.undo))").accessibilityLabel("撤销").shortcut(.undo)
+                .hoverTip(String(localized: "撤销 \(shortcuts.display(.undo))")).accessibilityLabel("撤销").shortcut(.undo)
             Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }
                 .buttonStyle(StudioIconButtonStyle()).disabled(!model.history.canRedo)
-                .hoverTip("重做 \(shortcuts.display(.redo))").accessibilityLabel("重做").shortcut(.redo)
+                .hoverTip(String(localized: "重做 \(shortcuts.display(.redo))")).accessibilityLabel("重做").shortcut(.redo)
             Spacer(minLength: CaploMetrics.Spacing.s)
             Button { model.togglePlayback() } label: { Image(systemName: model.playing ? "pause.fill" : "play.fill") }
                 .buttonStyle(StudioIconButtonStyle()).shortcut(.playPause)
-                .hoverTip("\(model.playing ? "暂停" : "播放") \(shortcuts.display(.playPause))").accessibilityLabel(model.playing ? "暂停" : "播放")
+                .hoverTip(model.playing ? String(localized: "暂停 \(shortcuts.display(.playPause))") : String(localized: "播放 \(shortcuts.display(.playPause))")).accessibilityLabel(model.playing ? "暂停" : "播放")
                 .disabled(model.loading || (model.edit.duration <= 0) || !model.ready)
             HStack(spacing: 4) {
                 Text(TimelineTime.code(model.position)).foregroundStyle(CaploColor.textPrimary)
@@ -52,17 +52,17 @@ struct TimelineToolbar: View {
             Spacer(minLength: CaploMetrics.Spacing.s)
             Button { viewport.snapping.toggle() } label: { Image(systemName: "arrow.right.and.line.vertical.and.arrow.left") }
                 .buttonStyle(StudioIconButtonStyle(active: viewport.snapping))
-                .hoverTip("吸附 · ⌥ 临时关闭").accessibilityLabel("边界吸附").accessibilityValue(viewport.snapping ? "开" : "关")
+                .hoverTip(String(localized: "吸附 · ⌥ 临时关闭")).accessibilityLabel("边界吸附").accessibilityValue(viewport.snapping ? "开" : "关")
             toolbarDivider
             // 缩放：图标 + 细滑条（参照 Logic），连续拖动；倍率是 2 的指数，线性拖动即等比缩放。
             // 下限 = 适合窗口的那一档，不能缩到整条时间线只占一小截；双击滑条回到适合窗口。
             let minimumZoom = min(viewport.minimumZoom(for: model.edit.duration), 4)
-            ThinSlider("时间线缩放", systemImage: "arrow.left.and.right", value: Binding(get: { viewport.zoom }, set: { viewport.zoom = $0 }),
+            ThinSlider(String(localized: "时间线缩放"), systemImage: "arrow.left.and.right", value: Binding(get: { viewport.zoom }, set: { viewport.zoom = $0 }),
                        in: minimumZoom...max(4, minimumZoom + 0.5), onReset: { viewport.fit(duration: model.edit.duration) })
                 .frame(width: 104)
-                .hoverTip("缩放")
+                .hoverTip(String(localized: "缩放"))
             Button { viewport.fit(duration: model.edit.duration) } label: { Image(systemName: "arrow.left.and.right.square") }
-                .buttonStyle(StudioIconButtonStyle()).hoverTip("适合窗口").accessibilityLabel("适合窗口")
+                .buttonStyle(StudioIconButtonStyle()).hoverTip(String(localized: "适合窗口")).accessibilityLabel("适合窗口")
         }
         .padding(.horizontal, CaploMetrics.Spacing.m)
         .frame(height: CaploMetrics.toolbarHeight)
@@ -76,14 +76,14 @@ struct TimelineToolbar: View {
         let track = selectedAudioTrack
         let available = track.map { model.audioTracks.contains($0) } ?? false
         let active = track.map { (solo ? model.edit.audio.solo : model.edit.audio.muted).contains($0) } ?? false
-        let name = track == .system ? "系统声音" : track == .microphone ? "麦克风" : nil
+        let name = track == .system ? String(localized: "系统声音") : track == .microphone ? String(localized: "麦克风") : nil
         return Button { if let track { solo ? model.toggleSolo(track) : model.toggleMute(track) } } label: {
             Text(solo ? "S" : "M").font(.system(size: 11, weight: .semibold, design: .monospaced))
         }
         .buttonStyle(StudioIconButtonStyle(size: .small, active: active))
         .disabled(!available || !model.ready)
-        .hoverTip(name.map { (solo ? "仅播放此轨 · " : "静音 · ") + $0 } ?? "先选中音频块")
-        .accessibilityLabel((name ?? "音频") + (solo ? "仅播放此轨" : "静音"))
+        .hoverTip(name.map { (solo ? String(localized: "仅播放此轨 · ") : String(localized: "静音 · ")) + $0 } ?? String(localized: "先选中音频块"))
+        .accessibilityLabel((name ?? String(localized: "音频")) + (solo ? String(localized: "仅播放此轨") : String(localized: "静音")))
         .accessibilityValue(active ? "开" : "关")
     }
 

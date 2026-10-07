@@ -1,3 +1,4 @@
+import EditingCore
 import AppKit
 import Observation
 import ScreenCaptureKit
@@ -102,13 +103,13 @@ public final class ScreenRecorder {
             let newContent = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
             content = newContent
             let displays = newContent.displays.enumerated().map { index, display in
-                CaptureSource(id: "display-\(display.displayID)", title: "显示器 \(index + 1) · \(display.width) × \(display.height)", kind: .display, displayID: display.displayID, frame: display.frame)
+                CaptureSource(id: "display-\(display.displayID)", title: String(localized: "显示器 \(index + 1) · \(display.width) × \(display.height)"), kind: .display, displayID: display.displayID, frame: display.frame)
             }
             let windows = newContent.windows.filter {
                 $0.owningApplication?.processID != ProcessInfo.processInfo.processIdentifier &&
                 $0.windowLayer == 0 && $0.frame.width > 0 && $0.frame.height > 0 && !($0.title ?? "").isEmpty
             }.map {
-                CaptureSource(id: "window-\($0.windowID)", title: "\($0.owningApplication?.applicationName ?? "应用") — \($0.title ?? "窗口")", kind: .window,
+                CaptureSource(id: "window-\($0.windowID)", title: "\($0.owningApplication?.applicationName ?? String(localized: "应用")) — \($0.title ?? String(localized: "窗口"))", kind: .window,
                               frame: $0.frame, applicationName: $0.owningApplication?.applicationName, windowTitle: $0.title,
                               processID: $0.owningApplication?.processID, windowID: $0.windowID)
             }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
@@ -116,16 +117,16 @@ public final class ScreenRecorder {
         } catch {
             content = nil
             sources = []
-            errorMessage = "无法读取录制来源。请在系统设置中允许 Caplo 录制屏幕，必要时退出并重新打开应用。\n\(error.localizedDescription)"
+            errorMessage = String(localized: "无法读取录制来源。请在系统设置中允许 Caplo 录制屏幕，必要时退出并重新打开应用。\n\(error.localizedDescription)")
         }
     }
 
 
     public func start(sourceID: String, options: RecordingOptions) async {
         guard !isBusy else { return }
-        guard !loadingSources else { errorMessage = "录制来源还在读取，请稍后再按一次 REC。"; return }
+        guard !loadingSources else { errorMessage = String(localized: "录制来源还在读取，请稍后再按一次 REC。"); return }
         guard var content, let source = sources.first(where: { $0.id == sourceID }) else {
-            errorMessage = "请先选择录制来源。"; return
+            errorMessage = String(localized: "请先选择录制来源。"); return
         }
         phase = .starting
         errorMessage = nil; completedURL = nil; projectURL = nil
@@ -136,12 +137,12 @@ public final class ScreenRecorder {
             if options.microphone {
                 let allowed = await AVCaptureDevice.requestAccess(for: .audio)
                 guard sessionID == id, phase == .starting else { return }
-                guard allowed else { throw RecordingError.message("请在系统设置中允许麦克风访问，或关闭麦克风后再录制。") }
+                guard allowed else { throw RecordingError.message(String(localized: "请在系统设置中允许麦克风访问，或关闭麦克风后再录制。")) }
             }
             if options.camera {
                 let allowed = await AVCaptureDevice.requestAccess(for: .video)
                 guard sessionID == id, phase == .starting else { return }
-                guard allowed else { throw RecordingError.message("请在系统设置中允许摄像头访问，或关闭摄像头后再录制。") }
+                guard allowed else { throw RecordingError.message(String(localized: "请在系统设置中允许摄像头访问，或关闭摄像头后再录制。")) }
             }
             _ = try resolveAudio(options, content: content)
             _ = try resolveCamera(options)
@@ -187,12 +188,12 @@ public final class ScreenRecorder {
             } else if let window = content.windows.first(where: { "window-\($0.windowID)" == sourceID }) {
                 filter = SCContentFilter(desktopIndependentWindow: window)
                 pointerBounds = window.frame; pointerWindow = window.windowID
-            } else { throw RecordingError.message("所选来源已不可用，请刷新后重试。") }
+            } else { throw RecordingError.message(String(localized: "所选来源已不可用，请刷新后重试。")) }
             let captureSize: CGSize
             if let region = options.region {
                 guard source.kind == .display, region.width >= 32, region.height >= 32,
                       CGRect(origin: .zero, size: filter.contentRect.size).contains(region) else {
-                    throw RecordingError.message("选区已超出显示器范围，请重新选择。")
+                    throw RecordingError.message(String(localized: "选区已超出显示器范围，请重新选择。"))
                 }
                 captureSize = region.size
                 pointerBounds = region.offsetBy(dx: pointerBounds.minX, dy: pointerBounds.minY)
@@ -218,7 +219,7 @@ public final class ScreenRecorder {
             config.sampleRate = 48_000; config.channelCount = 2
             config.ignoreShadowsSingleWindow = true
             if let region = options.region { config.sourceRect = region }
-            let name = "录制 \(Date().formatted(date: .abbreviated, time: .shortened))"
+            let name = String(localized: "录制 \(Date().formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(AppLocale.current)))")
             let project = try ProjectStorage.create(name: name)
             projectURL = project
             lease = try ProjectLease(url: project)
@@ -294,7 +295,7 @@ public final class ScreenRecorder {
                 guard sessionID == id, phase != .stopping else { await camera.stop(); return }
             }
             if audioPlan.systemAudio {
-                guard let display = content.displays.first else { throw RecordingError.message("没有可用的系统声音采集来源。") }
+                guard let display = content.displays.first else { throw RecordingError.message(String(localized: "没有可用的系统声音采集来源。")) }
                 let audioFilter: SCContentFilter
                 if let selected = audioPlan.applicationBundleIDs {
                     let applications = content.applications.filter { app in selected.contains { RecordingAudioPlan.matches(application: app.bundleIdentifier, selection: $0) } }
@@ -331,7 +332,7 @@ public final class ScreenRecorder {
             if phase == .starting {
                 firstFrameTimeout = Task { [weak self] in
                     do { try await Task.sleep(for: .seconds(8)) } catch { return }
-                    await self?.handleFailure("没有收到有效画面，请检查权限或重新选择来源。", sessionID: id)
+                    await self?.handleFailure(String(localized: "没有收到有效画面，请检查权限或重新选择来源。"), sessionID: id)
                 }
             }
         } catch { await handleFailure(error.localizedDescription, sessionID: id) }
@@ -441,7 +442,7 @@ public final class ScreenRecorder {
             do {
                 guard !(try ProjectStorage.load(projectURL)).segments.isEmpty else {
                     emptyProject = projectURL
-                    throw RecordingError.message(issue ?? "未收到可保存的画面，请检查来源和权限后重试。")
+                    throw RecordingError.message(issue ?? String(localized: "未收到可保存的画面，请检查来源和权限后重试。"))
                 }
                 try ProjectStorage.complete(projectURL, warning: issue)
                 completedURL = projectURL
@@ -472,7 +473,7 @@ public final class ScreenRecorder {
         guard let deviceID else { return }
         microphoneObserver = NotificationCenter.default.addObserver(forName: AVCaptureDevice.wasDisconnectedNotification, object: nil, queue: nil) { [weak self] notification in
             guard (notification.object as? AVCaptureDevice)?.uniqueID == deviceID else { return }
-            Task { @MainActor in await self?.handleFailure("麦克风已断开，已结束录制并保存已收到的内容。", sessionID: session) }
+            Task { @MainActor in await self?.handleFailure(String(localized: "麦克风已断开，已结束录制并保存已收到的内容。"), sessionID: session) }
         }
     }
 

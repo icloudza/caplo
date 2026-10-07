@@ -53,7 +53,7 @@ public struct SourceDropdown: View {
         .opacity(enabled ? 1 : 0.4)
         .onHover { hovered = $0 }
         .accessibilityLabel(accessibilityName)
-        .accessibilityValue(isOff ? "已关闭" : title)
+        .accessibilityValue(isOff ? String(localized: "已关闭") : title)
     }
 }
 

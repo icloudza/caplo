@@ -78,7 +78,7 @@ enum AppPresence {
         } catch {
             // 已经是目标状态时系统也会抛错，以状态为准。
             if (loginItemState == .on || loginItemState == .needsApproval) == enabled { return nil }
-            return enabled ? "没能加入登录项：\(error.localizedDescription)" : "没能移出登录项：\(error.localizedDescription)"
+            return enabled ? String(localized: "没能加入登录项：\(error.localizedDescription)") : String(localized: "没能移出登录项：\(error.localizedDescription)")
         }
     }
 

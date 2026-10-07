@@ -157,7 +157,7 @@ public final class VideoCompositor: NSObject, AVVideoCompositing, @unchecked Sen
                 if cancelled { request.finishCancelledRequest(); return }
                 guard let instruction = request.videoCompositionInstruction as? SceneInstruction,
                       let output = request.renderContext.newPixelBuffer() else {
-                    request.finish(with: NSError(domain: "Caplo.Render", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法读取合成画面。"])); return
+                    request.finish(with: NSError(domain: "Caplo.Render", code: 1, userInfo: [NSLocalizedDescriptionKey: String(localized: "无法读取合成画面。")])); return
                 }
                 let size = CGSize(width: CVPixelBufferGetWidth(output), height: CVPixelBufferGetHeight(output))
                 let camera = instruction.cameraSource(at: request.compositionTime)

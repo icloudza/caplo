@@ -111,7 +111,7 @@ public struct TimelineAnalysis: Sendable {
         let reader = try AVAssetReader(asset: asset)
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMIsFloatKey: true, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsNonInterleaved: false])
         reader.add(output)
-        guard reader.startReading() else { throw reader.error ?? ProjectError.invalid("无法读取音频波形。") }
+        guard reader.startReading() else { throw reader.error ?? ProjectError.invalid(String(localized: "无法读取音频波形。")) }
         defer { reader.cancelReading() }
         while let sample = output.copyNextSampleBuffer() {
             try Task.checkCancellation()
@@ -127,7 +127,7 @@ public struct TimelineAnalysis: Sendable {
                 accumulate(into: &peaks, samples: samples, frames: frames, channels: channels, sampleRate: sampleRate, base: base)
             }
         }
-        guard reader.status == .completed else { throw reader.error ?? ProjectError.invalid("波形读取中断。") }
+        guard reader.status == .completed else { throw reader.error ?? ProjectError.invalid(String(localized: "波形读取中断。")) }
         return peaks
     }
 
@@ -143,7 +143,7 @@ public struct TimelineAnalysis: Sendable {
         }
         var copy = [Float](repeating: 0, count: count)
         let status = copy.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(data, atOffset: 0, dataLength: bytes, destination: $0.baseAddress!) }
-        guard status == noErr else { throw ProjectError.invalid("波形样本无法解码。") }
+        guard status == noErr else { throw ProjectError.invalid(String(localized: "波形样本无法解码。")) }
         try copy.withUnsafeBufferPointer { try body($0.baseAddress!) }
     }
 

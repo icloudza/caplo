@@ -134,7 +134,8 @@ public struct FocusSegment: Codable, Equatable, Sendable, Identifiable {
     public var displayTitle: String { title ?? defaultTitle(number: nil) }
     /// 默认名："镜头聚焦 · 1.8×"，给了序号则是"镜头聚焦 2 · 1.8×"。
     public func defaultTitle(number: Int?) -> String {
-        number.map { String(format: "镜头聚焦 %d · %.1f×", $0, scale) } ?? String(format: "镜头聚焦 · %.1f×", scale)
+        let factor = String(format: "%.1f", scale)
+        return number.map { String(localized: "镜头聚焦 \($0) · \(factor)×") } ?? String(localized: "镜头聚焦 · \(factor)×")
     }
     public var editingStart: Double {
         get { timelineStart ?? start }
@@ -294,9 +295,9 @@ public struct VideoEdit: Codable, Equatable, Sendable {
     /// 拒绝损坏或未知版本的编辑文件，避免自动保存覆盖无法理解的用户数据。
     /// 数量超限单独报出是哪一样超了，不再一律说"版本不支持或内容无效"。
     public func validate(sourceDuration: Double) throws {
-        if captionList.count > Self.captionLimit { throw EditError.tooMany("字幕", Self.captionLimit) }
-        if textList.count > Self.textLimit { throw EditError.tooMany("文字", Self.textLimit) }
-        if maskList.count > Self.maskLimit { throw EditError.tooMany("遮罩", Self.maskLimit) }
+        if captionList.count > Self.captionLimit { throw EditError.tooMany(String(localized: "字幕"), Self.captionLimit) }
+        if textList.count > Self.textLimit { throw EditError.tooMany(String(localized: "文字"), Self.textLimit) }
+        if maskList.count > Self.maskLimit { throw EditError.tooMany(String(localized: "遮罩"), Self.maskLimit) }
         let editedDuration = duration
         let focusCoverage = FocusCoverage(clips: clips)
         for media in [cameraClips, systemClips, microphoneClips].compactMap({ $0 }) {
@@ -343,8 +344,8 @@ public enum EditError: LocalizedError, Equatable {
     case tooMany(String, Int)
     public var errorDescription: String? {
         switch self {
-        case .invalid: "编辑数据版本不支持或内容无效，已保留原文件。"
-        case .tooMany(let kind, let limit): "\(kind)最多 \(limit) 条，已超出上限。"
+        case .invalid: String(localized: "编辑数据版本不支持或内容无效，已保留原文件。")
+        case .tooMany(let kind, let limit): String(localized: "\(kind)最多 \(limit) 条，已超出上限。")
         }
     }
 }

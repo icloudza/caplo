@@ -73,17 +73,17 @@ enum UpdateErrorText {
     static func message(for error: Error) -> String? {
         let error = error as NSError
         if error.domain == NSURLErrorDomain {
-            return error.code == NSURLErrorCancelled ? nil : "无法连接更新服务器，请检查网络。"
+            return error.code == NSURLErrorCancelled ? nil : String(localized: "无法连接更新服务器，请检查网络。")
         }
         guard error.domain == SUSparkleErrorDomain, let code = SUError(rawValue: OSStatus(error.code)) else { return error.localizedDescription }
         switch code {
         case .installationCanceledError, .noUpdateError: return nil
-        case .downloadError: return "下载失败，请检查网络后重试。"
-        case .appcastError, .appcastParseError, .resumeAppcastError: return "读取更新信息失败，请稍后再试。"
-        case .signatureError, .validationError, .notValidUpdateError: return "更新包校验未通过，已停止安装。"
-        case .runningFromDiskImageError: return "请先把 Caplo 拖到\u{201C}应用程序\u{201D}文件夹。"
-        case .installationWriteNoPermissionError: return "没有权限替换当前的 Caplo，请从官网下载新版本。"
-        case .unarchivingError: return "更新包解压失败，请重试。"
+        case .downloadError: return String(localized: "下载失败，请检查网络后重试。")
+        case .appcastError, .appcastParseError, .resumeAppcastError: return String(localized: "读取更新信息失败，请稍后再试。")
+        case .signatureError, .validationError, .notValidUpdateError: return String(localized: "更新包校验未通过，已停止安装。")
+        case .runningFromDiskImageError: return String(localized: "请先把 Caplo 拖到\u{201C}应用程序\u{201D}文件夹。")
+        case .installationWriteNoPermissionError: return String(localized: "没有权限替换当前的 Caplo，请从官网下载新版本。")
+        case .unarchivingError: return String(localized: "更新包解压失败，请重试。")
         case .installationAuthorizeLaterError: return nil
         default: return error.localizedDescription
         }

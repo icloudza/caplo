@@ -1,3 +1,4 @@
+import EditingCore
 import SwiftUI
 import AppKit
 import Observation
@@ -131,7 +132,7 @@ final class ProjectLibraryModel {
     /// 复制整个工程包到项目库，名称加"副本"；正在编辑的工程也可复制（复制的是磁盘上的已保存状态）。
     func duplicate(_ entry: LibraryEntry) async {
         do {
-            let name = entry.document.name + " 副本"
+            let name = entry.document.name + String(localized: " 副本")
             try await Task.detached(priority: .utility) {
                 let root = ProjectStorage.libraryURL
                 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -149,7 +150,7 @@ final class ProjectLibraryModel {
     func trash(_ entries: [LibraryEntry]) async {
         var issues: [String] = []
         for entry in entries {
-            if VideoEditorSessions.current?.entry.url == entry.url { issues.append("“\(entry.document.name)”正在编辑，请先关闭编辑器。"); continue }
+            if VideoEditorSessions.current?.entry.url == entry.url { issues.append(String(localized: "“\(entry.document.name)”正在编辑，请先关闭编辑器。")); continue }
             do {
                 try await Task.detached(priority: .utility) { try FileManager.default.trashItem(at: entry.url, resultingItemURL: nil) }.value
                 Self.forget(entry.url)
@@ -213,14 +214,22 @@ public struct ProjectLibraryView: View {
         return result
     }
 
-    /// 分组标题不依赖系统区域设置，统一写成"9 月 7 日"；跨年才带年份。
+    /// 分组标题：中文界面统一写成"9 月 7 日"（不依赖系统区域设置），其他语言用界面语言的短日期（"Oct 7"）；跨年才带年份。
     static func groupTitle(for day: Date, calendar: Calendar = .current, now: Date = Date()) -> String {
-        let parts = calendar.dateComponents([.year, .month, .day], from: day)
-        var date = "\(parts.month ?? 1) 月 \(parts.day ?? 1) 日"
-        if !calendar.isDate(day, equalTo: now, toGranularity: .year) { date = "\(parts.year ?? 0) 年 " + date }
-        if calendar.isDateInToday(day) { return "今天 · " + date }
-        if calendar.isDateInYesterday(day) { return "昨天 · " + date }
+        let date = shortDate(day, calendar: calendar, includeYear: !calendar.isDate(day, equalTo: now, toGranularity: .year))
+        if calendar.isDateInToday(day) { return String(localized: "今天 · ") + date }
+        if calendar.isDateInYesterday(day) { return String(localized: "昨天 · ") + date }
         return date
+    }
+
+    static func shortDate(_ day: Date, calendar: Calendar = .current, includeYear: Bool) -> String {
+        guard AppLanguage.running == .chinese else {
+            let style = Date.FormatStyle(calendar: calendar).month(.abbreviated).day()
+            return includeYear ? day.formatted(style.year().locale(AppLocale.current)) : day.formatted(style.locale(AppLocale.current))
+        }
+        let parts = calendar.dateComponents([.year, .month, .day], from: day)
+        let date = "\(parts.month ?? 1) 月 \(parts.day ?? 1) 日"
+        return includeYear ? "\(parts.year ?? 0) 年 " + date : date
     }
 
     public var body: some View {
@@ -368,9 +377,9 @@ public struct ProjectLibraryView: View {
         }
         .sheet(item: $trashing) { request in
             StudioConfirmSheet(
-                title: request.entries.count == 1 ? "删除到废纸篓？" : "删除 \(request.entries.count) 个工程？",
+                title: request.entries.count == 1 ? String(localized: "删除到废纸篓？") : String(localized: "删除 \(request.entries.count) 个工程？"),
                 message: trashMessage(request.entries),
-                confirmTitle: request.entries.count == 1 ? "删除" : "删除 \(request.entries.count) 项", danger: true,
+                confirmTitle: request.entries.count == 1 ? String(localized: "删除") : String(localized: "删除 \(request.entries.count) 项"), danger: true,
                 confirm: {
                     let entries = request.entries
                     trashing = nil; selection.subtract(entries.map(\.url))
@@ -387,7 +396,7 @@ public struct ProjectLibraryView: View {
     private func row(for entry: LibraryEntry) -> some View {
         let editing = VideoEditorSessions.current?.entry.url == entry.url
         let inSelection = selection.contains(entry.url)
-        let deleteTitle = inSelection && selection.count > 1 ? "删除选中的 \(selection.count) 项" : "删除到废纸篓"
+        let deleteTitle = inSelection && selection.count > 1 ? String(localized: "删除选中的 \(selection.count) 项") : String(localized: "删除到废纸篓")
         return ProjectRow(entry: entry, selected: inSelection, selecting: !selection.isEmpty,
                           open: { VideoEditorWindow.shared.show(project: entry.url) },
                           select: { modifiers in select(entry, modifiers: modifiers) },
@@ -403,13 +412,13 @@ public struct ProjectLibraryView: View {
 
     private func trashMessage(_ entries: [LibraryEntry]) -> String {
         let names = entries.map { "“\($0.document.name)”" }
-        let subject = entries.count <= 3 ? names.joined(separator: "、") : names.prefix(3).joined(separator: "、") + " 等 \(entries.count) 个工程"
-        return subject + "会移到废纸篓，可从访达恢复。"
+        let subject = entries.count <= 3 ? names.joined(separator: "、") : names.prefix(3).joined(separator: "、") + String(localized: " 等 \(entries.count) 个工程")
+        return subject + String(localized: "会移到废纸篓，可从访达恢复。")
     }
 
     private func requestTrash(_ entries: [LibraryEntry]) {
         let deletable = entries.filter { VideoEditorSessions.current?.entry.url != $0.url }
-        guard !deletable.isEmpty else { if !entries.isEmpty { model.error = "工程正在编辑，请先关闭编辑器。" }; return }
+        guard !deletable.isEmpty else { if !entries.isEmpty { model.error = String(localized: "工程正在编辑，请先关闭编辑器。") }; return }
         trashing = TrashRequest(entries: deletable)
     }
 
@@ -465,9 +474,8 @@ private struct ProjectRow<Actions: View>: View {
     private var modified: String? {
         let calendar = Calendar.current, date = entry.lastModified
         guard date.timeIntervalSince(entry.document.createdAt) > 60 else { return nil }
-        if calendar.isDate(date, inSameDayAs: entry.document.createdAt) { return "修改于 " + date.formatted(date: .omitted, time: .shortened) }
-        let parts = calendar.dateComponents([.month, .day], from: date)
-        return "修改于 \(parts.month ?? 1) 月 \(parts.day ?? 1) 日"
+        if calendar.isDate(date, inSameDayAs: entry.document.createdAt) { return String(localized: "修改于 ") + date.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocale.current)) }
+        return String(localized: "修改于 ") + ProjectLibraryView.shortDate(date, calendar: calendar, includeYear: false)
     }
 
     var body: some View {
@@ -500,7 +508,7 @@ private struct ProjectRow<Actions: View>: View {
             VStack(alignment: .leading, spacing: CaploMetrics.Spacing.xs + 2) {
                 Text(entry.document.name).font(CaploFont.bodyMedium).foregroundStyle(CaploColor.textPrimary).lineLimit(1)
                 HStack(spacing: CaploMetrics.Spacing.m) {
-                    Text("录制于 " + entry.document.createdAt.formatted(date: .omitted, time: .shortened)).font(CaploFont.caption)
+                    Text(String(localized: "录制于 ") + entry.document.createdAt.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocale.current))).font(CaploFont.caption)
                     if let modified { Text(modified).font(CaploFont.caption) }
                     if entry.document.state == .recovered { Text("已恢复").font(CaploFont.caption).foregroundStyle(CaploColor.warning) }
                 }.foregroundStyle(CaploColor.textSecondary).lineLimit(1)

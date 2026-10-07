@@ -45,16 +45,16 @@ struct RecordingAudioPlan: Equatable, Sendable {
         if options.microphone {
             guard let chosen = options.microphoneDeviceID ?? defaultMicrophoneID,
                   microphones.contains(where: { $0.id == chosen }) else {
-                throw RecordingError.message("所选麦克风未连接。请选择可用设备，或关闭麦克风后录制。")
+                throw RecordingError.message(String(localized: "所选麦克风未连接。请选择可用设备，或关闭麦克风后录制。"))
             }
             microphoneID = chosen
         } else { microphoneID = nil }
         var selection: [String]?
         if options.systemAudio, let requested = options.systemAudioApplicationBundleIDs {
             let unique = Array(Set(requested)).sorted()
-            guard !unique.isEmpty else { throw RecordingError.message("请至少选择一个声音应用，或切换为全部系统声音。") }
+            guard !unique.isEmpty else { throw RecordingError.message(String(localized: "请至少选择一个声音应用，或切换为全部系统声音。")) }
             let missing = unique.filter { id in !applicationIDs.contains(where: { matches(application: $0, selection: id) }) }
-            guard missing.isEmpty else { throw RecordingError.message("所选声音应用已退出或不可用，请重新选择后录制。") }
+            guard missing.isEmpty else { throw RecordingError.message(String(localized: "所选声音应用已退出或不可用，请重新选择后录制。")) }
             selection = unique
         }
         return Self(microphoneDeviceID: microphoneID, systemAudio: options.systemAudio, applicationBundleIDs: selection)

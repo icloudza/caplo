@@ -15,15 +15,15 @@ public struct ExportSettings: Codable, Equatable, Sendable {
             case .h264: "MP4 · H.264"
             case .hevc: "MP4 · HEVC（H.265）"
             case .proRes: "MOV · ProRes 422"
-            case .gif: "GIF 动图"
+            case .gif: String(localized: "GIF 动图")
             }
         }
         public var detail: String {
             switch self {
-            case .h264: "兼容性最好：任何播放器、网站、聊天软件都能直接播放。"
-            case .hevc: "同样画质体积小约 40%；需要较新的设备与播放器，部分网站会转码。"
-            case .proRes: "几乎无损、体积很大，交给 Final Cut Pro、达芬奇等后期软件继续剪辑。"
-            case .gif: "无声、循环播放，适合放进文档、Issue 与聊天里演示一个小操作；体积随画面变化。"
+            case .h264: String(localized: "兼容性最好：任何播放器、网站、聊天软件都能直接播放。")
+            case .hevc: String(localized: "同样画质体积小约 40%；需要较新的设备与播放器，部分网站会转码。")
+            case .proRes: String(localized: "几乎无损、体积很大，交给 Final Cut Pro、达芬奇等后期软件继续剪辑。")
+            case .gif: String(localized: "无声、循环播放，适合放进文档、Issue 与聊天里演示一个小操作；体积随画面变化。")
             }
         }
         public var fileExtension: String {
@@ -51,7 +51,7 @@ public struct ExportSettings: Codable, Equatable, Sendable {
         case standard, high, maximum
         public var id: String { rawValue }
         public var title: String {
-            switch self { case .standard: "标准"; case .high: "高"; case .maximum: "极高" }
+            switch self { case .standard: String(localized: "标准"); case .high: String(localized: "高"); case .maximum: String(localized: "极高") }
         }
         /// H.264 每像素每帧的比特数。屏幕内容大块平坦、边缘锐利：0.14 给文字留足余量（1080p60 约 17 Mbps）；
         /// 标准档体积约减半、静态界面看不出差别，极高档给大量滚动与细小文字。
@@ -192,9 +192,9 @@ public struct ExportSettings: Codable, Equatable, Sendable {
     /// 一行概括（设置页显示当前记住的参数）。
     public var summary: String {
         var parts = [format.title, resolution.title]
-        if format == .gif { parts.append("\(gifFrameRate) fps") } else { parts.append(frameRate.map { "\($0) fps" } ?? "原始帧率") }
-        if format.hasQuality { parts.append("画质" + quality.title) }
-        if format.hasAudio { parts.append(includesAudio ? (format == .proRes ? "PCM 声音" : "AAC \(audioBitRate / 1000) kbps") : "无声") }
+        if format == .gif { parts.append("\(gifFrameRate) fps") } else { parts.append(frameRate.map { "\($0) fps" } ?? String(localized: "原始帧率")) }
+        if format.hasQuality { parts.append(String(localized: "画质\(quality.title)")) }
+        if format.hasAudio { parts.append(includesAudio ? (format == .proRes ? String(localized: "PCM 声音") : "AAC \(audioBitRate / 1000) kbps") : String(localized: "无声")) }
         return parts.joined(separator: " · ")
     }
 

@@ -22,7 +22,7 @@ public enum ExportEncoder {
         let duration = try await asset.load(.duration)
         let videoTracks = try await asset.loadTracks(withMediaType: .video)
         let audioTracks = settings.format.hasAudio && settings.includesAudio ? try await asset.loadTracks(withMediaType: .audio) : []
-        guard !videoTracks.isEmpty else { throw ProjectError.invalid("当前工程没有画面，无法导出。") }
+        guard !videoTracks.isEmpty else { throw ProjectError.invalid(String(localized: "当前工程没有画面，无法导出。")) }
         // 没有编辑数据时（只拼接原始片段）也走视频合成：多段素材按时间顺序合成一路画面。
         let composition: AVVideoComposition
         if let videoComposition { composition = videoComposition }
@@ -44,7 +44,7 @@ public enum ExportEncoder {
         ])
         videoOutput.videoComposition = composition
         videoOutput.alwaysCopiesSampleData = false
-        guard reader.canAdd(videoOutput) else { throw ProjectError.invalid("无法读取合成画面。") }
+        guard reader.canAdd(videoOutput) else { throw ProjectError.invalid(String(localized: "无法读取合成画面。")) }
         reader.add(videoOutput)
 
         if settings.format == .gif {
@@ -64,7 +64,7 @@ public enum ExportEncoder {
             ])
             output.audioMix = audioMix
             output.alwaysCopiesSampleData = false
-            guard reader.canAdd(output) else { throw ProjectError.invalid("无法读取混音。") }
+            guard reader.canAdd(output) else { throw ProjectError.invalid(String(localized: "无法读取混音。")) }
             reader.add(output)
             audioOutput = output
         }
@@ -74,7 +74,7 @@ public enum ExportEncoder {
         let width = Int(size.width.rounded()), height = Int(size.height.rounded())
         let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings(settings, width: width, height: height, frameRate: frameRate))
         videoInput.expectsMediaDataInRealTime = false
-        guard writer.canAdd(videoInput) else { throw ProjectError.invalid("无法建立视频编码。") }
+        guard writer.canAdd(videoInput) else { throw ProjectError.invalid(String(localized: "无法建立视频编码。")) }
         writer.add(videoInput)
         var audioInput: AVAssetWriterInput?
         if audioOutput != nil {
@@ -85,7 +85,7 @@ public enum ExportEncoder {
                 : [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48_000, AVNumberOfChannelsKey: 2, AVEncoderBitRateKey: settings.audioBitRate]
             let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
             input.expectsMediaDataInRealTime = false
-            guard writer.canAdd(input) else { throw ProjectError.invalid("无法建立声音编码。") }
+            guard writer.canAdd(input) else { throw ProjectError.invalid(String(localized: "无法建立声音编码。")) }
             writer.add(input)
             audioInput = input
         }
@@ -167,7 +167,7 @@ private final class GIFWriter: @unchecked Sendable {
     }
 
     private func write() throws {
-        guard reader.startReading() else { throw reader.error ?? ProjectError.invalid("无法开始读取工程素材。") }
+        guard reader.startReading() else { throw reader.error ?? ProjectError.invalid(String(localized: "无法开始读取工程素材。")) }
         let context = CIContext(options: [.cacheIntermediates: false])
         let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
         var assembler: GIFAssembler?
@@ -187,8 +187,8 @@ private final class GIFWriter: @unchecked Sendable {
             if written % 5 == 0 { progress(min(0.99, Double(written) / Double(frames))) }
         }
         if isCancelled { throw CancellationError() }
-        if reader.status == .failed { throw reader.error ?? ProjectError.invalid("读取工程素材失败。") }
-        guard written > 0, let assembler else { throw ProjectError.invalid("GIF 写入失败。") }
+        if reader.status == .failed { throw reader.error ?? ProjectError.invalid(String(localized: "读取工程素材失败。")) }
+        guard written > 0, let assembler else { throw ProjectError.invalid(String(localized: "GIF 写入失败。")) }
         try assembler.finish()
         progress(1)
     }
@@ -207,8 +207,8 @@ final class GIFAssembler {
     private var emitted = 0
 
     init(destination: URL, width: Int, height: Int, frameRate: Double) throws {
-        guard width > 0, height > 0, width <= 65_535, height <= 65_535 else { throw ProjectError.invalid("GIF 尺寸无效。") }
-        guard FileManager.default.createFile(atPath: destination.path, contents: nil) else { throw ProjectError.invalid("无法写入 GIF。") }
+        guard width > 0, height > 0, width <= 65_535, height <= 65_535 else { throw ProjectError.invalid(String(localized: "GIF 尺寸无效。")) }
+        guard FileManager.default.createFile(atPath: destination.path, contents: nil) else { throw ProjectError.invalid(String(localized: "无法写入 GIF。")) }
         handle = try FileHandle(forWritingTo: destination)
         self.width = width; self.height = height
         frameDuration = 1 / max(1, frameRate)
@@ -221,9 +221,9 @@ final class GIFAssembler {
 
     func append(_ image: CGImage) throws {
         let data = NSMutableData()
-        guard let single = CGImageDestinationCreateWithData(data, UTType.gif.identifier as CFString, 1, nil) else { throw ProjectError.invalid("GIF 编码失败。") }
+        guard let single = CGImageDestinationCreateWithData(data, UTType.gif.identifier as CFString, 1, nil) else { throw ProjectError.invalid(String(localized: "GIF 编码失败。")) }
         CGImageDestinationAddImage(single, image, nil)
-        guard CGImageDestinationFinalize(single) else { throw ProjectError.invalid("GIF 编码失败。") }
+        guard CGImageDestinationFinalize(single) else { throw ProjectError.invalid(String(localized: "GIF 编码失败。")) }
         let frame = try Self.parse(data as Data)
         // 停留时间按累计时刻取整后求差，误差不累积。
         elapsed += frameDuration
@@ -250,7 +250,7 @@ final class GIFAssembler {
     /// 解析单帧 GIF：取第一幅图的位置、调色板（局部优先，否则全局）与 LZW 数据（含最小码长字节与全部子块、结尾 0）。
     static func parse(_ data: Data) throws -> Frame {
         let bytes = [UInt8](data)
-        func fail() -> Error { ProjectError.invalid("GIF 编码结果无法解析。") }
+        func fail() -> Error { ProjectError.invalid(String(localized: "GIF 编码结果无法解析。")) }
         guard bytes.count > 13, bytes[0] == 0x47, bytes[1] == 0x49, bytes[2] == 0x46 else { throw fail() }
         var index = 13
         var global = Data(), globalBits = 0
@@ -343,8 +343,8 @@ private final class Pump: @unchecked Sendable {
 
     func run() async throws {
         if isCancelled { throw CancellationError() }
-        guard reader.startReading() else { throw reader.error ?? ProjectError.invalid("无法开始读取工程素材。") }
-        guard writer.startWriting() else { reader.cancelReading(); throw writer.error ?? ProjectError.invalid("无法开始写入导出文件。") }
+        guard reader.startReading() else { throw reader.error ?? ProjectError.invalid(String(localized: "无法开始读取工程素材。")) }
+        guard writer.startWriting() else { reader.cancelReading(); throw writer.error ?? ProjectError.invalid(String(localized: "无法开始写入导出文件。")) }
         writer.startSession(atSourceTime: .zero)
         lock.withLock { remainingLegs = audio == nil ? 1 : 2 }
         transfer(audio: false, on: DispatchQueue(label: "com.caplo.export.video"))
@@ -361,10 +361,10 @@ private final class Pump: @unchecked Sendable {
         let failedAppend = lock.withLock { appendFailed }
         if reader.status == .failed || failedAppend || writer.status == .failed {
             reader.cancelReading(); writer.cancelWriting()
-            throw writer.error ?? reader.error ?? ProjectError.invalid("导出文件写入失败。")
+            throw writer.error ?? reader.error ?? ProjectError.invalid(String(localized: "导出文件写入失败。"))
         }
         await writer.finishWriting()
-        if writer.status != .completed { throw writer.error ?? ProjectError.invalid("导出文件写入失败。") }
+        if writer.status != .completed { throw writer.error ?? ProjectError.invalid(String(localized: "导出文件写入失败。")) }
         progress(1)
     }
 

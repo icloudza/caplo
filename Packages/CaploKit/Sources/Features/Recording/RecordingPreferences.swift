@@ -29,10 +29,10 @@ enum RecordingCameraPreferences {
 enum RecordingDeviceNames {
     /// 所选设备不在线时返回 nil，调用方按"关"显示；空 id 表示系统默认，只要有任一设备就可用。
     static func camera(id: String, cameras: [CaptureCamera]) -> String? {
-        id.isEmpty ? (cameras.isEmpty ? nil : "默认摄像头") : cameras.first(where: { $0.id == id }).map { short($0.name) }
+        id.isEmpty ? (cameras.isEmpty ? nil : String(localized: "默认摄像头")) : cameras.first(where: { $0.id == id }).map { short($0.name) }
     }
     static func microphone(id: String, devices: [CaptureMicrophone]) -> String? {
-        id.isEmpty ? (devices.isEmpty ? nil : "默认麦克风") : devices.first(where: { $0.id == id }).map { short($0.name) }
+        id.isEmpty ? (devices.isEmpty ? nil : String(localized: "默认麦克风")) : devices.first(where: { $0.id == id }).map { short($0.name) }
     }
     /// 录制条上的短名：图标已经说明是摄像头还是麦克风，去掉系统名里的引号和"的相机 / 的麦克风"这类后缀
     /// （“云之安的 iPhone”的相机 → 云之安的 iPhone）；菜单里仍显示完整名。
@@ -50,11 +50,11 @@ enum RecordingDeviceNames {
     /// 空 id（系统默认）在有任一设备时可用；指定 id 必须在线。
     static func available(id: String, in ids: [String]) -> Bool { id.isEmpty ? !ids.isEmpty : ids.contains(id) }
     static func systemAudio(scope: String, selected: Set<String>, applications: [CaptureAudioApplication]) -> String {
-        if scope == "all" { return "系统声音" }
+        if scope == "all" { return String(localized: "系统声音") }
         if selected.count == 1, let id = selected.first {
-            return applications.first(where: { $0.id == id })?.name ?? "所选应用未运行"
+            return applications.first(where: { $0.id == id })?.name ?? String(localized: "所选应用未运行")
         }
-        return selected.isEmpty ? "选声音应用" : "\(selected.count) 个应用"
+        return selected.isEmpty ? String(localized: "选声音应用") : String(localized: "\(selected.count) 个应用")
     }
     static func decodeApplications(_ data: Data) -> Set<String> {
         Set((try? JSONDecoder().decode([String].self, from: data)) ?? [])

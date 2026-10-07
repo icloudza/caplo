@@ -139,7 +139,7 @@ final class WindowHighlightSession {
         let pixelSize = "\(Int(bounds.width * scale)) × \(Int(bounds.height * scale))"
         for entry in panels {
             let hole = WindowGeometry.localRect(bounds, in: entry.screen.frame, primaryHeight: primaryHeight)
-            entry.shade.update(hole: hole, name: source.applicationName ?? "窗口", pixelSize: pixelSize)
+            entry.shade.update(hole: hole, name: source.applicationName ?? String(localized: "窗口"), pixelSize: pixelSize)
             if !entry.panel.isVisible { entry.panel.orderFrontRegardless() }
         }
         for entry in blockers {
@@ -252,7 +252,7 @@ private final class WindowShadeView: NSView {
 
         let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white]
-        let mode = "窗口 · \(name)"
+        let mode = String(localized: "窗口 · \(name)")
         let modeWidth = (mode as NSString).size(withAttributes: attributes).width + 20
         let sizeWidth = (pixelSize as NSString).size(withAttributes: attributes).width + 20
         // 顶到屏幕上沿（菜单栏之下）放不下时画进窗口内部。

@@ -170,10 +170,10 @@ final class TimelineViewportView: NSView {
             let clips = edit.mediaClips(role), timing = TimelineIndex(clips: clips)
             for (number, clip) in clips.enumerated() {
                 let hold = clip.holdSource != nil
-                let title = role == .screen ? "录制画面" : role == .camera ? "摄像头" : role == .system ? "系统声音" : "麦克风"
+                let title = role == .screen ? String(localized: "录制画面") : role == .camera ? String(localized: "摄像头") : role == .system ? String(localized: "系统声音") : String(localized: "麦克风")
                 let labelNumber = role == .screen ? (screenNumbers[clip.id] ?? number) : number
                 // 卡片默认叫它的第一行字；清掉自定义名之后回到这里，不能变成一句"录制画面 0N"。
-                let defaultTitle = clip.card?.defaultTitle ?? (hold ? "定格画面" : title + String(format: " %02d", labelNumber + 1))
+                let defaultTitle = clip.card?.defaultTitle ?? (hold ? String(localized: "定格画面") : title + String(format: " %02d", labelNumber + 1))
                 values[clip.id] = Block(id: clip.id, role: role, title: clip.title ?? defaultTitle, defaultTitle: defaultTitle,
                                         start: timing.boundaries[number], duration: clip.duration, span: nil, card: clip.card != nil, hold: hold)
             }
@@ -253,7 +253,7 @@ final class TimelineViewportView: NSView {
         var byCue: [UUID: Block] = [:]
         for span in edit.captionSpans(using: timing) {
             guard let cue = lookup[span.cueID] else { continue }
-            let defaultTitle = "字幕 \(numbers[cue.id] ?? 1)"
+            let defaultTitle = String(localized: "字幕 \(numbers[cue.id] ?? 1)")
             let existing = byCue[span.cueID]
             let start = min(existing?.start ?? span.start, span.start)
             let end = max((existing?.start ?? span.start) + (existing?.duration ?? span.duration), span.end)
@@ -319,7 +319,7 @@ final class TimelineViewportView: NSView {
         playheadHandle.anchorPoint = CGPoint(x: 0.5, y: 0)
         layer?.addSublayer(playheadHandle)
         setAccessibilityRole(.group)
-        setAccessibilityLabel("视频时间线，方向键逐帧定位，空格播放，Command A 全选片段")
+        setAccessibilityLabel(String(localized: "视频时间线，方向键逐帧定位，空格播放，Command A 全选片段"))
         configureOverlays()
         addSubview(navigator)
         navigator.onRangeChange = { [weak self] start, duration in self?.navigate(start: start, duration: duration) }
@@ -772,7 +772,7 @@ final class TimelineViewportView: NSView {
             if case .invalid = dropTarget { conflict = true } else { conflict = false }
             let count: Int
             if let drag, case .reorder = drag.kind { count = drag.rowIDs.first { $0.contains(id) }?.count ?? 1 } else { count = 1 }
-            dragGhostTitle.string = conflict ? "此处时间已被占用" : count > 1 ? "整行 · \(count) 个块" : block.title
+            dragGhostTitle.string = conflict ? String(localized: "此处时间已被占用") : count > 1 ? String(localized: "整行 · \(count) 个块") : block.title
             dragGhostTitle.foregroundColor = CaploNSColor.textPrimary.cgColor
             // 浮起块会盖在其他文字之上，使用中性实色底的高透明度混合，避免透出下方标签。
             let ghostBase = CaploNSColor.surfaceOpaqueRaised.blended(withFraction: 0.24, of: color(for: block)) ?? CaploNSColor.surfaceOpaqueRaised
@@ -802,7 +802,7 @@ final class TimelineViewportView: NSView {
             if !head.isNull {
                 // 一行可能装着整条轨，名字只列前几个，后面报个数——否则光拼字符串就要扫几百个块。
                 let names = members.prefix(6).map(\.title).joined(separator: "、")
-                tooltipLabels[addToolTip(head, owner: self, userData: nil)] = members.count > 6 ? names + "…（共 \(members.count) 块）" : names
+                tooltipLabels[addToolTip(head, owner: self, userData: nil)] = members.count > 6 ? names + String(localized: "…（共 \(members.count) 块）") : names
             }
             var lastEdge = -Double.infinity
             for block in visibleMembers(members) {
@@ -979,7 +979,7 @@ final class TimelineViewportView: NSView {
             let block = entry.block
             let element = TimelineClipAccessibilityElement { [weak self] in self?.select(block) }
             element.setAccessibilityRole(.button)
-            element.setAccessibilityLabel("\(block.title)，起点 \(TimelineTime.code(block.start))，时长 \(TimelineTime.code(block.duration))")
+            element.setAccessibilityLabel(String(localized: "\(block.title)，起点 \(TimelineTime.code(block.start))，时长 \(TimelineTime.code(block.duration))"))
             element.setAccessibilityParent(self)
             let rect = blockRect(block, row: entry.row)
             element.setAccessibilityFrameInParentSpace(CGRect(x: rect.minX, y: bounds.height - rowY(entry.row) - rowHeight,
@@ -1225,10 +1225,10 @@ final class TimelineViewportView: NSView {
         let splittable = block.caption || (block.role != nil && !block.card)
         if splittable {
             menu.addItem(.separator())
-            let here = NSMenuItem(title: "在此处分割 · " + TimelineTime.code(clicked), action: #selector(splitBlockHere(_:)), keyEquivalent: "")
+            let here = NSMenuItem(title: String(localized: "在此处分割 · ") + TimelineTime.code(clicked), action: #selector(splitBlockHere(_:)), keyEquivalent: "")
             here.target = self; here.representedObject = clicked; here.isEnabled = model.canSplit(at: clicked)
             menu.addItem(here)
-            let atPlayhead = NSMenuItem(title: "在播放头分割", action: #selector(splitBlockAtPlayhead(_:)), keyEquivalent: "b")
+            let atPlayhead = NSMenuItem(title: String(localized: "在播放头分割"), action: #selector(splitBlockAtPlayhead(_:)), keyEquivalent: "b")
             atPlayhead.target = self; atPlayhead.isEnabled = model.canSplit
             menu.addItem(atPlayhead)
         }
@@ -1236,9 +1236,9 @@ final class TimelineViewportView: NSView {
         // 卡片插在这块之前或之后，不切开它（要插在中间用工具栏按钮，在播放头处切开插入）。
         if block.role == .screen, !block.card {
             menu.addItem(.separator())
-            let add = NSMenuItem(title: "在此处添加", action: nil, keyEquivalent: "")
-            let submenu = NSMenu(title: "在此处添加")
-            for (title, action) in [("聚焦", #selector(addFocusHere(_:))), ("遮罩", #selector(addMaskHere(_:))), ("文字", #selector(addTextHere(_:)))] {
+            let add = NSMenuItem(title: String(localized: "在此处添加"), action: nil, keyEquivalent: "")
+            let submenu = NSMenu(title: String(localized: "在此处添加"))
+            for (title, action) in [(String(localized: "聚焦"), #selector(addFocusHere(_:))), (String(localized: "遮罩"), #selector(addMaskHere(_:))), (String(localized: "文字"), #selector(addTextHere(_:)))] {
                 let item = NSMenuItem(title: title + " · " + TimelineTime.code(clicked), action: action, keyEquivalent: "")
                 item.target = self; item.representedObject = clicked
                 submenu.addItem(item)
@@ -1246,28 +1246,28 @@ final class TimelineViewportView: NSView {
             add.submenu = submenu
             menu.addItem(add)
             for after in [false, true] {
-                let item = NSMenuItem(title: after ? "在此后插入卡片" : "在此前插入卡片", action: #selector(insertCardBeside(_:)), keyEquivalent: "")
+                let item = NSMenuItem(title: after ? String(localized: "在此后插入卡片") : String(localized: "在此前插入卡片"), action: #selector(insertCardBeside(_:)), keyEquivalent: "")
                 item.target = self; item.representedObject = block.id; item.tag = after ? 1 : 0
                 menu.addItem(item)
             }
         }
         menu.addItem(.separator())
         // 所有种类都能就地复制一份接在后面；卡片的副本插在它后面，后面的内容让开。
-        let duplicate = NSMenuItem(title: "复制", action: #selector(duplicateBlock(_:)), keyEquivalent: "d")
+        let duplicate = NSMenuItem(title: String(localized: "复制"), action: #selector(duplicateBlock(_:)), keyEquivalent: "d")
         duplicate.target = self; menu.addItem(duplicate)
         // 字幕块的名字就是它的台词，改名没有意义；文本在字幕面板里编辑。
         if !block.caption {
-            let rename = NSMenuItem(title: "重命名", action: #selector(renameBlock(_:)), keyEquivalent: "")
+            let rename = NSMenuItem(title: String(localized: "重命名"), action: #selector(renameBlock(_:)), keyEquivalent: "")
             rename.target = self; rename.representedObject = block.id
             menu.addItem(rename)
         }
         // 静音与独奏作用于整条音轨，不是这一块；标题写明轨道，免得以为只静这一段（这一块的音量在音频面板里调）。
         if let role = block.role, role == .system || role == .microphone {
             let track: AudioTrack = role == .system ? .system : .microphone
-            let name = role == .system ? "系统声音" : "麦克风"
+            let name = role == .system ? String(localized: "系统声音") : String(localized: "麦克风")
             menu.addItem(.separator())
             for solo in [false, true] {
-                let item = NSMenuItem(title: solo ? "仅播放“\(name)”轨" : "静音“\(name)”轨", action: #selector(toggleRowAudio(_:)), keyEquivalent: "")
+                let item = NSMenuItem(title: solo ? String(localized: "仅播放“\(name)”轨") : String(localized: "静音“\(name)”轨"), action: #selector(toggleRowAudio(_:)), keyEquivalent: "")
                 item.target = self; item.identifier = NSUserInterfaceItemIdentifier(track.rawValue + (solo ? ".solo" : ".mute"))
                 item.state = (solo ? edit.audio.solo : edit.audio.muted).contains(track) ? .on : .off
                 item.isEnabled = model.audioTracks.contains(track)
@@ -1278,10 +1278,10 @@ final class TimelineViewportView: NSView {
         let follows = [TimelineMedia.system, .microphone].contains { edit.audioFollowsPicture($0) && model.audioTracks.contains($0 == .system ? .system : .microphone) }
         if block.role == .screen, !block.card, follows {
             menu.addItem(.separator())
-            let item = NSMenuItem(title: "分离声音", action: #selector(detachAudio(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: String(localized: "分离声音"), action: #selector(detachAudio(_:)), keyEquivalent: "")
             item.target = self; menu.addItem(item)
         } else if let role = block.role, role == .system || role == .microphone {
-            let item = NSMenuItem(title: "声音跟随画面", action: #selector(attachAudio(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: String(localized: "声音跟随画面"), action: #selector(attachAudio(_:)), keyEquivalent: "")
             item.target = self; menu.addItem(item)
         }
         if siblings.count > 1 {
@@ -1290,26 +1290,26 @@ final class TimelineViewportView: NSView {
         }
         menu.addItem(.separator())
         // 删卡片会连同它占的时长一起撤掉、后面的内容前移，标题说清楚。
-        let delete = NSMenuItem(title: block.card ? "删除卡片" : "删除", action: #selector(deleteBlock(_:)), keyEquivalent: "\u{8}")
+        let delete = NSMenuItem(title: block.card ? String(localized: "删除卡片") : String(localized: "删除"), action: #selector(deleteBlock(_:)), keyEquivalent: "\u{8}")
         delete.keyEquivalentModifierMask = []; delete.target = self; menu.addItem(delete)
         return menu
     }
     /// 空白处的"在此处添加"：按这一行装的是哪种叠加层决定；素材行与字幕行没有可凭空添加的东西。
     private func addItem(forRowOf sample: Block?, at time: Double) -> NSMenuItem? {
         guard let sample, sample.role == nil, !sample.caption else { return nil }
-        let (title, action): (String, Selector) = sample.mask ? ("添加遮罩", #selector(addMaskHere(_:)))
-            : sample.text ? ("添加文字", #selector(addTextHere(_:))) : ("添加聚焦", #selector(addFocusHere(_:)))
-        let item = NSMenuItem(title: "在此处" + title + " · " + TimelineTime.code(time), action: action, keyEquivalent: "")
+        let (title, action): (String, Selector) = sample.mask ? (String(localized: "添加遮罩"), #selector(addMaskHere(_:)))
+            : sample.text ? (String(localized: "添加文字"), #selector(addTextHere(_:))) : (String(localized: "添加聚焦"), #selector(addFocusHere(_:)))
+        let item = NSMenuItem(title: String(localized: "在此处") + title + " · " + TimelineTime.code(time), action: action, keyEquivalent: "")
         item.target = self; item.representedObject = time
         return item
     }
     private func rowMembersItem(_ members: [Block]) -> NSMenuItem {
-        let group = NSMenuItem(title: "同行块", action: nil, keyEquivalent: "")
+        let group = NSMenuItem(title: String(localized: "同行块"), action: nil, keyEquivalent: "")
         group.submenu = rowMembersMenu(members)
         return group
     }
     private func rowMembersMenu(_ members: [Block]) -> NSMenu {
-        let menu = NSMenu(title: "同行块")
+        let menu = NSMenu(title: String(localized: "同行块"))
         for block in members {
             let item = NSMenuItem(title: block.title + " · " + TimelineTime.code(block.start), action: #selector(selectRowMember(_:)), keyEquivalent: "")
             item.target = self; item.representedObject = block.id; item.state = isSelected(block) ? .on : .off

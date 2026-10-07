@@ -57,7 +57,7 @@ public struct SelectField: View {
         .opacity(enabled ? 1 : 0.4)
         .onHover { hovered = $0 }
         .accessibilityLabel(accessibilityName)
-        .accessibilityValue(value ?? "未选择")
+        .accessibilityValue(value ?? String(localized: "未选择"))
     }
 
     /// 分组 → 菜单条目：组间分隔线，有标题的组加节标题。

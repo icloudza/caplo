@@ -28,7 +28,7 @@ public struct TitleCard: Codable, Equatable, Sendable {
 
     public init(text: TextSegment? = nil, background: TextSegment.Palette? = nil) {
         var value = text ?? TextPreset.title.segment(start: 0, duration: VideoEdit.defaultCardDuration)
-        if text == nil { value.text = "标题" }
+        if text == nil { value.text = String(localized: "标题") }
         value.start = 0; value.timelineStart = nil; value.holdClipID = nil
         value.layout = .fullscreen
         self.text = value
@@ -39,7 +39,7 @@ public struct TitleCard: Codable, Equatable, Sendable {
     public var defaultTitle: String {
         let line = text.text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
         let trimmed = line.trimmingCharacters(in: .whitespaces)
-        return trimmed.isEmpty ? "卡片" : String(trimmed.prefix(16))
+        return trimmed.isEmpty ? String(localized: "卡片") : String(trimmed.prefix(16))
     }
 
     var isValid: Bool {

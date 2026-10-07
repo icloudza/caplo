@@ -27,7 +27,7 @@ public actor EditorPreviewRenderer {
     public func render(url: URL, document: ProjectDocument, edit: VideoEdit, time: Double) async throws -> CGImage {
         try Task.checkCancellation()
         guard !closed else { throw CancellationError() }
-        guard !rendering else { throw ProjectError.invalid("预览请求必须按顺序处理。") }
+        guard !rendering else { throw ProjectError.invalid(String(localized: "预览请求必须按顺序处理。")) }
         rendering = true
         defer { rendering = false }
         // 编辑会话持有工程租约，事件素材在会话内不变；只加载一次，剪辑变化才更新时间索引。
@@ -62,7 +62,7 @@ public actor EditorPreviewRenderer {
                 backgroundImage: background?.image, backdrop: backdrop, timeline: timeline)
             // 在渲染 actor 内完成像素输出，避免 SwiftUI 显示时才执行延迟合成和访问解码资源。
             guard let rendered = context.createCGImage(result, from: CGRect(origin: .zero, size: size), format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB), deferred: false) else {
-                throw ProjectError.invalid("无法渲染预览。")
+                throw ProjectError.invalid(String(localized: "无法渲染预览。"))
             }
             try Task.checkCancellation()
             return rendered
@@ -85,7 +85,7 @@ public actor EditorPreviewRenderer {
 
     /// 自定义布局对话框用的两张原帧（录屏、摄像头），不合成；缺失的返回空。
     public func stills(url: URL, document: ProjectDocument, edit: VideoEdit, time: Double) async throws -> (screen: CGImage?, camera: CGImage?) {
-        guard !closed, !rendering else { throw ProjectError.invalid("预览请求必须按顺序处理。") }
+        guard !closed, !rendering else { throw ProjectError.invalid(String(localized: "预览请求必须按顺序处理。")) }
         rendering = true
         defer { rendering = false }
         let context = self.context
@@ -107,7 +107,7 @@ public actor EditorPreviewRenderer {
             generator = cached.1; range = cached.2
         } else {
             let asset = AVURLAsset(url: url)
-            guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw ProjectError.invalid("素材缺少视频轨道。") }
+            guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw ProjectError.invalid(String(localized: "素材缺少视频轨道。")) }
             range = try await track.load(.timeRange)
             try Task.checkCancellation()
             guard !closed else { throw CancellationError() }

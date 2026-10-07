@@ -23,7 +23,7 @@ struct CursorPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             if !editable {
-                PanelNote("这段素材是旧版本录的，原光标已录进视频，下面的样式与运动效果无法应用于它；点击高亮仍可调整。")
+                PanelNote(String(localized: "这段素材是旧版本录的，原光标已录进视频，下面的样式与运动效果无法应用于它；点击高亮仍可调整。"))
             }
             VStack(alignment: .leading, spacing: CaploMetrics.Spacing.s) {
                 Toggle(isOn: Binding(get: { hidden }, set: { hide in
@@ -31,22 +31,22 @@ struct CursorPanel: View {
                         if edit.pointer == nil { var effects = PointerEffects(); effects.clicksVisible = false; edit.pointer = effects }
                         edit.pointer?.cursorVisible = !hide
                     }
-                })) { SettingLabel("隐藏光标", systemImage: "cursorarrow.slash") }
+                })) { SettingLabel(String(localized: "隐藏光标"), systemImage: "cursorarrow.slash") }
                     .toggleStyle(StudioToggleStyle())
                     .disabled(!editable)
-                if hidden { PanelNote("成片里不画光标；点击高亮仍按下面的设置显示。") }
+                if hidden { PanelNote(String(localized: "成片里不画光标；点击高亮仍按下面的设置显示。")) }
                 if clipsHidingCursor > 0 {
-                    PanelNote("有 \(clipsHidingCursor) 个片段单独隐藏了光标（旧版片段设置留下的）。")
+                    PanelNote(String(localized: "有 \(clipsHidingCursor) 个片段单独隐藏了光标（旧版片段设置留下的）。"))
                     Button("这些片段也显示光标") {
                         model.commit { edit in for index in edit.clips.indices { edit.clips[index].cursorHidden = false } }
                     }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
                 }
             }
             // 光标样式：上面按形状分类（箭头 / 指针 / 抓取 / 更多）切换预览，下面的格子是样式；录制始终单独保存真实光标轨迹，这里选的是回放时画成什么样。
-            PanelSection("光标样式", info: "只替换箭头，其他光标形状保持原样") {
+            PanelSection(String(localized: "光标样式"), info: String(localized: "只替换箭头，其他光标形状保持原样")) {
                 CursorCategoryBar(selection: $category)
                 if category.styles.isEmpty {
-                    PanelNote("此分组暂无样式。")
+                    PanelNote(String(localized: "此分组暂无样式。"))
                 } else {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: CaploMetrics.Spacing.s), count: 4), spacing: CaploMetrics.Spacing.s) {
                         ForEach(category.styles) { theme in
@@ -60,31 +60,31 @@ struct CursorPanel: View {
                     }
                 }
                 // 允许小于 1×：最小值就是与录制时系统光标同大的倍率（按真实光标的点尺寸换算），并作为一个档位。
-                EditorSlider(model: model, title: "大小", value: value(\.cursorScale), range: model.systemCursorScale...3, suffix: "×", defaultValue: 1, detents: [model.systemCursorScale, 1, 2])
-                EditorDial(model: model, title: "角度", value: value(\.angle))
-                EditorFill(model: model, title: "随移动转向", value: value(\.directionFollow), range: 0...1, suffix: "%", percentage: true, defaultValue: 0)
+                EditorSlider(model: model, title: String(localized: "大小"), value: value(\.cursorScale), range: model.systemCursorScale...3, suffix: "×", defaultValue: 1, detents: [model.systemCursorScale, 1, 2])
+                EditorDial(model: model, title: String(localized: "角度"), value: value(\.angle))
+                EditorFill(model: model, title: String(localized: "随移动转向"), value: value(\.directionFollow), range: 0...1, suffix: "%", percentage: true, defaultValue: 0)
             }
             .disabled(!editable || hidden)
             Group {
-                PanelSection("光标运动") {
-                    EditorFill(model: model, title: "轨迹平滑", value: value(\.smoothing), range: 0...2, defaultValue: 0)
-                    EditorFill(model: model, title: "点击弹跳", value: value(\.bounce), range: 0...0.4, defaultValue: 0)
-                    EditorSlider(model: model, title: "弹跳速度", value: value(\.bounceSpeed), range: 0.5...2, suffix: "×", defaultValue: 1, detents: [1])
-                    EditorFill(model: model, title: "摆动", value: value(\.sway), range: 0...1, defaultValue: 0)
-                    EditorFill(model: model, title: "运动模糊", value: value(\.motionBlur), range: 0...1, defaultValue: 0)
+                PanelSection(String(localized: "光标运动")) {
+                    EditorFill(model: model, title: String(localized: "轨迹平滑"), value: value(\.smoothing), range: 0...2, defaultValue: 0)
+                    EditorFill(model: model, title: String(localized: "点击弹跳"), value: value(\.bounce), range: 0...0.4, defaultValue: 0)
+                    EditorSlider(model: model, title: String(localized: "弹跳速度"), value: value(\.bounceSpeed), range: 0.5...2, suffix: "×", defaultValue: 1, detents: [1])
+                    EditorFill(model: model, title: String(localized: "摆动"), value: value(\.sway), range: 0...1, defaultValue: 0)
+                    EditorFill(model: model, title: String(localized: "运动模糊"), value: value(\.motionBlur), range: 0...1, defaultValue: 0)
                     Toggle("静止时淡出", isOn: toggle(\.hideIdle)).toggleStyle(StudioToggleStyle())
                     Toggle("结尾回到起点", isOn: toggle(\.loop)).toggleStyle(StudioToggleStyle())
                 }
             }
             .disabled(!editable || hidden)
-            PanelSection("点击高亮") {
-                Toggle(isOn: toggle(\.clicksVisible)) { SettingLabel("点击高亮", systemImage: "circle.circle") }.toggleStyle(StudioToggleStyle())
+            PanelSection(String(localized: "点击高亮")) {
+                Toggle(isOn: toggle(\.clicksVisible)) { SettingLabel(String(localized: "点击高亮"), systemImage: "circle.circle") }.toggleStyle(StudioToggleStyle())
                 Picker("点击样式", selection: choice(\.clickEffect)) {
                     Text("圆环").tag(PointerEffects.ClickEffect.ripple)
                     Text("光斑").tag(PointerEffects.ClickEffect.spotlight)
                     Text("双重波纹").tag(PointerEffects.ClickEffect.echo)
                 }.environment(\.colorScheme, .dark)
-                EditorSlider(model: model, title: "高亮大小", value: value(\.clickScale), range: 0.5...2, suffix: "×", defaultValue: 1, detents: [1])
+                EditorSlider(model: model, title: String(localized: "高亮大小"), value: value(\.clickScale), range: 0.5...2, suffix: "×", defaultValue: 1, detents: [1])
                     .disabled(model.edit.pointer?.clicksVisible != true)
                 ClickTintRow(effects: model.edit.pointer ?? PointerEffects()) { tint, custom in
                     model.commit { edit in
@@ -131,7 +131,7 @@ private struct CursorTheme: Identifiable {
     let title: String
     let style: PointerEffects.Style?
     let custom: String?
-    static let modern = CursorTheme(id: "modern", title: "现代", style: .tahoe, custom: nil)
+    static let modern = CursorTheme(id: "modern", title: String(localized: "现代"), style: .tahoe, custom: nil)
     init(id: String, title: String, style: PointerEffects.Style?, custom: String?) { self.id = id; self.title = title; self.style = style; self.custom = custom }
     init(_ style: CursorStyle) { self.init(id: style.id, title: style.title, style: nil, custom: style.id) }
 
@@ -160,10 +160,10 @@ private enum CursorStyleGroup: CaseIterable {
     }
     var title: String {
         switch self {
-        case .arrow: "箭头"
-        case .pointer: "指针"
-        case .minimal: "简约"
-        case .circle: "圆圈"
+        case .arrow: String(localized: "箭头")
+        case .pointer: String(localized: "指针")
+        case .minimal: String(localized: "简约")
+        case .circle: String(localized: "圆圈")
         }
     }
     private var catalogGroup: CursorStyle.Group {
@@ -250,7 +250,7 @@ private struct ClickTintRow: View {
     /// 上次调过的自定义色：切到预设再切回来，不用重新调。
     @State private var remembered = Color(red: 1, green: 0.42, blue: 0.42)
 
-    private static let presets: [(PointerEffects.Tint, String)] = [(.violet, "紫色"), (.blue, "蓝色"), (.yellow, "黄色")]
+    private static let presets: [(PointerEffects.Tint, String)] = [(.violet, String(localized: "紫色")), (.blue, String(localized: "蓝色")), (.yellow, String(localized: "黄色"))]
     private var isCustom: Bool { effects.customTint != nil }
 
     var body: some View {

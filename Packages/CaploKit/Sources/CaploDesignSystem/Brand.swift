@@ -24,7 +24,7 @@ public enum CaploBrand {
             return true
         }
         image.isTemplate = false
-        image.accessibilityDescription = "Caplo · 录制中"
+        image.accessibilityDescription = String(localized: "Caplo · 录制中")
         return image
     }
 

@@ -61,7 +61,7 @@ import Observation
 
     private func run(_ configuration: Configuration, run: Int) {
         Task { [weak self] in
-            guard await AVCaptureDevice.requestAccess(for: .video) else { self?.error = "摄像头访问未获允许。"; return }
+            guard await AVCaptureDevice.requestAccess(for: .video) else { self?.error = String(localized: "摄像头访问未获允许。"); return }
             var delay = 1_500
             while true {
                 guard let self, self.generation == run else { return }
@@ -76,7 +76,7 @@ import Observation
     private func attempt(_ configuration: Configuration, run: Int) async -> Bool {
         // 不用 isConnected 预判（连续互通的 iPhone 刚出现时它可能还是假）：直接开输入，开不了就按退避再试。
         guard let device = configuration.deviceID.flatMap({ AVCaptureDevice(uniqueID: $0) }) ?? AVCaptureDevice.default(for: .video) else {
-            error = "没有可用的摄像头。"; return false
+            error = String(localized: "没有可用的摄像头。"); return false
         }
         // 采集图与录制完全同一套配置（含视频数据输出）：按 REC 时录制器只挂消费者，AVFoundation 那边什么都不改。
         let feed = CameraFeed(queue: queue)
@@ -92,9 +92,9 @@ import Observation
         NSLog("Caplo：摄像头预览已启动（%@，%@）", device.localizedName, format?.title ?? "预设 " + feed.session.sessionPreset.rawValue)
         self.feed = feed; deviceUID = device.uniqueID; active = true; error = nil
         observer = NotificationCenter.default.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: feed.session, queue: nil) { [weak self] note in
-            let reason = (note.userInfo?[AVCaptureSessionErrorKey] as? NSError)?.localizedDescription ?? "采集出错"
+            let reason = (note.userInfo?[AVCaptureSessionErrorKey] as? NSError)?.localizedDescription ?? String(localized: "采集出错")
             NSLog("Caplo：摄像头预览中断，重来：%@", reason)
-            Task { @MainActor in self?.interrupted("摄像头预览中断：\(reason)", run: run) }
+            Task { @MainActor in self?.interrupted(String(localized: "摄像头预览中断：\(reason)"), run: run) }
         }
         return true
     }

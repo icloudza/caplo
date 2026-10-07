@@ -10,8 +10,13 @@ enum RecordingMode: String, CaseIterable, Identifiable {
     case display = "全屏", region = "自定义区域", window = "窗口"
     var id: Self { self }
 
+    /// 界面上的名字；原始值是内部标识，不随语言变化。
+    var title: String {
+        switch self { case .display: String(localized: "全屏"); case .region: String(localized: "自定义区域"); case .window: String(localized: "窗口") }
+    }
+
     var hint: String {
-        switch self { case .display: "录下整个屏幕"; case .region: "框选需要的画面"; case .window: "专注一个应用窗口" }
+        switch self { case .display: String(localized: "录下整个屏幕"); case .region: String(localized: "框选需要的画面"); case .window: String(localized: "专注一个应用窗口") }
     }
     var kind: CaptureSource.Kind { self == .window ? .window : .display }
     var symbol: String {
@@ -22,5 +27,5 @@ enum RecordingMode: String, CaseIterable, Identifiable {
         switch self { case .display: .recordDisplay; case .region: .recordRegion; case .window: .recordWindow }
     }
     /// 来源下拉为空时的占位。
-    var sourcePlaceholder: String { self == .window ? "选择窗口" : "选择显示器" }
+    var sourcePlaceholder: String { self == .window ? String(localized: "选择窗口") : String(localized: "选择显示器") }
 }

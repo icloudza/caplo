@@ -23,35 +23,35 @@ struct MaskPanel: View {
                 Text("模糊").tag(MaskSegment.Effect.blur)
                 Text("像素化").tag(MaskSegment.Effect.pixelate)
             }.environment(\.colorScheme, .dark)
-            EditorFill(model: model, title: "强度", value: amountBinding(id),
+            EditorFill(model: model, title: String(localized: "强度"), value: amountBinding(id),
                          range: MaskSegment.amountRange, decimals: 0, defaultValue: MaskSegment.defaultAmount)
             if mask.amount < MaskSegment.weakAmount {
-                PanelNote("强度偏低，画面里的文字可能仍然认得出来。导出前建议提到 \(Int(MaskSegment.weakAmount)) 以上。")
+                PanelNote(String(localized: "强度偏低，画面里的文字可能仍然认得出来。导出前建议提到 \(Int(MaskSegment.weakAmount)) 以上。"))
             }
         } else {
-            EditorFill(model: model, title: "周围压暗", value: binding(id, \.darkness),
+            EditorFill(model: model, title: String(localized: "周围压暗"), value: binding(id, \.darkness),
                          range: 0...0.95, suffix: "%", percentage: true, defaultValue: 0.55)
-            EditorStepper(model: model, title: "淡入", value: optionalBinding(id, \.fadeIn, fallback: 0.15), range: 0...1.5, defaultValue: 0.15)
-            EditorStepper(model: model, title: "淡出", value: optionalBinding(id, \.fadeOut, fallback: 0.15), range: 0...1.5, defaultValue: 0.15)
+            EditorStepper(model: model, title: String(localized: "淡入"), value: optionalBinding(id, \.fadeIn, fallback: 0.15), range: 0...1.5, defaultValue: 0.15)
+            EditorStepper(model: model, title: String(localized: "淡出"), value: optionalBinding(id, \.fadeOut, fallback: 0.15), range: 0...1.5, defaultValue: 0.15)
         }
         Picker("形状", selection: shapeBinding(id)) {
             Text("矩形").tag(MaskSegment.Shape.rectangle)
             Text("椭圆").tag(MaskSegment.Shape.ellipse)
         }.environment(\.colorScheme, .dark)
-        EditorRegion(model: model, title: "区域", shape: .box(minimumSide: 0.02), aspect: model.sourceAspect,
+        EditorRegion(model: model, title: String(localized: "区域"), shape: .box(minimumSide: 0.02), aspect: model.sourceAspect,
                      region: regionBinding(id), readout: EditorRegion.sizeReadout)
         if mask.shape == .rectangle {
-            EditorSlider(model: model, title: "圆角", value: binding(id, \.cornerRadius), range: 0...80, decimals: 0, defaultValue: 0)
+            EditorSlider(model: model, title: String(localized: "圆角"), value: binding(id, \.cornerRadius), range: 0...80, decimals: 0, defaultValue: 0)
         }
         if mask.kind == .sensitive {
-            EditorSlider(model: model, title: "羽化", value: binding(id, \.feather), range: 0...60, decimals: 0, defaultValue: 0)
+            EditorSlider(model: model, title: String(localized: "羽化"), value: binding(id, \.feather), range: 0...60, decimals: 0, defaultValue: 0)
         }
         Button("删除此遮罩") { model.select(.mask(id)); model.deleteSelection() }
             .buttonStyle(StudioButtonStyle(.destructive, size: .small))
     }
 
     var body: some View {
-        PanelSection("遮罩", info: "随画面缩放，剪切后自动拆分") {
+        PanelSection(String(localized: "遮罩"), info: String(localized: "随画面缩放，剪切后自动拆分")) {
             if let id = model.selectedMask, let mask = model.edit.mask(id: id) {
                 // 高亮画成"虚线框里有一块亮区"，与敏感遮罩的空心虚线框成对；别写没有的符号名（"spotlight" 不存在，图标会整个空掉）。
                 PanelSelection(symbol: mask.kind == .highlight
@@ -62,9 +62,9 @@ struct MaskPanel: View {
                     controls(for: id, mask: mask)
                 }
             } else if model.edit.maskList.isEmpty {
-                PanelNote("暂无遮罩。用下面的按钮在播放头处添加 2 秒遮罩，然后在画布上拖动它的位置和大小。")
+                PanelNote(String(localized: "暂无遮罩。用下面的按钮在播放头处添加 2 秒遮罩，然后在画布上拖动它的位置和大小。"))
             } else {
-                PanelNote("在时间线的遮罩块上点一下，这里就显示那一条的参数。")
+                PanelNote(String(localized: "在时间线的遮罩块上点一下，这里就显示那一条的参数。"))
             }
             HStack(spacing: CaploMetrics.Spacing.s) {
                 Button("添加遮罩") { if let id = model.addMask(kind: .sensitive) { select(id) } }
@@ -73,7 +73,7 @@ struct MaskPanel: View {
                     .buttonStyle(StudioButtonStyle(.secondary))
             }
             if model.edit.hasWeakMask {
-                PanelNote("有遮罩的强度低于 \(Int(MaskSegment.weakAmount))，导出前请确认它确实盖住了内容。")
+                PanelNote(String(localized: "有遮罩的强度低于 \(Int(MaskSegment.weakAmount))，导出前请确认它确实盖住了内容。"))
             }
         }
         // 进面板时还没选中就先选第一条，免得面板空着、非得先去时间线点一下。

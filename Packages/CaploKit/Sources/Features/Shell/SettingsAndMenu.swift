@@ -145,10 +145,10 @@ public final class RecordingAppDelegate: NSObject, NSApplicationDelegate {
         // 正在导出：先问。以前直接退出，导出白做，目标文件夹里还留下隐藏的临时文件。
         if let editor = VideoEditorSessions.current, editor.exporting {
             let alert = NSAlert()
-            alert.messageText = "正在导出视频"
-            alert.informativeText = "现在退出会取消这次导出。"
-            alert.addButton(withTitle: "继续导出")
-            alert.addButton(withTitle: "取消导出并退出")
+            alert.messageText = String(localized: "正在导出视频")
+            alert.informativeText = String(localized: "现在退出会取消这次导出。")
+            alert.addButton(withTitle: String(localized: "继续导出"))
+            alert.addButton(withTitle: String(localized: "取消导出并退出"))
             guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
             Task { @MainActor in
                 // 等导出收尾（删掉临时文件）后再走一遍正常的退出检查。
@@ -163,8 +163,8 @@ public final class RecordingAppDelegate: NSObject, NSApplicationDelegate {
         if recorder.phase == .countdown { StudioWindows.terminating = true; recorder.cancelCountdown(); return .terminateNow }
         if recorder.isBusy && !recorder.canStop {
             let alert = NSAlert()
-            alert.messageText = "录制正在启动或保存"
-            alert.informativeText = "请稍后再退出，以便完成当前操作。"
+            alert.messageText = String(localized: "录制正在启动或保存")
+            alert.informativeText = String(localized: "请稍后再退出，以便完成当前操作。")
             alert.runModal()
             return .terminateCancel
         }
@@ -174,7 +174,7 @@ public final class RecordingAppDelegate: NSObject, NSApplicationDelegate {
             await recorder.stop()
             if let error = recorder.errorMessage {
                 let alert = NSAlert()
-                alert.messageText = "请先检查录制保存结果"
+                alert.messageText = String(localized: "请先检查录制保存结果")
                 alert.informativeText = error
                 alert.runModal()
                 StudioWindows.terminating = false

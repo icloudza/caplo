@@ -1,0 +1,84 @@
+{
+  "sourceLanguage": "zh-Hans",
+  "strings": {
+    "Caplo 工程": {
+      "comment": "文档类型名（CFBundleTypeName）",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Caplo Project"
+          }
+        }
+      }
+    },
+    "Caplo 录制工程": {
+      "comment": "导出的 UTType 描述",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Caplo Recording Project"
+          }
+        }
+      }
+    },
+    "NSCameraUsageDescription": {
+      "comment": "摄像头权限说明",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Caplo records you on camera. Camera video is saved as separate media in your local project."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用于录制讲解人像，摄像头视频会作为独立素材保存在本地工程中。"
+          }
+        }
+      }
+    },
+    "NSMicrophoneUsageDescription": {
+      "comment": "麦克风权限说明",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Caplo records your narration. Microphone audio is saved in your local project."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用于录制讲解声音，麦克风素材会保存在本地工程中。"
+          }
+        }
+      }
+    },
+    "NSSpeechRecognitionUsageDescription": {
+      "comment": "语音识别权限说明",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Caplo turns your recorded narration into captions. Transcription happens entirely on this Mac, and audio never leaves it."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用于把录制的讲解声音转写成字幕。转写全部在本机完成，音频不会离开这台电脑。"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

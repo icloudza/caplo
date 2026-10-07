@@ -11,7 +11,7 @@ public struct TextSegment: Codable, Equatable, Sendable, Identifiable {
     public enum Layout: String, Codable, CaseIterable, Sendable {
         case overlay, fullscreen, splitLeft, splitRight
         public var title: String {
-            switch self { case .overlay: "叠加"; case .fullscreen: "全屏"; case .splitLeft: "左分屏"; case .splitRight: "右分屏" }
+            switch self { case .overlay: String(localized: "叠加"); case .fullscreen: String(localized: "全屏"); case .splitLeft: String(localized: "左分屏"); case .splitRight: String(localized: "右分屏") }
         }
         /// 分屏时文字占哪半边；`nil` 表示不分屏。
         public var textOnLeft: Bool? {
@@ -65,9 +65,9 @@ public struct TextSegment: Codable, Equatable, Sendable, Identifiable {
 
         public var title: String {
             switch rawValue {
-            case "white": "白"; case "ink": "墨"; case "mist": "雾"; case "sky": "天蓝"
-            case "mint": "薄荷"; case "amber": "琥珀"; case "rose": "玫瑰"
-            default: isCustom ? rawValue : "白"
+            case "white": String(localized: "白"); case "ink": String(localized: "墨"); case "mist": String(localized: "雾"); case "sky": String(localized: "天蓝")
+            case "mint": String(localized: "薄荷"); case "amber": String(localized: "琥珀"); case "rose": String(localized: "玫瑰")
+            default: isCustom ? rawValue : String(localized: "白")
             }
         }
 
@@ -221,7 +221,7 @@ public struct TextSegment: Codable, Equatable, Sendable, Identifiable {
 
     public var displayTitle: String { title ?? defaultTitle(number: nil) }
     public func defaultTitle(number: Int?) -> String {
-        let name = preset ?? (text.isEmpty ? "文字" : String(text.prefix(8)).replacingOccurrences(of: "\n", with: " "))
+        let name = preset ?? (text.isEmpty ? String(localized: "文字") : String(text.prefix(8)).replacingOccurrences(of: "\n", with: " "))
         return number.map { "\(name) \($0)" } ?? name
     }
 
@@ -502,15 +502,15 @@ public enum TextPreset: String, CaseIterable, Sendable, Identifiable {
     public var id: String { rawValue }
     public var name: String {
         switch self {
-        case .title: "标题"; case .subtitle: "副标题"; case .lowerThird: "字幕条"; case .eyebrow: "眉题"
-        case .bigNumber: "大数字"; case .quote: "引言"; case .code: "代码"; case .typewriter: "打字机"
+        case .title: String(localized: "标题"); case .subtitle: String(localized: "副标题"); case .lowerThird: String(localized: "字幕条"); case .eyebrow: String(localized: "眉题")
+        case .bigNumber: String(localized: "大数字"); case .quote: String(localized: "引言"); case .code: String(localized: "代码"); case .typewriter: String(localized: "打字机")
         }
     }
     /// 面板格子里画的样例文字。
     public var sample: String {
         switch self {
-        case .bigNumber: "3×"; case .code: "npm run build"; case .quote: "少即是多"
-        default: "产品演示"
+        case .bigNumber: "3×"; case .code: "npm run build"; case .quote: String(localized: "少即是多")
+        default: String(localized: "产品演示")
         }
     }
 

@@ -73,12 +73,12 @@ final class TimelineNavigatorView: NSView {
         handles.lineWidth = 1.5
         handles.lineCap = .round
         playheadLayer.cornerRadius = 0.5
-        toolTip = "拖动浏览 · 拖两端缩放 · 双击全览"
+        toolTip = String(localized: "拖动浏览 · 拖两端缩放 · 双击全览")
         setAccessibilityElement(true)
         setAccessibilityRole(.scrollBar)
         setAccessibilityOrientation(.horizontal)
-        setAccessibilityLabel("时间线总览")
-        setAccessibilityHelp("左右方向键移动视窗，加减键缩放，双击显示全部")
+        setAccessibilityLabel(String(localized: "时间线总览"))
+        setAccessibilityHelp(String(localized: "左右方向键移动视窗，加减键缩放，双击显示全部"))
         updateAppearance()
         updateLayers()
     }
@@ -212,7 +212,8 @@ final class TimelineNavigatorView: NSView {
         }
         handles.path = grips
         updatePlayheadLayer()
-        setAccessibilityValue(String(format: "%.2f 至 %.2f 秒，共 %.2f 秒", visibleStart, visibleStart + visibleDuration, totalDuration))
+        let seconds = { (value: Double) in String(format: "%.2f", value) }
+        setAccessibilityValue(String(localized: "\(seconds(visibleStart)) 至 \(seconds(visibleStart + visibleDuration)) 秒，共 \(seconds(totalDuration)) 秒"))
         window?.invalidateCursorRects(for: self)
     }
 

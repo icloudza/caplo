@@ -7,7 +7,7 @@ import CaploDesignSystem
 struct PermissionsView: View {
     let center: PermissionCenter
     /// 主按钮文字：启动时"开始使用"，其余场合"完成"。
-    var continueTitle = "开始使用"
+    var continueTitle = String(localized: "开始使用")
     /// 主按钮是否要等屏幕录制授权（启动、或因屏幕录制缺失而打开时）。
     var requiresScreen = true
     /// 因某项权限缺失而打开时高亮那一行。
@@ -58,7 +58,7 @@ struct PermissionsView: View {
         .preferredColorScheme(.dark)
     }
 
-    private var footnote: String { "可随时在系统设置中更改" }
+    private var footnote: String { String(localized: "可随时在系统设置中更改") }
 }
 
 private struct PermissionRow: View {
@@ -98,9 +98,9 @@ private struct PermissionRow: View {
 
     private var caption: String {
         switch status {
-        case .denied where kind == .screen: "在系统设置中打开\u{201C}\(PermissionCenter.appName)\u{201D}，再重新打开"
-        case .denied: "已拒绝，需在系统设置中开启"
-        case .needsRelaunch: "已开启，重新打开后生效"
+        case .denied where kind == .screen: String(localized: "在系统设置中打开\u{201C}\(PermissionCenter.appName)\u{201D}，再重新打开")
+        case .denied: String(localized: "已拒绝，需在系统设置中开启")
+        case .needsRelaunch: String(localized: "已开启，重新打开后生效")
         default: kind.purpose
         }
     }
@@ -147,7 +147,7 @@ public struct PermissionsPreview: View {
         default:
             center = PermissionCenter(preview: [:])
         }
-        continueTitle = "开始使用"
+        continueTitle = String(localized: "开始使用")
     }
     public var body: some View { PermissionsView(center: center, continueTitle: continueTitle) }
     public static var size: CGSize { PermissionsView.size }

@@ -12,16 +12,16 @@ enum PermissionKind: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .screen: "屏幕录制"; case .microphone: "麦克风"; case .camera: "摄像头"; case .speech: "语音识别"
+        case .screen: String(localized: "屏幕录制"); case .microphone: String(localized: "麦克风"); case .camera: String(localized: "摄像头"); case .speech: String(localized: "语音识别")
         }
     }
 
     var purpose: String {
         switch self {
-        case .screen: "录制屏幕与窗口画面"
-        case .microphone: "录制讲解声音"
-        case .camera: "录制人像画中画"
-        case .speech: "在本机转写字幕"
+        case .screen: String(localized: "录制屏幕与窗口画面")
+        case .microphone: String(localized: "录制讲解声音")
+        case .camera: String(localized: "录制人像画中画")
+        case .speech: String(localized: "在本机转写字幕")
         }
     }
 

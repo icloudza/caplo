@@ -83,9 +83,9 @@ public struct RegionPad: View {
 
     private var hint: String {
         switch shape {
-        case .point: "拖动摆放 · 双击复位"
-        case .window: "拖动取景 · 双击复位"
-        case .box: "拖角缩放 · 双击复位"
+        case .point: String(localized: "拖动摆放 · 双击复位")
+        case .window: String(localized: "拖动取景 · 双击复位")
+        case .box: String(localized: "拖角缩放 · 双击复位")
         }
     }
 

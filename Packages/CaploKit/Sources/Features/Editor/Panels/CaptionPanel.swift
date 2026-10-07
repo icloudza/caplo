@@ -23,13 +23,13 @@ struct CaptionPanel: View {
     }
 
     var body: some View {
-        PanelSection("转写", info: "本机转写，音频不上传；改过的句子不会被覆盖") {
+        PanelSection(String(localized: "转写"), info: String(localized: "本机转写，音频不上传；改过的句子不会被覆盖")) {
             if let progress = model.transcription {
                 ProgressView(value: progress.progress).progressViewStyle(.linear)
                 Text(progress.message).font(CaploFont.caption).foregroundStyle(CaploColor.textSecondary)
                 Button("取消") { model.cancelTranscription() }.buttonStyle(StudioButtonStyle(.secondary))
             } else if !model.hasTranscribableAudio {
-                PanelNote("这个工程没有录到声音。可以导入现成的 SRT / VTT 字幕。")
+                PanelNote(String(localized: "这个工程没有录到声音。可以导入现成的 SRT / VTT 字幕。"))
             } else {
                 let sources = TranscriptionSource.allCases.filter { ProjectTranscription.hasAudio(model.entry.document, source: $0) }
                 if sources.count > 1 {
@@ -41,12 +41,12 @@ struct CaptionPanel: View {
                     Text("中文（普通话）").tag("zh-CN")
                     Text("英语（美国）").tag("en-US")
                     Text("日语").tag("ja-JP")
-                    Text("跟随系统（\(model.captionLocale.localizedString(forLanguageCode: model.captionLocale.language.languageCode?.identifier ?? "zh") ?? "中文")）").tag("system")
+                    Text("跟随系统（\(model.captionLocale.localizedString(forLanguageCode: model.captionLocale.language.languageCode?.identifier ?? "zh") ?? String(localized: "中文"))）").tag("system")
                 }.environment(\.colorScheme, .dark)
                 Button(model.edit.captionList.isEmpty ? "开始转写" : "重新转写") { model.transcribe() }
                     .buttonStyle(StudioButtonStyle(.primary))
                 if model.dictationDisabled {
-                    PanelNote("系统听写已关闭，打开后再转写。")
+                    PanelNote(String(localized: "系统听写已关闭，打开后再转写。"))
                     Button("打开听写设置") {
                         if let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension") { NSWorkspace.shared.open(url) }
                     }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
@@ -60,7 +60,7 @@ struct CaptionPanel: View {
         }
 
         if !model.edit.captionList.isEmpty {
-            PanelSection("样式", expanded: $styleExpanded) {
+            PanelSection(String(localized: "样式"), expanded: $styleExpanded) {
                 Picker("字体", selection: styleBinding(\.family)) {
                     Text("系统").tag(TextSegment.Family.system)
                     Text("无衬线").tag(TextSegment.Family.sans)
@@ -68,13 +68,13 @@ struct CaptionPanel: View {
                     Text("圆体").tag(TextSegment.Family.rounded)
                     Text("等宽").tag(TextSegment.Family.mono)
                 }.environment(\.colorScheme, .dark)
-                EditorSlider(model: model, title: "字号", value: numberBinding(\.size), range: 20...120, decimals: 0, defaultValue: 46)
-                EditorSlider(model: model, title: "字重", value: numberBinding(\.weight), range: TextSegment.weightRange, decimals: 0, defaultValue: 600, detents: [400, 600, 700])
-                EditorFill(model: model, title: "垂直位置", value: numberBinding(\.y), range: 0.5...0.98, suffix: "%", percentage: true, defaultValue: 0.86)
-                EditorFill(model: model, title: "最大宽度", value: numberBinding(\.maxWidth), range: 0.3...1, suffix: "%", percentage: true, defaultValue: 0.72)
+                EditorSlider(model: model, title: String(localized: "字号"), value: numberBinding(\.size), range: 20...120, decimals: 0, defaultValue: 46)
+                EditorSlider(model: model, title: String(localized: "字重"), value: numberBinding(\.weight), range: TextSegment.weightRange, decimals: 0, defaultValue: 600, detents: [400, 600, 700])
+                EditorFill(model: model, title: String(localized: "垂直位置"), value: numberBinding(\.y), range: 0.5...0.98, suffix: "%", percentage: true, defaultValue: 0.86)
+                EditorFill(model: model, title: String(localized: "最大宽度"), value: numberBinding(\.maxWidth), range: 0.3...1, suffix: "%", percentage: true, defaultValue: 0.72)
                 Toggle("文字背景", isOn: boolBinding(\.plate)).toggleStyle(StudioToggleStyle())
                 if model.edit.captionStyleOrDefault.plate {
-                    EditorFill(model: model, title: "背景不透明度", value: numberBinding(\.plateOpacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 0.55)
+                    EditorFill(model: model, title: String(localized: "背景不透明度"), value: numberBinding(\.plateOpacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 0.55)
                 }
                 Picker("逐词高亮", selection: highlightBinding) {
                     ForEach(CaptionStyle.Highlight.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -82,27 +82,27 @@ struct CaptionPanel: View {
                 if model.edit.captionStyleOrDefault.highlight != .none {
                     Toggle(isOn: boolBinding(\.evenSplit)) {
                         // 别用 textformat 一类的符号：中文环境下 SwiftUI 会挑本地化变体，画出来是「甲乙丙」三个汉字。
-                        SettingLabel("按字均分", systemImage: "metronome",
-                                     tip: "按字数均分句内时间，点亮更均匀")
+                        SettingLabel(String(localized: "按字均分"), systemImage: "metronome",
+                                     tip: String(localized: "按字数均分句内时间，点亮更均匀"))
                     }.toggleStyle(StudioToggleStyle())
                 }
                 Toggle(isOn: boolBinding(\.burnIn)) {
-                    SettingLabel("烧录到画面", systemImage: "square.and.arrow.down",
-                                 tip: "关闭后成片不含字幕，可另导出 SRT")
+                    SettingLabel(String(localized: "烧录到画面"), systemImage: "square.and.arrow.down",
+                                 tip: String(localized: "关闭后成片不含字幕，可另导出 SRT"))
                 }.toggleStyle(StudioToggleStyle())
                 if !model.edit.captionStyleOrDefault.burnIn {
-                    PanelNote("字幕不会烧进导出的视频，记得把 SRT 一起交付。")
+                    PanelNote(String(localized: "字幕不会烧进导出的视频，记得把 SRT 一起交付。"))
                 }
             }
-            PanelSection("时间", expanded: $timingExpanded) {
-                EditorStepper(model: model, title: "提前显示", value: numberBinding(\.lead), range: 0...1, defaultValue: 0.06)
-                EditorStepper(model: model, title: "延后消失", value: numberBinding(\.tail), range: 0...2, defaultValue: 0.35)
-                EditorStepper(model: model, title: "最短时长", value: numberBinding(\.minHold), range: 0.3...4, defaultValue: 1.0)
-                EditorStepper(model: model, title: "衔接间隔", value: numberBinding(\.bridge), range: 0...1, defaultValue: 0.25)
-                EditorStepper(model: model, title: "淡入", value: numberBinding(\.fadeIn), range: 0...1, defaultValue: 0.12)
-                EditorStepper(model: model, title: "淡出", value: numberBinding(\.fadeOut), range: 0...1, defaultValue: 0.12)
+            PanelSection(String(localized: "时间"), expanded: $timingExpanded) {
+                EditorStepper(model: model, title: String(localized: "提前显示"), value: numberBinding(\.lead), range: 0...1, defaultValue: 0.06)
+                EditorStepper(model: model, title: String(localized: "延后消失"), value: numberBinding(\.tail), range: 0...2, defaultValue: 0.35)
+                EditorStepper(model: model, title: String(localized: "最短时长"), value: numberBinding(\.minHold), range: 0.3...4, defaultValue: 1.0)
+                EditorStepper(model: model, title: String(localized: "衔接间隔"), value: numberBinding(\.bridge), range: 0...1, defaultValue: 0.25)
+                EditorStepper(model: model, title: String(localized: "淡入"), value: numberBinding(\.fadeIn), range: 0...1, defaultValue: 0.12)
+                EditorStepper(model: model, title: String(localized: "淡出"), value: numberBinding(\.fadeOut), range: 0...1, defaultValue: 0.12)
             }
-            PanelSection("这一句") {
+            PanelSection(String(localized: "这一句")) {
                 if let id = model.selectedCaption, let cue = model.edit.caption(id: id) {
                     TextEditor(text: textBinding(id))
                         .font(CaploFont.body).scrollContentBackground(.hidden)
@@ -113,7 +113,7 @@ struct CaptionPanel: View {
                     Text("原素材 \(timecode(cue.sourceStart)) – \(timecode(cue.sourceEnd))")
                         .font(CaploFont.caption).foregroundStyle(CaploColor.textSecondary)
                     if cue.locked {
-                        PanelNote("这一句你改过，重新转写不会覆盖它。")
+                        PanelNote(String(localized: "这一句你改过，重新转写不会覆盖它。"))
                     }
                     HStack(spacing: CaploMetrics.Spacing.s) {
                         Button("在播放头分割") { splitSelected(id) }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
@@ -121,7 +121,7 @@ struct CaptionPanel: View {
                     }
                     Button("删除这一句") { model.deleteSelection() }.buttonStyle(StudioButtonStyle(.destructive, size: .small))
                 } else {
-                    PanelNote("在时间线的字幕轨上点一句来编辑它。")
+                    PanelNote(String(localized: "在时间线的字幕轨上点一句来编辑它。"))
                 }
             }
         }
@@ -142,7 +142,7 @@ struct CaptionPanel: View {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [UTType(filenameExtension: "srt") ?? .plainText, UTType(filenameExtension: "vtt") ?? .plainText, .plainText]
         panel.allowsMultipleSelection = false
-        panel.message = "选择 SRT 或 VTT 字幕文件"
+        panel.message = String(localized: "选择 SRT 或 VTT 字幕文件")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         model.importCaptions(from: url)
     }
@@ -152,7 +152,7 @@ struct CaptionPanel: View {
         panel.nameFieldStringValue = model.entry.document.name + (vtt ? ".vtt" : ".srt")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do { try model.captionFileText(vtt: vtt).write(to: url, atomically: true, encoding: .utf8) }
-        catch { model.error = "写不进这个文件：\(error.localizedDescription)" }
+        catch { model.error = String(localized: "写不进这个文件：\(error.localizedDescription)") }
     }
 
     // MARK: 绑定

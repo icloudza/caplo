@@ -191,16 +191,16 @@ public enum VoiceProcessor {
     /// 用 AVAssetReader 把素材读成 48 kHz 单声道浮点（多声道混成单声道）。
     static func readMono(url: URL) async throws -> [Float] {
         let asset = AVURLAsset(url: url)
-        guard let track = try await asset.loadTracks(withMediaType: .audio).first else { throw ProjectError.invalid("素材缺少声音轨道：\(url.lastPathComponent)") }
+        guard let track = try await asset.loadTracks(withMediaType: .audio).first else { throw ProjectError.invalid(String(localized: "素材缺少声音轨道：\(url.lastPathComponent)")) }
         let reader = try AVAssetReader(asset: asset)
         let output = AVAssetReaderAudioMixOutput(audioTracks: [track], audioSettings: [
             AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: sampleRate, AVNumberOfChannelsKey: 1,
             AVLinearPCMBitDepthKey: 32, AVLinearPCMIsFloatKey: true, AVLinearPCMIsBigEndianKey: false, AVLinearPCMIsNonInterleaved: false
         ])
         output.alwaysCopiesSampleData = false
-        guard reader.canAdd(output) else { throw ProjectError.invalid("无法读取声音素材。") }
+        guard reader.canAdd(output) else { throw ProjectError.invalid(String(localized: "无法读取声音素材。")) }
         reader.add(output)
-        guard reader.startReading() else { throw reader.error ?? ProjectError.invalid("无法读取声音素材。") }
+        guard reader.startReading() else { throw reader.error ?? ProjectError.invalid(String(localized: "无法读取声音素材。")) }
         var samples: [Float] = []
         while let sample = output.copyNextSampleBuffer() {
             guard let block = CMSampleBufferGetDataBuffer(sample) else { continue }
@@ -209,13 +209,13 @@ public enum VoiceProcessor {
             CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: &bytes)
             bytes.withUnsafeBytes { raw in samples.append(contentsOf: raw.bindMemory(to: Float.self)) }
         }
-        if reader.status == .failed { throw reader.error ?? ProjectError.invalid("读取声音素材失败。") }
+        if reader.status == .failed { throw reader.error ?? ProjectError.invalid(String(localized: "读取声音素材失败。")) }
         return samples
     }
 
     static func write(_ samples: [Float], to url: URL) throws {
         guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false),
-              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(max(1, samples.count))) else { throw ProjectError.invalid("无法建立声音缓冲。") }
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(max(1, samples.count))) else { throw ProjectError.invalid(String(localized: "无法建立声音缓冲。")) }
         buffer.frameLength = AVAudioFrameCount(samples.count)
         samples.withUnsafeBufferPointer { source in buffer.floatChannelData!.pointee.update(from: source.baseAddress!, count: samples.count) }
         // 先写到同目录的隐藏临时文件，写完关闭后再原子改名。产物是否存在就是"处理过没有"的唯一判据，
@@ -226,7 +226,7 @@ public enum VoiceProcessor {
             let file = try AVAudioFile(forWriting: temporary, settings: format.settings, commonFormat: .pcmFormatFloat32, interleaved: false)
             try file.write(from: buffer)
         }()   // 出了这个作用域 AVAudioFile 释放并关闭文件，之后才能改名。
-        guard rename(temporary.path, url.path) == 0 else { throw ProjectError.invalid("无法保存处理后的声音：\(String(cString: strerror(errno)))") }
+        guard rename(temporary.path, url.path) == 0 else { throw ProjectError.invalid(String(localized: "无法保存处理后的声音：\(String(cString: strerror(errno)))")) }
     }
 }
 

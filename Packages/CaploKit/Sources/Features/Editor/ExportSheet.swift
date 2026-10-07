@@ -16,7 +16,7 @@ struct ExportSheet: View {
     init(model: VideoEditorModel) {
         self.model = model
         _settings = State(initialValue: model.exportSettings)
-        _fileName = State(initialValue: ExportSettings.sanitizedFileName(model.entry.document.name) ?? "导出")
+        _fileName = State(initialValue: ExportSettings.sanitizedFileName(model.entry.document.name) ?? String(localized: "导出"))
         _folder = State(initialValue: ExportSettings.defaultFolder())
         _remember = State(initialValue: ExportSettings.remembersChoices())
     }
@@ -40,8 +40,8 @@ struct ExportSheet: View {
                     .font(CaploFont.caption).foregroundStyle(CaploColor.textSecondary).lineLimit(1).truncationMode(.middle)
             }
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: CaploMetrics.Spacing.m, verticalSpacing: CaploMetrics.Spacing.m) {
-                row("格式", caption: settings.format.detail) {
-                    SelectField(value: settings.format.title, placeholder: "格式", accessibilityName: "导出格式", sections: [
+                row(String(localized: "格式"), caption: settings.format.detail) {
+                    SelectField(value: settings.format.title, placeholder: String(localized: "格式"), accessibilityName: String(localized: "导出格式"), sections: [
                         SelectField.Section(items: ExportSettings.Format.allCases.map { format in
                             SelectField.Item(id: format.id, title: format.title, checked: format == settings.format) {
                                 settings.format = format; settings.normalize()
@@ -49,31 +49,31 @@ struct ExportSheet: View {
                         }),
                     ])
                 }
-                row("分辨率", caption: "\(size.width) × \(size.height) · 画面比例 \(ratio.rawValue)") {
+                row(String(localized: "分辨率"), caption: String(localized: "\(size.width) × \(size.height) · 画面比例 \(ratio.title)")) {
                     SegmentedBar(ExportSettings.Resolution.options(for: settings.format), selection: $settings.resolution) { $0.title }
                         .accessibilityLabel("分辨率")
                 }
                 if settings.format == .gif {
-                    row("帧率", caption: "动图 15 帧已经连贯；帧率越高，体积越大。") {
+                    row(String(localized: "帧率"), caption: String(localized: "动图 15 帧已经连贯；帧率越高，体积越大。")) {
                         SegmentedBar(ExportSettings.gifFrameRates, selection: $settings.gifFrameRate) { "\($0) fps" }
                             .accessibilityLabel("帧率")
                     }
                 } else {
-                    row("帧率", caption: frameRateCaption) {
+                    row(String(localized: "帧率"), caption: frameRateCaption) {
                         SegmentedBar(ExportSettings.frameRateOptions(recorded: recordedFrameRate),
                                      selection: Binding(get: { settings.frameRate ?? 0 }, set: { settings.frameRate = $0 == 0 ? nil : $0 })) { value in
-                            value == 0 ? "原始 \(Int(recordedFrameRate.rounded()))" : "\(value)"
+                            value == 0 ? String(localized: "原始 \(Int(recordedFrameRate.rounded()))") : "\(value)"
                         }
                         .accessibilityLabel("帧率")
                     }
                 }
                 if settings.format.hasQuality {
-                    row("画质", caption: qualityCaption) {
+                    row(String(localized: "画质"), caption: qualityCaption) {
                         SegmentedBar(ExportSettings.Quality.allCases, selection: $settings.quality) { $0.title }
                             .accessibilityLabel("画质")
                     }
                 }
-                row("声音", caption: audioCaption) {
+                row(String(localized: "声音"), caption: audioCaption) {
                     if settings.format.hasAudio {
                         HStack(spacing: CaploMetrics.Spacing.m) {
                             Toggle("包含声音", isOn: $settings.includesAudio).toggleStyle(StudioToggleStyle()).fixedSize()
@@ -86,7 +86,7 @@ struct ExportSheet: View {
                         Text("GIF 没有声音").font(CaploFont.body).foregroundStyle(CaploColor.textSecondary)
                     }
                 }
-                row("保存到", caption: destinationCaption) {
+                row(String(localized: "保存到"), caption: destinationCaption) {
                     VStack(alignment: .leading, spacing: CaploMetrics.Spacing.xs + 2) {
                         HStack(spacing: CaploMetrics.Spacing.xs) {
                             TextField("文件名", text: $fileName).textFieldStyle(.plain).font(CaploFont.body)
@@ -131,15 +131,15 @@ struct ExportSheet: View {
     }
 
     private var destinationCaption: String? {
-        guard destination != nil else { return "请输入文件名。" }
-        return destinationExists ? "这个位置已有同名文件，导出时会先问你是否替换。" : nil
+        guard destination != nil else { return String(localized: "请输入文件名。") }
+        return destinationExists ? String(localized: "这个位置已有同名文件，导出时会先问你是否替换。") : nil
     }
 
     /// 另选保存位置（只影响这一次；勾着"记住这些设置"时它会成为下次的默认位置）。
     private func chooseFolder() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
-        panel.allowsMultipleSelection = false; panel.prompt = "选择"; panel.message = "选择导出文件的保存位置"
+        panel.allowsMultipleSelection = false; panel.prompt = String(localized: "选择"); panel.message = String(localized: "选择导出文件的保存位置")
         panel.directoryURL = folder
         if panel.runModal() == .OK, let url = panel.url { folder = url }
     }
@@ -149,10 +149,10 @@ struct ExportSheet: View {
         guard let destination else { return }
         if FileManager.default.fileExists(atPath: destination.path) {
             let alert = NSAlert()
-            alert.messageText = "替换“\(destination.lastPathComponent)”？"
-            alert.informativeText = "这个位置已有同名文件。替换后原文件会被新导出的文件覆盖。"
-            alert.addButton(withTitle: "替换")
-            alert.addButton(withTitle: "取消")
+            alert.messageText = String(localized: "替换“\(destination.lastPathComponent)”？")
+            alert.informativeText = String(localized: "这个位置已有同名文件。替换后原文件会被新导出的文件覆盖。")
+            alert.addButton(withTitle: String(localized: "替换"))
+            alert.addButton(withTitle: String(localized: "取消"))
             alert.buttons.first?.hasDestructiveAction = true
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
@@ -197,36 +197,36 @@ struct ExportSheet: View {
         }
         if let bitRate = settings.videoBitRate(width: size.width, height: size.height, frameRate: frameRate) { parts.append(Self.megabits(bitRate)) }
         if settings.format.hasAudio {
-            parts.append(!settings.includesAudio ? "无声" : settings.format == .proRes ? "PCM 24 位" : "AAC \(settings.audioBitRate / 1000) kbps")
+            parts.append(!settings.includesAudio ? String(localized: "无声") : settings.format == .proRes ? String(localized: "PCM 24 位") : "AAC \(settings.audioBitRate / 1000) kbps")
         }
         return parts.joined(separator: " · ")
     }
 
     private var sizeLine: String {
         guard let bytes = settings.estimatedBytes(layout: model.edit.layout, recordedFrameRate: recordedFrameRate, duration: model.edit.duration) else {
-            return "GIF 的体积随画面变化，动得越多越大；较长的演示建议导出 MP4。"
+            return String(localized: "GIF 的体积随画面变化，动得越多越大；较长的演示建议导出 MP4。")
         }
-        return "预计约 " + ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        return String(localized: "预计约 ") + ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
     private var frameRateCaption: String {
         let output = Int(frameRate.rounded())
-        if settings.resolution == .p2160, recordedFrameRate > 60.5 { return "4K 最高 60 fps，将以 \(output) fps 导出。" }
-        return settings.frameRate == nil ? "与录制相同（\(output) fps），动作最流畅。" : "以 \(output) fps 导出，体积更小。"
+        if settings.resolution == .p2160, recordedFrameRate > 60.5 { return String(localized: "4K 最高 60 fps，将以 \(output) fps 导出。") }
+        return settings.frameRate == nil ? String(localized: "与录制相同（\(output) fps），动作最流畅。") : String(localized: "以 \(output) fps 导出，体积更小。")
     }
 
     private var qualityCaption: String {
         let rate = settings.videoBitRate(width: size.width, height: size.height, frameRate: frameRate).map(Self.megabits) ?? ""
         switch settings.quality {
-        case .standard: return "约 \(rate)，静态界面为主时看不出差别。"
-        case .high: return "约 \(rate)，文字与细线清晰，推荐。"
-        case .maximum: return "约 \(rate)，大量滚动与细小文字时选它。"
+        case .standard: return String(localized: "约 \(rate)，静态界面为主时看不出差别。")
+        case .high: return String(localized: "约 \(rate)，文字与细线清晰，推荐。")
+        case .maximum: return String(localized: "约 \(rate)，大量滚动与细小文字时选它。")
         }
     }
 
     private var audioCaption: String? {
         guard settings.format.hasAudio, settings.includesAudio else { return nil }
-        return settings.format == .proRes ? "ProRes 的声音按 24 位 PCM 写入，不再有损压缩。" : "AAC 码率（kbps），256 对讲解与系统声音都足够。"
+        return settings.format == .proRes ? String(localized: "ProRes 的声音按 24 位 PCM 写入，不再有损压缩。") : String(localized: "AAC 码率（kbps），256 对讲解与系统声音都足够。")
     }
 
     private static func megabits(_ bitRate: Int) -> String {

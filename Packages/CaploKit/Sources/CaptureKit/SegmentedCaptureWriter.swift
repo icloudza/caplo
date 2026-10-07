@@ -47,9 +47,9 @@ private final class TrackFile: @unchecked Sendable {
             ])
         }
         input.expectsMediaDataInRealTime = true
-        guard writer.canAdd(input) else { throw RecordingError.message("无法创建 \(role.rawValue) 编码轨道。") }
+        guard writer.canAdd(input) else { throw RecordingError.message(String(localized: "无法创建 \(role.rawValue) 编码轨道。")) }
         writer.add(input)
-        guard writer.startWriting() else { throw writer.error ?? RecordingError.message("无法写入素材。") }
+        guard writer.startWriting() else { throw writer.error ?? RecordingError.message(String(localized: "无法写入素材。")) }
         writer.startSession(atSourceTime: start)
     }
 
@@ -57,12 +57,12 @@ private final class TrackFile: @unchecked Sendable {
         let pts = sample.presentationTimeStamp
         guard !lastPTS.isValid || pts > lastPTS else { return }
         guard input.isReadyForMoreMediaData else {
-            if writer.status == .failed { throw writer.error ?? RecordingError.message("素材写入失败。") }
+            if writer.status == .failed { throw writer.error ?? RecordingError.message(String(localized: "素材写入失败。")) }
             // 音频不允许静默丢失；持续积压将损害同步，直接错误收尾并保留已提交片段。
-            if audio { throw RecordingError.message("音频写入跟不上采集速度，请检查磁盘空间和系统负载。") }
+            if audio { throw RecordingError.message(String(localized: "音频写入跟不上采集速度，请检查磁盘空间和系统负载。")) }
             return
         }
-        guard input.append(sample) else { throw writer.error ?? RecordingError.message("无法追加素材数据。") }
+        guard input.append(sample) else { throw writer.error ?? RecordingError.message(String(localized: "无法追加素材数据。")) }
         lastPTS = pts
         count += 1
     }
@@ -72,7 +72,7 @@ private final class TrackFile: @unchecked Sendable {
         writer.endSession(atSourceTime: end)
         input.markAsFinished()
         writer.finishWriting { [self] in
-            completion(writer.status == .completed ? nil : (writer.error?.localizedDescription ?? "素材收尾失败。"))
+            completion(writer.status == .completed ? nil : (writer.error?.localizedDescription ?? String(localized: "素材收尾失败。")))
         }
     }
 }
@@ -251,11 +251,11 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
     /// 以每段第一帧的实际尺寸创建摄像头编码器，不能沿用屏幕分辨率导致人像拉伸。
     /// 未收到摄像头画面的区间不创建空视频，也不伪造首帧时间。
     private func appendCamera(_ sample: CMSampleBuffer, to segment: OpenSegment) throws {
-        guard let pixel = sample.imageBuffer else { throw RecordingError.message("摄像头未提供有效视频画面。") }
+        guard let pixel = sample.imageBuffer else { throw RecordingError.message(String(localized: "摄像头未提供有效视频画面。")) }
         if segment.tracks[.camera] == nil {
             let width = CVPixelBufferGetWidth(pixel), height = CVPixelBufferGetHeight(pixel)
             guard width >= 2, height >= 2, width <= 4096, height <= 4096, width % 2 == 0, height % 2 == 0 else {
-                throw RecordingError.message("摄像头输出尺寸不支持，请选择标准视频格式。")
+                throw RecordingError.message(String(localized: "摄像头输出尺寸不支持，请选择标准视频格式。"))
             }
             // 摄像头文件从实际首帧开始；它在片段中的偏移另外记录，避免编码器补黑被误当成有效画面。
             segment.tracks[.camera] = try TrackFile(project: project, index: segment.index, role: .camera, width: width, height: height, start: sample.presentationTimeStamp)
@@ -283,7 +283,7 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
 
     private func rotate(at time: CMTime) throws {
         guard let old = current, let frame = latestFrame else { return }
-        guard pending < Self.maximumPendingSegments else { throw RecordingError.message("片段保存持续积压，已结束录制以保护现有素材。") }
+        guard pending < Self.maximumPendingSegments else { throw RecordingError.message(String(localized: "片段保存持续积压，已结束录制以保护现有素材。")) }
         old.end = time
         retire(old)
         current = nil
@@ -314,7 +314,7 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
                 if issue == nil {
                     do {
                         let files = segment.tracks.filter { $0.value.count > 0 }.mapValues(\.path)
-                        guard files[.screen] != nil else { throw RecordingError.message("当前片段没有有效视频。") }
+                        guard files[.screen] != nil else { throw RecordingError.message(String(localized: "当前片段没有有效视频。")) }
                         let duration = (segment.end! - segment.start).seconds
                         var record = SegmentRecord(id: segment.index, duration: duration, files: files)
                         let offsets = segment.tracks.filter { $0.value.count > 0 && $0.value.start > segment.start }
@@ -384,7 +384,7 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
     func finish(at time: CMTime) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
             queue.async { [self] in
-                guard !stopped else { continuation.resume(throwing: RecordingError.message("录制已停止。")); return }
+                guard !stopped else { continuation.resume(throwing: RecordingError.message(String(localized: "录制已停止。"))); return }
                 stopped = true
                 timer?.cancel(); timer = nil
                 if let current {
@@ -395,7 +395,7 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
                 group.notify(queue: queue) { [self] in
                     latestFrame = nil; latestCameraFrame = nil
                     if let reportedFailure { continuation.resume(throwing: RecordingError.message(reportedFailure)) }
-                    else if index == 0 { continuation.resume(throwing: RecordingError.message("没有收到有效画面。")) }
+                    else if index == 0 { continuation.resume(throwing: RecordingError.message(String(localized: "没有收到有效画面。"))) }
                     else { continuation.resume() }
                 }
             }
@@ -417,7 +417,7 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
         var result: CMSampleBuffer?
         let status = CMSampleBufferCreateCopyWithNewTiming(allocator: kCFAllocatorDefault, sampleBuffer: buffer,
             sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleBufferOut: &result)
-        guard status == noErr, let result else { throw RecordingError.message("视频时间戳转换失败。") }
+        guard status == noErr, let result else { throw RecordingError.message(String(localized: "视频时间戳转换失败。")) }
         return result
     }
 }

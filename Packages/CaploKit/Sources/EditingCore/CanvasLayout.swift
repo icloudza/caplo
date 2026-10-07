@@ -29,11 +29,20 @@ public enum CanvasRatio: String, CaseIterable, Codable, Sendable {
         }
     }
 
+    /// 界面上显示的名字。原始值是持久化标识（"原始"），不随语言变化；显示一律用它。
+    public var title: String { self == .original ? String(localized: "原始") : rawValue }
+
     /// 横 / 竖 / 方，平台下拉按此分组，与地区无关。
     public enum Orientation: String, CaseIterable, Sendable {
         case landscape = "横屏"
         case portrait = "竖屏"
         case square = "方形"
+
+        public var title: String {
+            switch self {
+            case .landscape: String(localized: "横屏"); case .portrait: String(localized: "竖屏"); case .square: String(localized: "方形")
+            }
+        }
     }
     public var orientation: Orientation { value > 1 ? .landscape : value < 1 ? .portrait : .square }
 
@@ -97,6 +106,23 @@ public struct CanvasBackground: RawRepresentable, Codable, Hashable, Sendable {
 
     /// 用户自己调的颜色，不是预设档。
     public var isCustom: Bool { Self.parse(rawValue) != nil }
+
+    /// 面板上显示的名字。预设名是持久化标识（中文），显示时按当前语言翻译；自定义色显示"自定义"。
+    public var title: String {
+        if isCustom { return String(localized: "自定义") }
+        switch rawValue {
+        case "浅滩": return String(localized: "浅滩"); case "霓虹": return String(localized: "霓虹"); case "鸢尾": return String(localized: "鸢尾")
+        case "薄暮": return String(localized: "薄暮"); case "紫焰": return String(localized: "紫焰"); case "火花": return String(localized: "火花")
+        case "熔岩": return String(localized: "熔岩"); case "赛博": return String(localized: "赛博"); case "翡翠": return String(localized: "翡翠")
+        case "蜜桃": return String(localized: "蜜桃"); case "石墨": return String(localized: "石墨"); case "海盐": return String(localized: "海盐")
+        case "极夜": return String(localized: "极夜"); case "琥珀": return String(localized: "琥珀"); case "电光": return String(localized: "电光")
+        case "日出": return String(localized: "日出"); case "森林": return String(localized: "森林"); case "纯白": return String(localized: "纯白")
+        case "浅灰": return String(localized: "浅灰"); case "深灰": return String(localized: "深灰"); case "纯黑": return String(localized: "纯黑")
+        case "紫": return String(localized: "紫"); case "靛蓝": return String(localized: "靛蓝"); case "青": return String(localized: "青")
+        case "珊瑚": return String(localized: "珊瑚")
+        default: return rawValue
+        }
+    }
     /// 两端同色即纯色；预设的纯色档与自定义单色都算。
     public var isSolid: Bool { let value = colors; return value.start == value.end }
 

@@ -152,7 +152,7 @@ private final class WindowPickerOverlay: NSView {
     }
 
     private func drawDescription(for source: CaptureSource, in rect: CGRect) {
-        let name = source.applicationName ?? "应用"
+        let name = source.applicationName ?? String(localized: "应用")
         let title = source.windowTitle ?? ""
         let size = "\(Int(rect.width)) × \(Int(rect.height))"
         let nameAttributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 18, weight: .semibold), .foregroundColor: NSColor.white]
@@ -193,7 +193,8 @@ private final class WindowPickerOverlay: NSView {
     }
 
     private func drawHint() {
-        let text = hovered == nil ? "将鼠标移到要录制的窗口上，单击即可选定 · Esc 取消" : "单击选定“\(hovered?.applicationName ?? "")”窗口 · Esc 取消"
+        let name = hovered?.applicationName ?? ""
+        let text = hovered == nil ? String(localized: "将鼠标移到要录制的窗口上，单击即可选定 · Esc 取消") : String(localized: "单击选定“\(name)”窗口 · Esc 取消")
         let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 14, weight: .medium), .foregroundColor: NSColor.white]
         let size = (text as NSString).size(withAttributes: attributes)
         let pill = CGRect(x: bounds.midX - size.width / 2 - 18, y: 44, width: size.width + 36, height: size.height + 16)

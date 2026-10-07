@@ -81,25 +81,25 @@ public struct RecordBarView: View {
             .font(.system(size: 14, weight: .medium))
             .foregroundStyle(CaploColor.textSecondary)
             .frame(width: CaploMetrics.ControlHeight.medium, height: CaploMetrics.ControlHeight.medium)
-            .help("\(model.mode.rawValue) · \(model.sourceTitle)")
-            .accessibilityLabel("\(model.mode.rawValue)录制，来源 \(model.sourceTitle)")
+            .help("\(model.mode.title) · \(model.sourceTitle)")
+            .accessibilityLabel("\(model.mode.title)录制，来源 \(model.sourceTitle)")
     }
 
     private var settingsDropdown: some View {
-        IconDropdown(symbol: "gearshape", accessibilityName: "录制设置", help: "录制设置") {
-            var entries: [PopupMenuEntry] = [.header(model.mode == .window ? "窗口" : "显示器")]
+        IconDropdown(symbol: "gearshape", accessibilityName: String(localized: "录制设置"), help: String(localized: "录制设置")) {
+            var entries: [PopupMenuEntry] = [.header(model.mode == .window ? String(localized: "窗口") : String(localized: "显示器"))]
             entries += model.sources.map { source in .item(source.title, checked: source.id == model.source?.id) { model.choose(source) } }
-            if model.mode == .region { entries.append(.item("重新框选区域") { Task { await model.pickRegion() } }) }
-            if model.mode == .window { entries.append(.item("在屏幕上选择窗口") { Task { await model.pickWindow() } }) }
-            entries.append(.item("刷新来源") { Task { await model.refreshSources() } })
+            if model.mode == .region { entries.append(.item(String(localized: "重新框选区域")) { Task { await model.pickRegion() } }) }
+            if model.mode == .window { entries.append(.item(String(localized: "在屏幕上选择窗口")) { Task { await model.pickWindow() } }) }
+            entries.append(.item(String(localized: "刷新来源")) { Task { await model.refreshSources() } })
             entries += [
-                .separator, .header("录制"),
-                .submenu("倒计时 · " + (countdown == 0 ? "关" : "\(countdown) 秒"), [0, 3, 5, 10].map { seconds in
-                    choice(seconds == 0 ? "不倒计时" : "\(seconds) 秒", selected: countdown == seconds) { countdown = seconds }
+                .separator, .header(String(localized: "录制")),
+                .submenu(String(localized: "倒计时 · ") + (countdown == 0 ? String(localized: "关") : String(localized: "\(countdown) 秒")), [0, 3, 5, 10].map { seconds in
+                    choice(seconds == 0 ? String(localized: "不倒计时") : String(localized: "\(seconds) 秒"), selected: countdown == seconds) { countdown = seconds }
                 }),
-                .submenu("帧率 · \(frameRate) fps", [30, 60].map { rate in choice("\(rate) fps", selected: frameRate == rate) { frameRate = rate } }),
+                .submenu(String(localized: "帧率 · \(frameRate) fps"), [30, 60].map { rate in choice("\(rate) fps", selected: frameRate == rate) { frameRate = rate } }),
                 .separator,
-                .item("更多设置") { StudioWindows.showSettings() },
+                .item(String(localized: "更多设置")) { StudioWindows.showSettings() },
             ]
             return entries
         }
@@ -111,18 +111,18 @@ public struct RecordBarView: View {
 
     private var cameraDropdown: some View {
         SourceDropdown(symbol: "video", offSymbol: "video.slash",
-                       title: cameraTitle ?? "摄像头 关",
-                       isOff: cameraTitle == nil, accessibilityName: "摄像头", maxTitleWidth: 140) {
+                       title: cameraTitle ?? String(localized: "摄像头 关"),
+                       isOff: cameraTitle == nil, accessibilityName: String(localized: "摄像头"), maxTitleWidth: 140) {
             var entries: [PopupMenuEntry] = [
-                choice("关闭", selected: !camera) { camera = false },
-                choice("默认摄像头", selected: camera && cameraID.isEmpty) { camera = true; cameraID = "" },
+                choice(String(localized: "关闭"), selected: !camera) { camera = false },
+                choice(String(localized: "默认摄像头"), selected: camera && cameraID.isEmpty) { camera = true; cameraID = "" },
             ]
             if !cameras.isEmpty { entries.append(.separator) }
             entries += cameras.map { device in choice(device.name, selected: camera && cameraID == device.id) { camera = true; cameraID = device.id } }
             if !cameraFormats.isEmpty {
                 // 设备真实支持的格式（尺寸 × 帧率）全列出来；预览与录制共用同一个选择。
                 let effective = CameraFormat.resolve(available: cameraFormats, wanted: CameraFormat(key: cameraFormat))
-                entries += [.separator, .submenu("分辨率 · " + (effective?.title ?? "自动"), cameraFormats.map { format in
+                entries += [.separator, .submenu(String(localized: "分辨率 · ") + (effective?.title ?? String(localized: "自动")), cameraFormats.map { format in
                     choice(format.title, selected: format == effective) { cameraFormat = format.key }
                 })]
             }
@@ -133,28 +133,28 @@ public struct RecordBarView: View {
     private var microphoneDropdown: some View {
         // 试听时的跳动图标就在按钮标签里：标签是普通视图，图标自己观察电平刷新，录制条主体不因电平重绘。
         SourceDropdown(symbol: "mic", offSymbol: "mic.slash",
-                       title: microphoneTitle ?? "麦克风 关",
-                       isOff: microphoneTitle == nil, accessibilityName: "麦克风", maxTitleWidth: 140,
+                       title: microphoneTitle ?? String(localized: "麦克风 关"),
+                       isOff: microphoneTitle == nil, accessibilityName: String(localized: "麦克风"), maxTitleWidth: 140,
                        leading: microphone && MicrophoneMonitor.shared.active ? AnyView(MicrophoneMonitorIcon()) : nil) {
             var entries: [PopupMenuEntry] = [
-                choice("关闭", selected: !microphone) { microphone = false },
-                choice("默认麦克风", selected: microphone && microphoneID.isEmpty) { microphone = true; microphoneID = "" },
+                choice(String(localized: "关闭"), selected: !microphone) { microphone = false },
+                choice(String(localized: "默认麦克风"), selected: microphone && microphoneID.isEmpty) { microphone = true; microphoneID = "" },
             ]
             if !devices.isEmpty { entries.append(.separator) }
             entries += devices.map { device in choice(device.name, selected: microphone && microphoneID == device.id) { microphone = true; microphoneID = device.id } }
             // 麦克风模式（语音隔离等）只能由用户在系统面板里选；回声消除与降噪在编辑器的声音面板里离线做。
-            entries += [.separator, .text("麦克风模式 · " + MicrophoneModes.shared.currentName), .item("更改麦克风模式") { MicrophoneModes.showSystemPicker() }]
+            entries += [.separator, .text(String(localized: "麦克风模式 · ") + MicrophoneModes.shared.currentName), .item(String(localized: "更改麦克风模式")) { MicrophoneModes.showSystemPicker() }]
             return entries
         }
     }
 
     private var systemAudioDropdown: some View {
         SourceDropdown(symbol: "speaker.wave.2", offSymbol: "speaker.slash",
-                       title: systemAudio ? RecordingDeviceNames.systemAudio(scope: scope, selected: selectedApplications, applications: applications) : "系统声音 关",
-                       isOff: !systemAudio, accessibilityName: "系统声音", maxTitleWidth: 150) { [
-            choice("关闭", selected: !systemAudio) { systemAudio = false },
-            choice("全部系统声音", selected: systemAudio && scope == "all") { systemAudio = true; scope = "all" },
-            choice("仅指定应用", selected: systemAudio && scope == "applications") {
+                       title: systemAudio ? RecordingDeviceNames.systemAudio(scope: scope, selected: selectedApplications, applications: applications) : String(localized: "系统声音 关"),
+                       isOff: !systemAudio, accessibilityName: String(localized: "系统声音"), maxTitleWidth: 150) { [
+            choice(String(localized: "关闭"), selected: !systemAudio) { systemAudio = false },
+            choice(String(localized: "全部系统声音"), selected: systemAudio && scope == "all") { systemAudio = true; scope = "all" },
+            choice(String(localized: "仅指定应用"), selected: systemAudio && scope == "applications") {
                 systemAudio = true; scope = "applications"; applications = AudioInputCatalog.applications(); choosingApplications = true
             },
         ] }

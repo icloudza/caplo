@@ -30,11 +30,11 @@ public enum TranscriptionError: LocalizedError {
     case failed(String)
     public var errorDescription: String? {
         switch self {
-        case .dictationDisabled: "系统的听写已关闭，本机转写用不了。请在「系统设置 › 键盘 › 听写」打开听写后重试，音频仍只在本机处理。"
-        case .denied: "没有语音识别权限。请在「系统设置 › 隐私与安全性 › 语音识别」里允许 Caplo。"
+        case .dictationDisabled: String(localized: "系统的听写已关闭，本机转写用不了。请在「系统设置 › 键盘 › 听写」打开听写后重试，音频仍只在本机处理。")
+        case .denied: String(localized: "没有语音识别权限。请在「系统设置 › 隐私与安全性 › 语音识别」里允许 Caplo。")
         case .unsupported(let reason): reason
-        case .noAudio: "这个工程里没有可转写的声音轨。"
-        case .failed(let reason): "转写失败：\(reason)"
+        case .noAudio: String(localized: "这个工程里没有可转写的声音轨。")
+        case .failed(let reason): String(localized: "转写失败：\(reason)")
         }
     }
 }
@@ -43,7 +43,7 @@ public enum TranscriptionError: LocalizedError {
 public enum TranscriptionSource: String, CaseIterable, Sendable, Identifiable {
     case microphone, system
     public var id: String { rawValue }
-    public var title: String { self == .microphone ? "麦克风" : "系统声音" }
+    public var title: String { self == .microphone ? String(localized: "麦克风") : String(localized: "系统声音") }
     var role: MediaRole { self == .microphone ? .microphone : .systemAudio }
 }
 
@@ -131,7 +131,7 @@ public struct SpeechTranscriber: TranscriptionEngine {
     static let separators: Set<Character> = ["，", "、", ",", "：", ":"]
 
     public init() {}
-    public var name: String { "系统本机识别" }
+    public var name: String { String(localized: "系统本机识别") }
 
     /// 把识别服务的错误换成能照着做的中文。听写关闭时系统回的是 kAFAssistantErrorDomain 下的
     /// "Siri and Dictation are disabled"，错误码随系统版本变过，按域与原文一起认。
@@ -145,11 +145,11 @@ public struct SpeechTranscriber: TranscriptionEngine {
 
     public func availability(locale: Locale) async -> TranscriptionAvailability {
         guard let recognizer = SFSpeechRecognizer(locale: locale) else {
-            return .unavailable("系统不支持这个语言的本机识别。")
+            return .unavailable(String(localized: "系统不支持这个语言的本机识别。"))
         }
-        guard recognizer.isAvailable else { return .unavailable("语音识别当前不可用，请稍后再试。") }
+        guard recognizer.isAvailable else { return .unavailable(String(localized: "语音识别当前不可用，请稍后再试。")) }
         guard recognizer.supportsOnDeviceRecognition else {
-            return .unavailable("这个语言还没有本机识别模型。请在「系统设置 › 键盘 › 听写」里添加该语言后重试。")
+            return .unavailable(String(localized: "这个语言还没有本机识别模型。请在「系统设置 › 键盘 › 听写」里添加该语言后重试。"))
         }
         return switch SFSpeechRecognizer.authorizationStatus() {
         case .authorized: .ready
@@ -168,7 +168,7 @@ public struct SpeechTranscriber: TranscriptionEngine {
 
     public func transcribe(file: URL, locale: Locale, progress: @Sendable @escaping (Double) -> Void) async throws -> [CaptionCue] {
         guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.supportsOnDeviceRecognition else {
-            throw TranscriptionError.unsupported("这个语言还没有本机识别模型。")
+            throw TranscriptionError.unsupported(String(localized: "这个语言还没有本机识别模型。"))
         }
         guard SFSpeechRecognizer.authorizationStatus() == .authorized else { throw TranscriptionError.denied }
         let request = SFSpeechURLRecognitionRequest(url: file)

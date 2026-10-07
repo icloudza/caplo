@@ -59,7 +59,7 @@ final class RecordingPresentation {
 
     private func showPanel() {
         if controller == nil {
-            let controller = StudioWindowController(identifier: "caplo-recording-controls", title: "录制控制",
+            let controller = StudioWindowController(identifier: "caplo-recording-controls", title: String(localized: "录制控制"),
                                                     content: LiveRecordingControls(),
                                                     sizing: .fixed(RecordingControls.panelSize),
                                                     chrome: .borderlessPanel(activating: false))

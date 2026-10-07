@@ -41,6 +41,7 @@
 - **声音**：降噪、回声消除、逐片段音量；录制声音默认跟随画面，可分离单独编辑。
 - **导出**：H.264 / HEVC（MP4）、ProRes 422（MOV）、GIF，最高 4K。
 - **更新**：应用内检查、下载并安装新版本，录制与导出期间不打扰。
+- **语言**：简体中文与英文，默认跟随系统，可在设置中切换。
 
 ## 环境
 
@@ -80,6 +81,16 @@ cd Packages/CaploKit
 swift test                                              # 单元测试
 swift run PreviewGallery ../../build/previews --windows # 窗口回归
 swift run PreviewGallery ../../build/previews --demo    # 界面与渲染快照
+```
+
+## 多语言
+
+界面文字的键是中文原文，英文翻译在 `App/Localizable.xcstrings`（权限说明等在 `App/InfoPlist.xcstrings`）。
+代码里直接写在 `Text` / `Button` 中的字面量会自动本地化；其余显示文字用 `String(localized:)`，枚举的原始值作为存档标识不翻译，另加 `title`。
+改动界面文字后同步并检查未翻译条目：
+
+```bash
+Scripts/localize.sh
 ```
 
 ## 发布

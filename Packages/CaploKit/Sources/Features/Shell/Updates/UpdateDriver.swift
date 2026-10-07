@@ -147,10 +147,10 @@ final class UpdateDriver: NSObject, SPUUserDriver {
         let latest = info[SPULatestAppcastItemFoundKey] as? SUAppcastItem
         switch reason {
         case .systemIsTooOld:
-            if let latest, let minimum = latest.minimumSystemVersion { return "\(latest.displayVersionString) 需要 macOS \(minimum) 及以上。" }
-            return "新版本需要更新的 macOS。"
-        case .onNewerThanLatestVersion: return "当前版本 \(current)，比已发布的版本更新。"
-        default: return "当前版本 \(current)。"
+            if let latest, let minimum = latest.minimumSystemVersion { return String(localized: "\(latest.displayVersionString) 需要 macOS \(minimum) 及以上。") }
+            return String(localized: "新版本需要更新的 macOS。")
+        case .onNewerThanLatestVersion: return String(localized: "当前版本 \(current)，比已发布的版本更新。")
+        default: return String(localized: "当前版本 \(current)。")
         }
     }
 }

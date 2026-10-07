@@ -77,7 +77,7 @@ public struct CaptionStyle: Codable, Equatable, Sendable {
     /// 逐词高亮的做法。
     public enum Highlight: String, Codable, CaseIterable, Sendable {
         case none, color, pill
-        public var title: String { switch self { case .none: "不高亮"; case .color: "逐词变色"; case .pill: "逐词药丸" } }
+        public var title: String { switch self { case .none: String(localized: "不高亮"); case .color: String(localized: "逐词变色"); case .pill: String(localized: "逐词药丸") } }
     }
     public enum Animation: String, Codable, CaseIterable, Sendable { case none, fade, rise, bounce }
 

@@ -51,7 +51,7 @@ struct EditorStepper: View {
     var body: some View {
         let decimals = step < 0.05 ? 2 : (step < 0.1 ? 2 : 1)
         ValueStepper(title, value: $value, in: range, step: step, defaultValue: defaultValue,
-                     format: { String(format: "%.\(decimals)f 秒", $0) },
+                     format: { value in String(localized: "\(String(format: "%.\(decimals)f", value)) 秒") },
                      onEditingChanged: { active in if active { model.beginInteraction() } else { model.endInteraction() } })
     }
 }
@@ -102,10 +102,12 @@ struct EditorRegion: View {
 
     /// 读数："水平 50% · 垂直 50%"（点 / 取景框中心）或"宽 30% · 高 20%"（框）。
     static func positionReadout(_ point: CGPoint) -> String {
-        String(format: "水平 %.0f%% · 垂直 %.0f%%", point.x * 100, point.y * 100)
+        let x = Int((point.x * 100).rounded()), y = Int((point.y * 100).rounded())
+        return String(localized: "水平 \(x)% · 垂直 \(y)%")
     }
     static func sizeReadout(_ rect: CGRect) -> String {
-        String(format: "宽 %.0f%% · 高 %.0f%%", rect.width * 100, rect.height * 100)
+        let width = Int((rect.width * 100).rounded()), height = Int((rect.height * 100).rounded())
+        return String(localized: "宽 \(width)% · 高 \(height)%")
     }
 }
 

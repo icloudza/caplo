@@ -132,7 +132,7 @@ public struct MaskSegment: Codable, Equatable, Sendable, Identifiable {
     public var safetyPad: Double { kind == .sensitive ? Self.safetyPad : 0 }
     public var displayTitle: String { title ?? defaultTitle(number: nil) }
     public func defaultTitle(number: Int?) -> String {
-        let name = kind == .highlight ? "高亮" : (effect == .blur ? "模糊" : "像素化")
+        let name = kind == .highlight ? String(localized: "高亮") : (effect == .blur ? String(localized: "模糊") : String(localized: "像素化"))
         return number.map { "\(name) \(String(format: "%02d", $0))" } ?? name
     }
 

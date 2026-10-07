@@ -29,36 +29,36 @@ struct FocusPanel: View {
                     Text("柔和平滑").tag(FocusSegment.Easing.smooth)
                     Text("演示推近").tag(FocusSegment.Easing.demo)
                 }.environment(\.colorScheme, .dark)
-                EditorStepper(model: model, title: "推近时长", value: optionalBinding(id, \.easeIn, fallback: 0.6), range: 0.05...2, defaultValue: 0.6)
-                EditorStepper(model: model, title: "拉远时长", value: optionalBinding(id, \.easeOut, fallback: 0.7), range: 0.05...2, defaultValue: 0.7)
-                EditorSlider(model: model, title: "缩放倍率", value: binding(id, \.scale), range: 1...3, suffix: "×", detents: [1.5, 2, 2.5])
+                EditorStepper(model: model, title: String(localized: "推近时长"), value: optionalBinding(id, \.easeIn, fallback: 0.6), range: 0.05...2, defaultValue: 0.6)
+                EditorStepper(model: model, title: String(localized: "拉远时长"), value: optionalBinding(id, \.easeOut, fallback: 0.7), range: 0.05...2, defaultValue: 0.7)
+                EditorSlider(model: model, title: String(localized: "缩放倍率"), value: binding(id, \.scale), range: 1...3, suffix: "×", detents: [1.5, 2, 2.5])
                 // 取景框的大小就是 1 / 倍率：在底板上看得见推近之后画面里还剩多大一块。
                 let scale = max(1, focus.scale)
-                EditorRegion(model: model, title: "取景位置", shape: .window(width: 1 / scale, height: 1 / scale), aspect: model.sourceAspect,
+                EditorRegion(model: model, title: String(localized: "取景位置"), shape: .window(width: 1 / scale, height: 1 / scale), aspect: model.sourceAspect,
                              region: focusRegion(id)) { EditorRegion.positionReadout(CGPoint(x: $0.midX, y: $0.midY)) }
         Button("删除此镜头") { model.select(.focus(id)); model.deleteSelection() }.buttonStyle(StudioButtonStyle(.destructive, size: .small))
     }
 
     var body: some View {
         Toggle(isOn: Binding(get: { model.edit.automaticFocus }, set: { value in model.commit { $0.automaticFocus = value } })) {
-            SettingLabel("自动聚焦", systemImage: "sparkles",
-                         tip: "按点击推近并平滑跟随鼠标")
+            SettingLabel(String(localized: "自动聚焦"), systemImage: "sparkles",
+                         tip: String(localized: "按点击推近并平滑跟随鼠标"))
         }.toggleStyle(StudioToggleStyle())
         // 默认收起，专注于各镜头的参数；需要时展开调整。状态随偏好保留。
-        PanelSection("自动聚焦设置", expanded: $autoParametersExpanded) {
-            EditorSlider(model: model, title: "默认缩放倍率", value: styleBinding(\.baseScale), range: 1...3, suffix: "×", detents: [1.5, 2, 2.5])
-            EditorStepper(model: model, title: "拉远延迟", value: styleBinding(\.idleTimeout), range: 0.5...5, step: 0.1, defaultValue: AutoFocusStyle().idleTimeout)
-            EditorStepper(model: model, title: "合并间隔", value: styleBinding(\.mergeGap), range: 0...2, defaultValue: AutoFocusStyle().mergeGap)
-            EditorStepper(model: model, title: "提前对准", value: optionalStyleBinding(\.prediction, fallback: 0.21), range: 0...0.4, step: 0.01, defaultValue: 0.21)
-            EditorFill(model: model, title: "跟随平滑度", value: optionalStyleBinding(\.panResponse, fallback: 0.55), range: 0.15...1.5, defaultValue: 0.55, detents: [0.55])
-            EditorFill(model: model, title: "安全区", value: optionalStyleBinding(\.clusterWidth, fallback: 0.5), range: 0.2...0.9, suffix: "%", percentage: true, defaultValue: 0.5, detents: [0.5])
+        PanelSection(String(localized: "自动聚焦设置"), expanded: $autoParametersExpanded) {
+            EditorSlider(model: model, title: String(localized: "默认缩放倍率"), value: styleBinding(\.baseScale), range: 1...3, suffix: "×", detents: [1.5, 2, 2.5])
+            EditorStepper(model: model, title: String(localized: "拉远延迟"), value: styleBinding(\.idleTimeout), range: 0.5...5, step: 0.1, defaultValue: AutoFocusStyle().idleTimeout)
+            EditorStepper(model: model, title: String(localized: "合并间隔"), value: styleBinding(\.mergeGap), range: 0...2, defaultValue: AutoFocusStyle().mergeGap)
+            EditorStepper(model: model, title: String(localized: "提前对准"), value: optionalStyleBinding(\.prediction, fallback: 0.21), range: 0...0.4, step: 0.01, defaultValue: 0.21)
+            EditorFill(model: model, title: String(localized: "跟随平滑度"), value: optionalStyleBinding(\.panResponse, fallback: 0.55), range: 0.15...1.5, defaultValue: 0.55, detents: [0.55])
+            EditorFill(model: model, title: String(localized: "安全区"), value: optionalStyleBinding(\.clusterWidth, fallback: 0.5), range: 0.2...0.9, suffix: "%", percentage: true, defaultValue: 0.5, detents: [0.5])
             Button(generating ? "正在生成…" : "重新生成自动镜头") {
                 generating = true
                 Task { await model.regenerateFocus(); generating = false }
             }.buttonStyle(StudioButtonStyle(.secondary)).disabled(generating)
         }
         // 挑哪一个镜头是时间线的事：这里只显示时间线上选中的那一个，换一块内容跟着换。
-        PanelSection("镜头") {
+        PanelSection(String(localized: "镜头")) {
             if let id = model.selectedFocus, let focus = model.edit.focuses.first(where: { $0.id == id }) {
                 PanelSelection(symbol: focus.automatic ? "sparkles" : "viewfinder",
                                title: model.edit.focusDisplayTitle(focus, numbers: model.edit.focusNumbers()),
@@ -66,9 +66,9 @@ struct FocusPanel: View {
                     controls(for: id, focus: focus)
                 }
             } else if model.edit.focuses.isEmpty {
-                PanelNote("暂无镜头。在时间线右键“在此处添加聚焦”，或用工具栏按钮在播放头处添加 2 秒镜头。")
+                PanelNote(String(localized: "暂无镜头。在时间线右键“在此处添加聚焦”，或用工具栏按钮在播放头处添加 2 秒镜头。"))
             } else {
-                PanelNote("在时间线的镜头块上点一下，这里就显示那一个的参数。")
+                PanelNote(String(localized: "在时间线的镜头块上点一下，这里就显示那一个的参数。"))
             }
         }
         // 进面板时还没选中就先选第一个，免得面板空着、非得先去时间线点一下。

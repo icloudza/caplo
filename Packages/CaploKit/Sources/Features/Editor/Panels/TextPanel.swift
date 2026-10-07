@@ -25,7 +25,7 @@ struct TextPanel: View {
     private var editingID: UUID? { model.editingTextID }
 
     var body: some View {
-        PanelSection("预设", info: "套用后仍可逐项修改") {
+        PanelSection(String(localized: "预设"), info: String(localized: "套用后仍可逐项修改")) {
             let current = editingID.flatMap { model.edit.text(id: $0) }
             let matched = current.flatMap { TextPreset.matching($0) }
             // 一行三个、格子矮一点：八个预设两行多就能看完，不占面板一大截。
@@ -37,7 +37,7 @@ struct TextPanel: View {
             }
         }
         if let card = model.selectedCard, let content = card.card, let value = model.edit.text(id: content.text.id) {
-            PanelSection("卡片") {
+            PanelSection(String(localized: "卡片")) {
                 PanelSelection(symbol: "rectangle.inset.filled", title: card.title ?? content.defaultTitle,
                                trailing: timecode(card.timelineStart ?? 0)) {
                     cardBackground(card.id, content: content)
@@ -45,7 +45,7 @@ struct TextPanel: View {
                 }
             }
         }
-        PanelSection("文字") {
+        PanelSection(String(localized: "文字")) {
             if let id = model.selectedText, let value = model.edit.text(id: id) {
                 PanelSelection(symbol: "text.alignleft",
                                title: model.edit.textDisplayTitle(value, numbers: model.edit.textNumbers()),
@@ -53,12 +53,12 @@ struct TextPanel: View {
                     controls(for: id, value: value)
                 }
             } else if model.edit.textList.isEmpty {
-                PanelNote("暂无文字。挑一个预设，或用下面的按钮在播放头处添加 3 秒文字。")
+                PanelNote(String(localized: "暂无文字。挑一个预设，或用下面的按钮在播放头处添加 3 秒文字。"))
             } else {
-                PanelNote("在时间线的文字块上点一下，这里就显示那一段的参数。")
+                PanelNote(String(localized: "在时间线的文字块上点一下，这里就显示那一段的参数。"))
             }
             Button("添加文字") { if let id = model.addText() { select(id) } }.buttonStyle(StudioButtonStyle(.secondary))
-            PanelNote("片头、章节、片尾用卡片：时间线工具栏的“插入卡片”，或右键录制画面“在此前 / 后插入卡片”。")
+            PanelNote(String(localized: "片头、章节、片尾用卡片：时间线工具栏的“插入卡片”，或右键录制画面“在此前 / 后插入卡片”。"))
         }
         // 进面板时还没选中任何一段就先选第一段，免得面板空着、非得先去时间线点一下。
         .onAppear {
@@ -78,13 +78,13 @@ struct TextPanel: View {
             model.commit { $0.updateCard(id: id) { $0.background = on ? .ink : nil } }
         })).toggleStyle(StudioToggleStyle())
         if content.background != nil {
-            SwatchRow(title: "背景色", selection: Binding(get: { model.selectedCard?.card?.background ?? .ink }, set: { color in
+            SwatchRow(title: String(localized: "背景色"), selection: Binding(get: { model.selectedCard?.card?.background ?? .ink }, set: { color in
                 model.commit { $0.updateCard(id: id) { $0.background = color } }
             }))
         } else {
-            PanelNote("背景跟随画布（画面布局里的壁纸 / 渐变 / 纯色）。")
+            PanelNote(String(localized: "背景跟随画布（画面布局里的壁纸 / 渐变 / 纯色）。"))
         }
-        PanelNote("卡片期间不显示录屏、人像与光标，声音留空。时长在时间线上拖卡片右缘来改，后面的内容跟着挪。")
+        PanelNote(String(localized: "卡片期间不显示录屏、人像与光标，声音留空。时长在时间线上拖卡片右缘来改，后面的内容跟着挪。"))
     }
 
     /// 单段文字的参数：文本框、版式、动画，然后是收起的排版与外观。起止时间只在时间线上拖。
@@ -105,30 +105,30 @@ struct TextPanel: View {
             }
             if value.layout != .overlay {
                 PanelNote(value.layout == .fullscreen
-                          ? "全屏：文字占满画面，底下的录制画面缩一点并淡出，视频照常往下播。要让成片在这里停一会儿，用时间线上的“插入卡片”。"
-                          : "分屏：录制画面退到一栏，文字占另一栏。浮在画面上的画中画会待在画面那一栏里，不跟着画面一起缩小。")
-                EditorStepper(model: model, title: "过渡时长", value: binding(id, \.layoutTransition), range: 0...3, defaultValue: 0.35)
+                          ? String(localized: "全屏：文字占满画面，底下的录制画面缩一点并淡出，视频照常往下播。要让成片在这里停一会儿，用时间线上的“插入卡片”。")
+                          : String(localized: "分屏：录制画面退到一栏，文字占另一栏。浮在画面上的画中画会待在画面那一栏里，不跟着画面一起缩小。"))
+                EditorStepper(model: model, title: String(localized: "过渡时长"), value: binding(id, \.layoutTransition), range: 0...3, defaultValue: 0.35)
             }
             if value.layout.textOnLeft != nil {
                 // 人像被当成画面构图一部分的那几种布局（侧边 / 在后 / 分屏 / 人像全屏）没法摘出来单独摆，
                 // 摘了整套构图就散了。这里说清楚，免得用户以为是画中画没生效。
                 if model.hasCameraMedia, let camera = model.edit.camera, camera.enabled, !camera.isFloatingPortrait {
-                    PanelNote("人像当前不是浮在画面上的画中画，它属于画面构图的一部分，会跟着画面一起缩进这一栏。想让人像保持原大小，去「人像」面板换成圆形或圆角矩形那两种叠放预设。")
+                    PanelNote(String(localized: "人像当前不是浮在画面上的画中画，它属于画面构图的一部分，会跟着画面一起缩进这一栏。想让人像保持原大小，去「人像」面板换成圆形或圆角矩形那两种叠放预设。"))
                 }
-                EditorFill(model: model, title: "画面栏宽", value: binding(id, \.splitRatio), range: TextSegment.splitRatioRange,
+                EditorFill(model: model, title: String(localized: "画面栏宽"), value: binding(id, \.splitRatio), range: TextSegment.splitRatioRange,
                              suffix: "%", percentage: true, defaultValue: TextSegment.defaultSplitRatio, detents: [0.5])
-                EditorSlider(model: model, title: "栏间距", value: binding(id, \.splitGap), range: 0...240, decimals: 0,
+                EditorSlider(model: model, title: String(localized: "栏间距"), value: binding(id, \.splitGap), range: 0...240, decimals: 0,
                              defaultValue: TextSegment.defaultSplitGap)
             }
         }
         Picker("入场动画", selection: animationBinding(id, \.enterKind)) { animationOptions }.environment(\.colorScheme, .dark)
-        EditorStepper(model: model, title: "入场时长", value: binding(id, \.enterDuration), range: 0...3, defaultValue: 0.4)
+        EditorStepper(model: model, title: String(localized: "入场时长"), value: binding(id, \.enterDuration), range: 0...3, defaultValue: 0.4)
         Picker("出场动画", selection: animationBinding(id, \.exitKind)) { animationOptions }.environment(\.colorScheme, .dark)
-        EditorStepper(model: model, title: "出场时长", value: binding(id, \.exitDuration), range: 0...3, defaultValue: 0.35)
+        EditorStepper(model: model, title: String(localized: "出场时长"), value: binding(id, \.exitDuration), range: 0...3, defaultValue: 0.35)
         if value.enterDuration + value.exitDuration > value.duration {
-            PanelNote("进出时长之和超过了本段时长，已按比例压缩。")
+            PanelNote(String(localized: "进出时长之和超过了本段时长，已按比例压缩。"))
         }
-        PanelSection("排版", expanded: $typographyExpanded) {
+        PanelSection(String(localized: "排版"), expanded: $typographyExpanded) {
             Picker("字体", selection: familyBinding(id)) {
                 Text("系统").tag(TextSegment.Family.system)
                 Text("无衬线").tag(TextSegment.Family.sans)
@@ -136,32 +136,32 @@ struct TextPanel: View {
                 Text("圆体").tag(TextSegment.Family.rounded)
                 Text("等宽").tag(TextSegment.Family.mono)
             }.environment(\.colorScheme, .dark)
-            EditorSlider(model: model, title: "字号", value: binding(id, \.size), range: TextSegment.sizeRange,
+            EditorSlider(model: model, title: String(localized: "字号"), value: binding(id, \.size), range: TextSegment.sizeRange,
                          decimals: 0, detents: [26, 40, 44, 56, 96, 160])
-            EditorSlider(model: model, title: "字重", value: binding(id, \.weight), range: TextSegment.weightRange,
+            EditorSlider(model: model, title: String(localized: "字重"), value: binding(id, \.weight), range: TextSegment.weightRange,
                          decimals: 0, defaultValue: 500, detents: [400, 700])
-            EditorSlider(model: model, title: "行距", value: binding(id, \.lineHeight), range: 0.8...2.0, defaultValue: 1.30, detents: [1.0, 1.3])
-            EditorSlider(model: model, title: "字间距", value: binding(id, \.tracking), range: -2...20, decimals: 1, defaultValue: 0, detents: [0])
+            EditorSlider(model: model, title: String(localized: "行距"), value: binding(id, \.lineHeight), range: 0.8...2.0, defaultValue: 1.30, detents: [1.0, 1.3])
+            EditorSlider(model: model, title: String(localized: "字间距"), value: binding(id, \.tracking), range: -2...20, decimals: 1, defaultValue: 0, detents: [0])
             // 位置在画布比例的底板上拖（也可以直接在画布上拖文字）；靠近中线吸附。
-            EditorRegion(model: model, title: "位置", shape: .point, aspect: model.edit.layout.aspect,
+            EditorRegion(model: model, title: String(localized: "位置"), shape: .point, aspect: model.edit.layout.aspect,
                          region: positionBinding(id)) { EditorRegion.positionReadout($0.origin) }
-            EditorSlider(model: model, title: "文本框宽度", value: binding(id, \.maxWidth), range: TextSegment.maxWidthRange, suffix: "%", percentage: true, defaultValue: 0.8)
+            EditorSlider(model: model, title: String(localized: "文本框宽度"), value: binding(id, \.maxWidth), range: TextSegment.maxWidthRange, suffix: "%", percentage: true, defaultValue: 0.8)
         }
-        PanelSection("外观", expanded: $appearanceExpanded) {
-            SwatchRow(title: "文字颜色", selection: paletteBinding(id, \.color))
-            EditorFill(model: model, title: "不透明度", value: binding(id, \.opacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 1)
+        PanelSection(String(localized: "外观"), expanded: $appearanceExpanded) {
+            SwatchRow(title: String(localized: "文字颜色"), selection: paletteBinding(id, \.color))
+            EditorFill(model: model, title: String(localized: "不透明度"), value: binding(id, \.opacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 1)
             Toggle("文字背景", isOn: boolBinding(id, \.plate)).toggleStyle(StudioToggleStyle())
             if value.plate {
-                SwatchRow(title: "背景色", selection: paletteBinding(id, \.plateColor))
-                EditorFill(model: model, title: "背景不透明度", value: binding(id, \.plateOpacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 0.55)
-                EditorSlider(model: model, title: "内边距", value: binding(id, \.platePadding), range: 0...48, decimals: 0, defaultValue: 16)
-                EditorSlider(model: model, title: "背景圆角", value: binding(id, \.plateRadius), range: 0...32, decimals: 0, defaultValue: 8)
+                SwatchRow(title: String(localized: "背景色"), selection: paletteBinding(id, \.plateColor))
+                EditorFill(model: model, title: String(localized: "背景不透明度"), value: binding(id, \.plateOpacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 0.55)
+                EditorSlider(model: model, title: String(localized: "内边距"), value: binding(id, \.platePadding), range: 0...48, decimals: 0, defaultValue: 16)
+                EditorSlider(model: model, title: String(localized: "背景圆角"), value: binding(id, \.plateRadius), range: 0...32, decimals: 0, defaultValue: 8)
             }
             Toggle("阴影", isOn: boolBinding(id, \.shadow)).toggleStyle(StudioToggleStyle())
             if value.shadow {
-                EditorFill(model: model, title: "不透明度", value: binding(id, \.shadowOpacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 0.45)
-                EditorSlider(model: model, title: "模糊", value: binding(id, \.shadowBlur), range: 0...60, decimals: 0, defaultValue: 18)
-                EditorSlider(model: model, title: "距离", value: binding(id, \.shadowOffset), range: -40...40, decimals: 0, defaultValue: 6, detents: [0])
+                EditorFill(model: model, title: String(localized: "不透明度"), value: binding(id, \.shadowOpacity), range: 0...1, suffix: "%", percentage: true, defaultValue: 0.45)
+                EditorSlider(model: model, title: String(localized: "模糊"), value: binding(id, \.shadowBlur), range: 0...60, decimals: 0, defaultValue: 18)
+                EditorSlider(model: model, title: String(localized: "距离"), value: binding(id, \.shadowOffset), range: -40...40, decimals: 0, defaultValue: 6, detents: [0])
             }
         }
         HStack(spacing: CaploMetrics.Spacing.s) {

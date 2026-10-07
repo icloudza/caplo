@@ -9,6 +9,7 @@ struct CropPanel: View {
         var aspect: Double? {
             switch self { case .free: nil; case .wide: 16.0 / 9; case .standard: 4.0 / 3; case .square: 1; case .tall: 9.0 / 16 }
         }
+        var title: String { self == .free ? String(localized: "自由") : rawValue }
     }
 
     private var crop: CropRect { model.edit.layout.crop ?? .full }
@@ -23,18 +24,18 @@ struct CropPanel: View {
     }
 
     var body: some View {
-        PanelNote("裁掉录屏画面的边缘。裁切后聚焦与点击效果仍对准原位置，导出与预览一致。")
-        PanelSection("比例") {
+        PanelNote(String(localized: "裁掉录屏画面的边缘。裁切后聚焦与点击效果仍对准原位置，导出与预览一致。"))
+        PanelSection(String(localized: "比例")) {
             ChipGroup(Preset.allCases, selection: Binding(get: { activePreset }, set: { preset in
                 model.commit { edit in
                     if let aspect = preset.aspect { edit.layout.crop = CropRect.centered(aspect: aspect, sourceAspect: sourceAspect) }
                     else if edit.layout.crop == nil { edit.layout.crop = .full }
                 }
-            })) { $0.rawValue }
+            })) { $0.title }
         }
-        PanelSection("范围") {
+        PanelSection(String(localized: "范围")) {
             // 在录制画面比例的底板上直接拖裁剪框：移动框、拉四角，比四条边距滑块直观。
-            EditorRegion(model: model, title: "保留区域", shape: .box(minimumSide: CropRect.minimumSide), aspect: sourceAspect,
+            EditorRegion(model: model, title: String(localized: "保留区域"), shape: .box(minimumSide: CropRect.minimumSide), aspect: sourceAspect,
                          region: cropRegion, defaultRegion: CGRect(x: 0, y: 0, width: 1, height: 1), readout: EditorRegion.sizeReadout)
         }
         Button("取消裁剪") { model.commit { $0.layout.crop = nil } }

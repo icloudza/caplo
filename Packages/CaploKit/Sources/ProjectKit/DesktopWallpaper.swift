@@ -27,16 +27,16 @@ public enum DesktopWallpaper {
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("caplo-backdrop-\(UUID().uuidString).heic")
         defer { try? FileManager.default.removeItem(at: temporary) }
         guard let destination = CGImageDestinationCreateWithURL(temporary as CFURL, UTType.heic.identifier as CFString, 1, nil) else {
-            throw ProjectError.invalid("无法写入壁纸。")
+            throw ProjectError.invalid(String(localized: "无法写入壁纸。"))
         }
         CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
-        guard CGImageDestinationFinalize(destination) else { throw ProjectError.invalid("无法写入壁纸。") }
+        guard CGImageDestinationFinalize(destination) else { throw ProjectError.invalid(String(localized: "无法写入壁纸。")) }
         return try ProjectStorage.importBackground(from: temporary, into: project)
     }
 
     /// 一张壁纸文件收进工程包。
     public static func importWallpaper(_ url: URL, into project: URL) throws -> String {
-        guard let image = decode(url, maximumPixelSize: maximumEdge) else { throw ProjectError.invalid("无法读取这张壁纸。") }
+        guard let image = decode(url, maximumPixelSize: maximumEdge) else { throw ProjectError.invalid(String(localized: "无法读取这张壁纸。")) }
         return try importImage(image, into: project)
     }
 }

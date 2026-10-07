@@ -11,7 +11,7 @@ import CoreImage
 public enum ProjectMedia {
     public static func compose(url: URL, document: ProjectDocument, levels: AudioLevels, edit: VideoEdit? = nil) async throws -> (AVMutableComposition, AVMutableAudioMix) {
         if let edit { try edit.validate(sourceDuration: document.duration) }
-        guard !document.segments.isEmpty else { throw ProjectError.invalid("工程没有可播放的片段。") }
+        guard !document.segments.isEmpty else { throw ProjectError.invalid(String(localized: "工程没有可播放的片段。")) }
         let composition = AVMutableComposition()
         // 声音：每个角色按"泳道"建轨——互不重叠的块共用一条轨，只有时间上重叠的块才另开一条（见 audioLanes）。
         // 以前独立编辑模式下每块一条轨，分割几百次就是几百条音轨，播放与导出的混音开销随之暴涨。
@@ -65,7 +65,7 @@ public enum ProjectMedia {
                     } else {
                         let asset = AVURLAsset(url: try ProjectStorage.mediaURL(path, in: url))
                         guard let loaded = try await asset.loadTracks(withMediaType: mediaType).first else {
-                            throw ProjectError.invalid("素材缺少预期轨道：\(path)")
+                            throw ProjectError.invalid(String(localized: "素材缺少预期轨道：\(path)"))
                         }
                         source = loaded; sourceRange = try await loaded.load(.timeRange)
                         formats = role.isVideo ? try await loaded.load(.formatDescriptions) : []
@@ -87,7 +87,7 @@ public enum ProjectMedia {
                                 // 首条屏幕 / 摄像头仍为 1 / 4；额外屏幕使用奇数 5 起，摄像头使用偶数 6 起。
                                 let identifier = groups.isEmpty ? trackID(for: role) : CMPersistentTrackID((role == .screen ? 3 : 4) + groups.count * 2)
                                 guard let created = composition.addMutableTrack(withMediaType: .video, preferredTrackID: identifier) else {
-                                    throw ProjectError.invalid("无法创建视频解码轨道。")
+                                    throw ProjectError.invalid(String(localized: "无法创建视频解码轨道。"))
                                 }
                                 videoGroups[role, default: []].append((formats, created))
                                 destination = created
@@ -96,7 +96,7 @@ public enum ProjectMedia {
                             let lane = lanes[original.id] ?? 0
                             if let matching = audioGroups[role]?.first(where: { $0.0 == lane }) { destination = matching.1 }
                             else {
-                                guard let created = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: audioTrackID(role: role, lane: lane)) else { throw ProjectError.invalid("无法创建声音轨道。") }
+                                guard let created = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: audioTrackID(role: role, lane: lane)) else { throw ProjectError.invalid(String(localized: "无法创建声音轨道。")) }
                                 audioGroups[role, default: []].append((lane, created)); destination = created
                             }
                         }
@@ -202,7 +202,7 @@ public enum ProjectMedia {
     /// 画布、镜头和音量不改变素材拼接，直接更新同一个播放项，保留解码与缓冲状态。
     public static func updatePresentation(item: AVPlayerItem, previous: VideoEdit, edit: VideoEdit, url: URL? = nil) throws {
         guard previous.hasSameMedia(as: edit), let composition = item.asset as? AVMutableComposition else {
-            throw ProjectError.invalid("片段已变化，需要重新构建播放时间线。")
+            throw ProjectError.invalid(String(localized: "片段已变化，需要重新构建播放时间线。"))
         }
         if edit.differsVisually(from: previous) {
             let existing = item.videoComposition?.instructions.first as? SceneInstruction
@@ -248,7 +248,7 @@ public enum ProjectMedia {
                 guard let path = segment.files[.screen], ProjectStorage.mediaExists(path, in: url) else { break }
                 return (path, max(0, min(source - cursor, segment.duration - 0.001)), masks)
             }
-            throw ProjectError.invalid("暂无缩略图。")
+            throw ProjectError.invalid(String(localized: "暂无缩略图。"))
         }.value
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: try ProjectStorage.mediaURL(plan.path, in: url)))
         generator.maximumSize = CGSize(width: 640, height: 400)
@@ -259,7 +259,7 @@ public enum ProjectMedia {
         guard !plan.masks.isEmpty else { return frame }
         let image = CIImage(cgImage: frame)
         guard let masked = CIContext().createCGImage(MaskRenderer.apply(plan.masks, to: image), from: image.extent) else {
-            throw ProjectError.invalid("无法生成已打码的缩略图。")
+            throw ProjectError.invalid(String(localized: "无法生成已打码的缩略图。"))
         }
         return masked
     }
@@ -302,7 +302,7 @@ public enum ProjectMedia {
     }
 
     private static func videoComposition(composition: AVMutableComposition, edit: VideoEdit, shortEdge: Int, pointers: PointerTimeline, backgroundImage: CIImage? = nil, frameRate: Double = 30, reusing previous: SceneInstruction? = nil) throws -> AVVideoComposition {
-        guard let track = composition.track(withTrackID: trackID(for: .screen)), edit.duration > 0 else { throw ProjectError.invalid("时间线为空，请先恢复一个片段。") }
+        guard let track = composition.track(withTrackID: trackID(for: .screen)), edit.duration > 0 else { throw ProjectError.invalid(String(localized: "时间线为空，请先恢复一个片段。")) }
         let video = AVMutableVideoComposition()
         video.customVideoCompositorClass = VideoCompositor.self
         let routes = composition.tracks.filter { $0.mediaType == .video }.flatMap { source in

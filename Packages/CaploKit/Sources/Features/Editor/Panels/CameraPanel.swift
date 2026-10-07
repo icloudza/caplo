@@ -22,12 +22,12 @@ struct CameraPanel: View {
         let cornerRadius: Double
 
         static let all: [Preset] = [
-            Preset(id: "circle-trailing-bottom", name: "圆形 · 右下", mode: .overlay, shape: .circle, x: 1, y: 1, sideHeight: 0.45, cornerRadius: 0.5),
-            Preset(id: "split-leading", name: "分屏 · 人像在左", mode: .splitLeading, shape: .roundedRectangle, x: 0, y: 1, sideHeight: 0.45, cornerRadius: 0.14),
-            Preset(id: "side-leading", name: "侧边 · 人像在左", mode: .sideLeading, shape: .roundedRectangle, x: 0, y: 0, sideHeight: 0.45, cornerRadius: 0.14),
-            Preset(id: "rounded-trailing-top", name: "圆角矩形 · 右上", mode: .overlay, shape: .roundedRectangle, x: 1, y: 0, sideHeight: 0.45, cornerRadius: 0.14),
-            Preset(id: "camera-full", name: "人像全屏 · 录屏小窗", mode: .cameraFull, shape: .roundedRectangle, x: 1, y: 1, sideHeight: 0.45, cornerRadius: 0.14),
-            Preset(id: "behind-trailing", name: "人像在后 · 右侧", mode: .behindTrailing, shape: .roundedRectangle, x: 1, y: 0, sideHeight: 0.9, cornerRadius: 0.14),
+            Preset(id: "circle-trailing-bottom", name: String(localized: "圆形 · 右下"), mode: .overlay, shape: .circle, x: 1, y: 1, sideHeight: 0.45, cornerRadius: 0.5),
+            Preset(id: "split-leading", name: String(localized: "分屏 · 人像在左"), mode: .splitLeading, shape: .roundedRectangle, x: 0, y: 1, sideHeight: 0.45, cornerRadius: 0.14),
+            Preset(id: "side-leading", name: String(localized: "侧边 · 人像在左"), mode: .sideLeading, shape: .roundedRectangle, x: 0, y: 0, sideHeight: 0.45, cornerRadius: 0.14),
+            Preset(id: "rounded-trailing-top", name: String(localized: "圆角矩形 · 右上"), mode: .overlay, shape: .roundedRectangle, x: 1, y: 0, sideHeight: 0.45, cornerRadius: 0.14),
+            Preset(id: "camera-full", name: String(localized: "人像全屏 · 录屏小窗"), mode: .cameraFull, shape: .roundedRectangle, x: 1, y: 1, sideHeight: 0.45, cornerRadius: 0.14),
+            Preset(id: "behind-trailing", name: String(localized: "人像在后 · 右侧"), mode: .behindTrailing, shape: .roundedRectangle, x: 1, y: 0, sideHeight: 0.9, cornerRadius: 0.14),
         ]
 
         /// 当前布局对应哪个预设：预设与它的水平翻转算同一格（翻转后格子仍选中、缩略图镜像显示）；
@@ -71,9 +71,9 @@ struct CameraPanel: View {
                     if edit.camera == nil { edit.camera = CameraLayout() }
                     edit.camera?.enabled = value
                 }
-            })) { SettingLabel("显示人像", systemImage: "person.crop.circle") }.toggleStyle(StudioToggleStyle())
+            })) { SettingLabel(String(localized: "显示人像"), systemImage: "person.crop.circle") }.toggleStyle(StudioToggleStyle())
             Group {
-                PanelSection("摄像头布局") {
+                PanelSection(String(localized: "摄像头布局")) {
                     let current = Preset.matching(model.edit.camera)
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: CaploMetrics.Spacing.xs), count: 3), spacing: CaploMetrics.Spacing.xs) {
                         ForEach(Preset.all) { preset in
@@ -89,7 +89,7 @@ struct CameraPanel: View {
                         }
                     }
                 }
-                PanelSection("调整") {
+                PanelSection(String(localized: "调整")) {
                     let layout = model.edit.camera ?? CameraLayout()
                     HStack(spacing: CaploMetrics.Spacing.s) {
                         // 翻转的是布局（人像换到对侧、自定义摆过的录屏也换到对侧），不是画面镜像。
@@ -106,34 +106,34 @@ struct CameraPanel: View {
                     if layout.isSplit {
                         // 分屏的尺寸完全由画布决定，没有可调的大小。
                     } else if layout.isCameraFull {
-                        EditorSlider(model: model, title: "录屏大小", value: Binding(get: { model.edit.layout.screenScale }, set: { model.edit.layout.screenScale = $0 }),
+                        EditorSlider(model: model, title: String(localized: "录屏大小"), value: Binding(get: { model.edit.layout.screenScale }, set: { model.edit.layout.screenScale = $0 }),
                                      range: 0.2...0.6, suffix: "%", percentage: true, detents: [0.32])
                     } else if layout.isBehind {
-                        EditorSlider(model: model, title: "人像高度", value: binding(\.sideHeight), range: 0.6...1, suffix: "%", percentage: true, detents: [0.9])
+                        EditorSlider(model: model, title: String(localized: "人像高度"), value: binding(\.sideHeight), range: 0.6...1, suffix: "%", percentage: true, detents: [0.9])
                     } else if layout.isSide {
-                        EditorSlider(model: model, title: "人像高度", value: binding(\.sideHeight), range: 0.4...0.8, suffix: "%", percentage: true, detents: [0.45])
+                        EditorSlider(model: model, title: String(localized: "人像高度"), value: binding(\.sideHeight), range: 0.4...0.8, suffix: "%", percentage: true, detents: [0.45])
                     } else {
-                        EditorSlider(model: model, title: "大小", value: binding(\.size), range: 0.12...0.6, suffix: "%", percentage: true)
+                        EditorSlider(model: model, title: String(localized: "大小"), value: binding(\.size), range: 0.12...0.6, suffix: "%", percentage: true)
                     }
                     // 每种布局都能调圆角：圆形预设 50 % 是正圆，拉小就是圆角方块；人像全屏没有圆角（小窗的圆角在“画面布局”）。
                     if !layout.isCameraFull {
-                        EditorSlider(model: model, title: "圆角", value: binding(\.cornerRadius), range: 0...0.5, suffix: "%", percentage: true, detents: [0.14, 0.5])
+                        EditorSlider(model: model, title: String(localized: "圆角"), value: binding(\.cornerRadius), range: 0...0.5, suffix: "%", percentage: true, detents: [0.14, 0.5])
                     }
                     // 镜头推近时人像随同一条包络缩小并淡一点，拉远时放回来（像 FocuSee）；在后与分屏的人像不参与。
                     if !layout.ignoresFocus {
                         Toggle(isOn: Binding(get: { model.edit.camera?.shrinkOnFocus == true }, set: { value in model.commit { $0.camera?.shrinkOnFocus = value } })) {
-                            SettingLabel("聚焦时缩小人像", systemImage: "arrow.down.right.and.arrow.up.left")
+                            SettingLabel(String(localized: "聚焦时缩小人像"), systemImage: "arrow.down.right.and.arrow.up.left")
                         }.toggleStyle(StudioToggleStyle())
                         if layout.shrinkOnFocus {
-                            EditorFill(model: model, title: "聚焦时缩放", value: binding(\.focusedScale), range: 0.4...1, suffix: "%", percentage: true, detents: [0.7])
+                            EditorFill(model: model, title: String(localized: "聚焦时缩放"), value: binding(\.focusedScale), range: 0.4...1, suffix: "%", percentage: true, detents: [0.7])
                         }
                     }
                     Toggle(isOn: Binding(get: { model.edit.camera?.mirrored == true }, set: { value in model.commit { $0.camera?.mirrored = value } })) {
-                        SettingLabel("镜像", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+                        SettingLabel(String(localized: "镜像"), systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
                     }.toggleStyle(StudioToggleStyle())
                     if !layout.ignoresFocus {
                         Toggle(isOn: Binding(get: { model.edit.camera?.shadow == true }, set: { value in model.commit { $0.camera?.shadow = value } })) {
-                            SettingLabel("阴影", systemImage: "square.3.layers.3d")
+                            SettingLabel(String(localized: "阴影"), systemImage: "square.3.layers.3d")
                         }.toggleStyle(StudioToggleStyle())
                     }
                 }
@@ -142,9 +142,9 @@ struct CameraPanel: View {
                 .buttonStyle(StudioButtonStyle(.secondary))
                 .sheet(isPresented: $customizing) { CustomLayoutSheet(model: model, stills: customStills ?? CustomLayoutStills()) }
         } else if model.cameraClipsDeleted {
-            PanelNote("摄像头片段已从时间线删除。撤销可以恢复。")
+            PanelNote(String(localized: "摄像头片段已从时间线删除。撤销可以恢复。"))
         } else {
-            PanelNote("此录制没有摄像头素材。下次录制前可在录制条开启摄像头。")
+            PanelNote(String(localized: "此录制没有摄像头素材。下次录制前可在录制条开启摄像头。"))
         }
     }
 

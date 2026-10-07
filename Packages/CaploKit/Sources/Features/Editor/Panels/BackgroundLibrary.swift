@@ -105,7 +105,7 @@ final class BackgroundLibrary {
 
     /// 内置壁纸：无损 WebP 原样复制进工程包，返回工程内相对路径。
     nonisolated static func importBundled(_ wallpaper: BundledWallpaper, into project: URL) throws -> String {
-        guard let url = wallpaper.url else { throw ProjectError.invalid("内置壁纸缺失。") }
+        guard let url = wallpaper.url else { throw ProjectError.invalid(String(localized: "内置壁纸缺失。")) }
         return try ProjectStorage.importBackground(from: url, into: project)
     }
 

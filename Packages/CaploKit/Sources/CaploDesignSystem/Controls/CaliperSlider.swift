@@ -678,7 +678,7 @@ public final class CaliperView: NSView {
     private func emitChange() { if handles == 2 { onRangeChange?(lowerValue, upperValue) } else { onChange?(value) } }
 
     private func updateAccessibility() {
-        setAccessibilityValue(handles == 2 ? "\(format(lowerValue)) 到 \(format(upperValue))" : format(value))
+        setAccessibilityValue(handles == 2 ? String(localized: "\(format(lowerValue)) 到 \(format(upperValue))") : format(value))
         setAccessibilityMinValue(configuration.range.lowerBound); setAccessibilityMaxValue(configuration.range.upperBound)
     }
     public override func accessibilityPerformIncrement() -> Bool { step(1, multiplier: 1); return true }

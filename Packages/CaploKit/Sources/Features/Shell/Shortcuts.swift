@@ -34,7 +34,7 @@ struct KeyCombo: Codable, Hashable, Sendable {
 
     /// 按 macOS 菜单的习惯顺序：⌃⌥⇧⌘ + 键名。
     var display: String {
-        let name = key == " " ? "空格" : key.uppercased()
+        let name = key == " " ? String(localized: "空格") : key.uppercased()
         return (control ? "⌃" : "") + (option ? "⌥" : "") + (shift ? "⇧" : "") + (command ? "⌘" : "") + name
     }
 
@@ -56,7 +56,15 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable {
     var id: Self { self }
 
     /// 作用范围：同一范围内不能重复；`global` 是主菜单命令，任何窗口在前都生效，所以和所有范围都算冲突。
-    enum Scope: String, CaseIterable { case global = "全局", recorder = "录制方式条", library = "项目中心", editor = "编辑器" }
+    enum Scope: String, CaseIterable {
+        case global = "全局", recorder = "录制方式条", library = "项目中心", editor = "编辑器"
+        var title: String {
+            switch self {
+            case .global: String(localized: "全局"); case .recorder: String(localized: "录制方式条")
+            case .library: String(localized: "项目中心"); case .editor: String(localized: "编辑器")
+            }
+        }
+    }
 
     var scope: Scope {
         switch self {
@@ -69,11 +77,11 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .newRecording: "新建录制"; case .openProject: "打开工程"; case .projectLibrary: "项目中心"; case .settings: "设置"
-        case .recordDisplay: "全屏"; case .recordRegion: "自定义区域"; case .recordWindow: "窗口"
-        case .librarySearch: "搜索"; case .librarySelectAll: "全选"
-        case .playPause: "播放 / 暂停"; case .split: "分割"; case .undo: "撤销"; case .redo: "重做"
-        case .duplicate: "复制片段"; case .selectAllClips: "全选片段"; case .export: "导出"
+        case .newRecording: String(localized: "新建录制"); case .openProject: String(localized: "打开工程"); case .projectLibrary: String(localized: "项目中心"); case .settings: String(localized: "设置")
+        case .recordDisplay: String(localized: "全屏"); case .recordRegion: String(localized: "自定义区域"); case .recordWindow: String(localized: "窗口")
+        case .librarySearch: String(localized: "搜索"); case .librarySelectAll: String(localized: "全选")
+        case .playPause: String(localized: "播放 / 暂停"); case .split: String(localized: "分割"); case .undo: String(localized: "撤销"); case .redo: String(localized: "重做")
+        case .duplicate: String(localized: "复制片段"); case .selectAllClips: String(localized: "全选片段"); case .export: String(localized: "导出")
         }
     }
 
@@ -129,11 +137,11 @@ final class ShortcutStore {
     func problem(assigning candidate: KeyCombo, to action: ShortcutAction) -> String? {
         if let reason = Self.reservedReason(candidate, scope: action.scope) { return reason }
         // 主菜单命令不带 ⌘ / ⌃ 会在打字时被菜单截走。
-        if action.scope == .global, !candidate.hasPrimaryModifier { return "全局快捷键需要包含 ⌘ 或 ⌃" }
+        if action.scope == .global, !candidate.hasPrimaryModifier { return String(localized: "全局快捷键需要包含 ⌘ 或 ⌃") }
         if let other = ShortcutAction.allCases.first(where: {
             $0 != action && combo($0) == candidate && ($0.scope == action.scope || $0.scope == .global || action.scope == .global)
         }) {
-            return "\(candidate.display) 已用于「\(other.scope.rawValue) · \(other.title)」"
+            return String(localized: "\(candidate.display) 已用于「\(other.scope.title) · \(other.title)」")
         }
         return nil
     }
@@ -156,13 +164,13 @@ final class ShortcutStore {
     /// 系统与应用固定占用的组合：退出 / 关窗 / 隐藏 / 最小化 / 剪贴板，编辑器的 ⌘1–⌘9 切面板，导航条的 + − =。
     static func reservedReason(_ combo: KeyCombo, scope: ShortcutAction.Scope) -> String? {
         let commandOnly = combo.command && !combo.shift && !combo.option && !combo.control
-        if commandOnly, ["q", "w", "h", "m", "c", "v", "x", "`"].contains(combo.key) { return "\(combo.display) 是系统快捷键，不能占用" }
-        if combo.command, combo.option, !combo.shift, !combo.control, ["h", "w", "m"].contains(combo.key) { return "\(combo.display) 是系统快捷键，不能占用" }
+        if commandOnly, ["q", "w", "h", "m", "c", "v", "x", "`"].contains(combo.key) { return String(localized: "\(combo.display) 是系统快捷键，不能占用") }
+        if combo.command, combo.option, !combo.shift, !combo.control, ["h", "w", "m"].contains(combo.key) { return String(localized: "\(combo.display) 是系统快捷键，不能占用") }
         if commandOnly, scope == .editor || scope == .global, Int(combo.key).map({ (1...9).contains($0) }) == true {
-            return "⌘1 – ⌘9 固定用于编辑器切换面板"
+            return String(localized: "⌘1 – ⌘9 固定用于编辑器切换面板")
         }
         if !combo.command, !combo.control, !combo.option, scope == .editor || scope == .global, ["+", "=", "-"].contains(combo.key) {
-            return "\(combo.display) 固定用于缩放时间线导航条"
+            return String(localized: "\(combo.display) 固定用于缩放时间线导航条")
         }
         return nil
     }
@@ -190,7 +198,7 @@ struct ShortcutRecorderField: View {
         Button {
             if active { stop() } else { recording = action; problem = nil }
         } label: {
-            Text(active ? "按下新的快捷键" : store.display(action))
+            Text(active ? String(localized: "按下新的快捷键") : store.display(action))
                 .font(CaploFont.value)
                 .foregroundStyle(active ? CaploColor.accent : CaploColor.textPrimary)
                 .frame(minWidth: 72)
@@ -202,7 +210,7 @@ struct ShortcutRecorderField: View {
         .buttonStyle(.plain)
         .help(active ? "Esc 取消" : "点击录入")
         .accessibilityLabel("\(action.title)快捷键")
-        .accessibilityValue(active ? "正在录入" : store.display(action))
+        .accessibilityValue(active ? String(localized: "正在录入") : store.display(action))
         .onChange(of: active, initial: true) { _, now in now ? start() : removeMonitor() }
         .onDisappear { if active { recording = nil }; removeMonitor() }
     }
@@ -218,7 +226,7 @@ struct ShortcutRecorderField: View {
     private func handle(_ event: NSEvent) {
         if event.keyCode == 53 { stop(); return }
         guard let combo = KeyCombo(event: event) else {
-            problem = (action, "方向键、回车、删除、Tab、Esc 与功能键不能设为快捷键"); return
+            problem = (action, String(localized: "方向键、回车、删除、Tab、Esc 与功能键不能设为快捷键")); return
         }
         if let reason = store.problem(assigning: combo, to: action) { problem = (action, reason); return }
         store.assign(combo, to: action)

@@ -9,7 +9,12 @@ import RenderKit
 /// 布局：比例（常用 chips + 平台下拉）、背景（渐变 / 纯色 / 图片）、留白、圆角、阴影（可调不透明度、柔和度、距离）与预设。
 struct CanvasPanel: View {
     let model: VideoEditorModel
-    private enum BackgroundKind: String, CaseIterable { case gradient = "渐变", solid = "纯色", image = "图片" }
+    private enum BackgroundKind: String, CaseIterable {
+        case gradient = "渐变", solid = "纯色", image = "图片"
+        var title: String {
+            switch self { case .gradient: String(localized: "渐变"); case .solid: String(localized: "纯色"); case .image: String(localized: "图片") }
+        }
+    }
     /// 背景分类只在面板创建时按当前工程推断一次；之后完全由用户点选决定。
     /// （原来挂在最后一个分区的 `onAppear` 上，图片页把它挤出可视区再滚回来就会重新推断成"图片"，渐变 / 纯色怎么点都切不过去。）
     @State private var kind: BackgroundKind
@@ -34,17 +39,17 @@ struct CanvasPanel: View {
     @State private var series: WallpaperSeries = .echoes
 
     var body: some View {
-        PanelSection("画面比例") {
-            ChipGroup(CanvasRatio.common, selection: Binding(get: { model.edit.layout.ratio }, set: { ratio in model.commit { $0.layout.ratio = ratio } })) { $0.rawValue }
-            SelectField(value: currentPlatform?.title, placeholder: "按平台选择…", accessibilityName: "平台比例", sections: platformSections)
+        PanelSection(String(localized: "画面比例")) {
+            ChipGroup(CanvasRatio.common, selection: Binding(get: { model.edit.layout.ratio }, set: { ratio in model.commit { $0.layout.ratio = ratio } })) { $0.title }
+            SelectField(value: currentPlatform?.title, placeholder: String(localized: "按平台选择…"), accessibilityName: String(localized: "平台比例"), sections: platformSections)
             Text(outputCaption).font(CaploFont.caption).monospacedDigit().foregroundStyle(CaploColor.textTertiary)
             // 开：镜头推近只放大录屏框里的内容，留白与背景不动；关：整个画面一起推近（像 FocuSee）。
             Toggle(isOn: Binding(get: { model.edit.layout.fixedFocusFrame }, set: { value in model.commit { $0.layout.fixedFocusFrame = value } })) {
-                SettingLabel("固定聚焦区域", systemImage: "rectangle.dashed")
+                SettingLabel(String(localized: "固定聚焦区域"), systemImage: "rectangle.dashed")
             }.toggleStyle(StudioToggleStyle())
         }
-        PanelSection("背景") {
-            ChipGroup(BackgroundKind.allCases, selection: $kind) { $0.rawValue }
+        PanelSection(String(localized: "背景")) {
+            ChipGroup(BackgroundKind.allCases, selection: $kind) { $0.title }
             switch kind {
             case .gradient:
                 // 最后一格是自定义渐变：种子取 Cap 新建渐变时的那一对色，选中后下面露出调色卡。
@@ -66,35 +71,35 @@ struct CanvasPanel: View {
             }
             // 只有真的在用图片时才给模糊：渐变与纯色糊了还是原样，摆个滑块出来纯属误导。
             if model.edit.layout.backgroundImage != nil {
-                EditorFill(model: model, title: "背景模糊", value: Binding(get: { model.edit.layout.backgroundBlur },
+                EditorFill(model: model, title: String(localized: "背景模糊"), value: Binding(get: { model.edit.layout.backgroundBlur },
                                                                         set: { model.edit.layout.backgroundBlur = $0 }),
                              range: 0...100, decimals: 0, defaultValue: 0)
             }
         }
-        PanelSection("样式") {
-            EditorSlider(model: model, title: "边距", value: Binding(get: { model.edit.layout.padding }, set: { model.edit.layout.padding = $0 }), range: 0...120, decimals: 0, defaultValue: 0)
-            EditorSlider(model: model, title: "圆角", value: Binding(get: { model.edit.layout.cornerRadius }, set: { model.edit.layout.cornerRadius = $0 }), range: 0...40, decimals: 0, defaultValue: 12)
+        PanelSection(String(localized: "样式")) {
+            EditorSlider(model: model, title: String(localized: "边距"), value: Binding(get: { model.edit.layout.padding }, set: { model.edit.layout.padding = $0 }), range: 0...120, decimals: 0, defaultValue: 0)
+            EditorSlider(model: model, title: String(localized: "圆角"), value: Binding(get: { model.edit.layout.cornerRadius }, set: { model.edit.layout.cornerRadius = $0 }), range: 0...40, decimals: 0, defaultValue: 12)
         }
-        PanelSection("阴影") {
+        PanelSection(String(localized: "阴影")) {
             Toggle(isOn: Binding(get: { model.edit.layout.shadow }, set: { value in model.commit { $0.layout.shadow = value } })) {
-                SettingLabel("阴影", systemImage: "square.3.layers.3d")
+                SettingLabel(String(localized: "阴影"), systemImage: "square.3.layers.3d")
             }.toggleStyle(StudioToggleStyle())
             if model.edit.layout.shadow {
-                EditorFill(model: model, title: "不透明度", value: Binding(get: { model.edit.layout.shadowOpacity }, set: { model.edit.layout.shadowOpacity = $0 }), range: 0...1, suffix: "%", percentage: true, defaultValue: CanvasLayout.defaultShadowOpacity)
-                EditorSlider(model: model, title: "模糊", value: Binding(get: { model.edit.layout.shadowBlur }, set: { model.edit.layout.shadowBlur = $0 }), range: 0...60, decimals: 0, defaultValue: CanvasLayout.defaultShadowBlur)
-                EditorSlider(model: model, title: "距离", value: Binding(get: { model.edit.layout.shadowOffset }, set: { model.edit.layout.shadowOffset = $0 }), range: -40...40, decimals: 0, defaultValue: CanvasLayout.defaultShadowOffset, detents: [0])
+                EditorFill(model: model, title: String(localized: "不透明度"), value: Binding(get: { model.edit.layout.shadowOpacity }, set: { model.edit.layout.shadowOpacity = $0 }), range: 0...1, suffix: "%", percentage: true, defaultValue: CanvasLayout.defaultShadowOpacity)
+                EditorSlider(model: model, title: String(localized: "模糊"), value: Binding(get: { model.edit.layout.shadowBlur }, set: { model.edit.layout.shadowBlur = $0 }), range: 0...60, decimals: 0, defaultValue: CanvasLayout.defaultShadowBlur)
+                EditorSlider(model: model, title: String(localized: "距离"), value: Binding(get: { model.edit.layout.shadowOffset }, set: { model.edit.layout.shadowOffset = $0 }), range: -40...40, decimals: 0, defaultValue: CanvasLayout.defaultShadowOffset, detents: [0])
             }
         }
-        PanelSection("预设", info: "不含自定义背景图片") {
+        PanelSection(String(localized: "预设"), info: String(localized: "不含自定义背景图片")) {
             // 预设用下拉选择：当前布局与哪个预设一致就显示哪个，否则显示占位；没有预设时下拉禁用并给一行说明。
-            SelectField(value: matchingPreset?.name, placeholder: presets.presets.isEmpty ? "还没有预设" : "选择预设…", accessibilityName: "布局预设", sections: [
+            SelectField(value: matchingPreset?.name, placeholder: presets.presets.isEmpty ? String(localized: "还没有预设") : String(localized: "选择预设…"), accessibilityName: String(localized: "布局预设"), sections: [
                 SelectField.Section(items: presets.presets.map { preset in
                     SelectField.Item(id: preset.id.uuidString, title: preset.name, checked: presetMatches(preset)) { apply(preset) }
                 }),
             ])
             .disabled(presets.presets.isEmpty)
             if presets.presets.isEmpty {
-                PanelNote("调好布局后保存为预设，以后一键套用到其他工程。")
+                PanelNote(String(localized: "调好布局后保存为预设，以后一键套用到其他工程。"))
             }
             HStack(spacing: CaploMetrics.Spacing.s) {
                 Button("保存为预设") { presetName = ""; namingPreset = true }
@@ -115,7 +120,7 @@ struct CanvasPanel: View {
                     }
                 if let matchingPreset {
                     Button("删除预设") { presets.remove(matchingPreset) }.buttonStyle(StudioButtonStyle(.quiet, size: .small))
-                        .hoverTip("删除「\(matchingPreset.name)」")
+                        .hoverTip(String(localized: "删除「\(matchingPreset.name)」"))
                 }
                 Button("重置布局") { model.commit { $0.layout = CanvasLayout() } }.buttonStyle(StudioButtonStyle(.quiet, size: .small))
             }
@@ -133,7 +138,7 @@ struct CanvasPanel: View {
     /// 平台按横 / 竖 / 方分组，不分地区；组内顺序即 `PlatformFormat.all` 的热度顺序。
     private var platformSections: [SelectField.Section] {
         CanvasRatio.Orientation.allCases.map { orientation in
-            SelectField.Section(orientation.rawValue, items: PlatformFormat.formats(in: orientation).map { format in
+            SelectField.Section(orientation.title, items: PlatformFormat.formats(in: orientation).map { format in
                 SelectField.Item(id: format.id, title: format.title, checked: currentPlatform?.id == format.id) { choosePlatform(format) }
             })
         }
@@ -147,7 +152,7 @@ struct CanvasPanel: View {
     private var outputCaption: String {
         let hd = model.edit.layout.outputSize(shortEdge: 1080)
         // 分辨率在导出窗口里选（2026-10-06 从顶栏挪过去）；这里只说明比例对应的尺寸。
-        return "1080p 下为 \(hd.width)×\(hd.height)，导出时可选 720p 至 4K"
+        return String(localized: "1080p 下为 \(hd.width)×\(hd.height)，导出时可选 720p 至 4K")
     }
 
     private func presetMatches(_ preset: CanvasPreset) -> Bool {
@@ -181,7 +186,7 @@ struct CanvasPanel: View {
                 Button("移除图片") { chosenBackdrop = nil; model.commit { $0.layout.backgroundImage = nil } }.buttonStyle(StudioButtonStyle(.quiet, size: .small))
             }
         } else {
-            PanelNote("图片会按填满画面裁切，并随工程一起保存；导出与预览一致。")
+            PanelNote(String(localized: "图片会按填满画面裁切，并随工程一起保存；导出与预览一致。"))
             Button { importImage() } label: { Label("导入图片", systemImage: "photo.badge.plus") }.buttonStyle(StudioButtonStyle(.secondary))
         }
         Text("内置壁纸").font(CaploFont.caption).foregroundStyle(CaploColor.textSecondary)
@@ -277,7 +282,7 @@ struct BackgroundSwatches: View {
     let choose: (CanvasBackground) -> Void
     var body: some View {
         SwatchGrid(options.map { value in
-            Swatch(id: value.rawValue, name: value.isCustom ? "自定义" : value.rawValue, colors: [
+            Swatch(id: value.rawValue, name: value.title, colors: [
                 Color(red: value.colors.start.red, green: value.colors.start.green, blue: value.colors.start.blue),
                 Color(red: value.colors.end.red, green: value.colors.end.green, blue: value.colors.end.blue),
             ])
@@ -292,10 +297,10 @@ struct GradientEnds: View {
     @Binding var background: CanvasBackground
     var body: some View {
         HStack(spacing: CaploMetrics.Spacing.m) {
-            well("起点", \.start)
-            well("终点", \.end)
+            well(String(localized: "起点"), \.start)
+            well(String(localized: "终点"), \.end)
             Spacer(minLength: 0)
-            Text(background.rawValue).font(CaploFont.caption).foregroundStyle(CaploColor.textSecondary)
+            Text(background.title).font(CaploFont.caption).foregroundStyle(CaploColor.textSecondary)
         }
     }
 

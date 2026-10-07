@@ -57,7 +57,7 @@ import Observation
 
     private func run(deviceID: String?, run: Int) {
         Task { [weak self] in
-            guard await AVCaptureDevice.requestAccess(for: .audio) else { self?.error = "麦克风访问未获允许。"; return }
+            guard await AVCaptureDevice.requestAccess(for: .audio) else { self?.error = String(localized: "麦克风访问未获允许。"); return }
             var delay = 1_500
             while true {
                 guard let self, self.generation == run else { return }
@@ -70,7 +70,7 @@ import Observation
 
     /// 一轮尝试；起不来返回 false 由外层重试。
     private func attempt(deviceID: String?, run: Int) async -> Bool {
-        guard let device = deviceID ?? AVCaptureDevice.default(for: .audio)?.uniqueID else { error = "没有可用的麦克风。"; return false }
+        guard let device = deviceID ?? AVCaptureDevice.default(for: .audio)?.uniqueID else { error = String(localized: "没有可用的麦克风。"); return false }
         let capture = MicrophoneCapture(writer: nil, level: { [weak self] value in
             Task { @MainActor in self?.receive(value, run: run) }
         }, onFailure: { [weak self] message in

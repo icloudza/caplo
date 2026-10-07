@@ -91,7 +91,7 @@ struct RecordingCameraPlan: Equatable, Sendable {
     static func resolve(enabled: Bool, selectedID: String?, cameras: [CaptureCamera], defaultID: String?, format: CameraFormat? = nil) throws -> Self {
         guard enabled else { return Self(deviceID: nil) }
         guard let chosen = selectedID ?? defaultID, cameras.contains(where: { $0.id == chosen }) else {
-            throw RecordingError.message("所选摄像头未连接。请选择可用设备，或关闭摄像头后录制。")
+            throw RecordingError.message(String(localized: "所选摄像头未连接。请选择可用设备，或关闭摄像头后录制。"))
         }
         return Self(deviceID: chosen, format: format)
     }
@@ -129,7 +129,7 @@ public final class CameraFeed: NSObject, AVCaptureVideoDataOutputSampleBufferDel
         let uid = device.uniqueID
         info.withLock { $0 = (uid, format) }
         session.startRunning()
-        guard session.isRunning else { throw RecordingError.message("无法启动摄像头，请检查设备是否被占用。") }
+        guard session.isRunning else { throw RecordingError.message(String(localized: "无法启动摄像头，请检查设备是否被占用。")) }
         logFormat(device)
     }
 
@@ -147,7 +147,7 @@ public final class CameraFeed: NSObject, AVCaptureVideoDataOutputSampleBufferDel
     /// 消费者也不用摘。格式没变就什么都不做。
     func change(to format: CameraFormat?) throws {
         dispatchPrecondition(condition: .onQueue(queue))
-        guard let device = (session.inputs.first as? AVCaptureDeviceInput)?.device else { throw RecordingError.message("采集图还没有摄像头输入。") }
+        guard let device = (session.inputs.first as? AVCaptureDeviceInput)?.device else { throw RecordingError.message(String(localized: "采集图还没有摄像头输入。")) }
         guard format != self.format else { return }
         session.beginConfiguration()
         do { try applyFormat(device, format: format) } catch { session.commitConfiguration(); throw error }
@@ -162,19 +162,19 @@ public final class CameraFeed: NSObject, AVCaptureVideoDataOutputSampleBufferDel
         let size = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
         let rate = device.activeVideoMinFrameDuration.seconds > 0 ? 1 / device.activeVideoMinFrameDuration.seconds : 0
         NSLog("Caplo：摄像头格式已提交（所选 %@；设备 activeFormat %d × %d @ %.0f fps；预设 %@）",
-              format?.title ?? "预设阶梯", size.width, size.height, rate, session.sessionPreset.rawValue)
+              format?.title ?? String(localized: "预设阶梯"), size.width, size.height, rate, session.sessionPreset.rawValue)
     }
 
     private func configure(_ device: AVCaptureDevice, format: CameraFormat?) throws {
         session.beginConfiguration()
         defer { session.commitConfiguration() }
         let input = try AVCaptureDeviceInput(device: device)
-        guard session.canAddInput(input) else { throw RecordingError.message("无法添加摄像头输入。") }
+        guard session.canAddInput(input) else { throw RecordingError.message(String(localized: "无法添加摄像头输入。")) }
         session.addInput(input)
         try applyFormat(device, format: format)
         output.alwaysDiscardsLateVideoFrames = true
         output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
-        guard session.canAddOutput(output) else { throw RecordingError.message("无法添加摄像头画面输出。") }
+        guard session.canAddOutput(output) else { throw RecordingError.message(String(localized: "无法添加摄像头画面输出。")) }
         session.addOutput(output)
         output.setSampleBufferDelegate(self, queue: queue)
         if let connection = output.connection(with: .video), connection.isVideoMirroringSupported {
@@ -283,13 +283,13 @@ final class CameraCapture: CameraFrameConsumer, @unchecked Sendable {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
             queue.async { [self] in
                 do {
-                    guard !consumed else { throw RecordingError.message("摄像头会话已使用，请重新开始录制。") }
+                    guard !consumed else { throw RecordingError.message(String(localized: "摄像头会话已使用，请重新开始录制。")) }
                     consumed = true
                     guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else {
-                        throw RecordingError.message("摄像头访问未获允许，请在系统设置中开启权限。")
+                        throw RecordingError.message(String(localized: "摄像头访问未获允许，请在系统设置中开启权限。"))
                     }
                     guard let device = AVCaptureDevice(uniqueID: deviceID), device.hasMediaType(.video), device.isConnected else {
-                        throw RecordingError.message("所选摄像头已断开，请重新选择设备。")
+                        throw RecordingError.message(String(localized: "所选摄像头已断开，请重新选择设备。"))
                     }
                     if borrowed, !feed.isRunning(device: deviceID, format: format) {
                         // 借来的采集图已经不在跑（设备刚拔掉等）：自己起一路，不让录制失败。
@@ -323,7 +323,7 @@ final class CameraCapture: CameraFrameConsumer, @unchecked Sendable {
         guard active, !failed, sampleBuffer.isValid, sampleBuffer.imageBuffer != nil else { return }
         do {
             // AVFoundation 的输出时间属于会话时钟，先换算成屏幕、声音、鼠标共用的主机时钟。
-            guard let clock = session.synchronizationClock else { throw RecordingError.message("摄像头同步时钟不可用。") }
+            guard let clock = session.synchronizationClock else { throw RecordingError.message(String(localized: "摄像头同步时钟不可用。")) }
             let frame = CameraFrameTransfer(sample: try MediaClockBridge.retime(sampleBuffer, from: clock))
             lastFrameAt = ProcessInfo.processInfo.systemUptime
             // 编码繁忙时最多排队两帧，避免摄像头回调把像素缓冲无限堆到屏幕队列。
@@ -338,12 +338,12 @@ final class CameraCapture: CameraFrameConsumer, @unchecked Sendable {
     private func observe(deviceID: String) {
         let center = NotificationCenter.default
         observers.append(center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: feed.session, queue: nil) { [weak self] notification in
-            let message = (notification.userInfo?[AVCaptureSessionErrorKey] as? NSError)?.localizedDescription ?? "摄像头采集发生错误。"
+            let message = (notification.userInfo?[AVCaptureSessionErrorKey] as? NSError)?.localizedDescription ?? String(localized: "摄像头采集发生错误。")
             self?.enqueueFailure(message)
         })
         observers.append(center.addObserver(forName: AVCaptureDevice.wasDisconnectedNotification, object: nil, queue: nil) { [weak self] notification in
             guard (notification.object as? AVCaptureDevice)?.uniqueID == deviceID else { return }
-            self?.enqueueFailure("摄像头已断开，已结束录制并保存已收到的内容。")
+            self?.enqueueFailure(String(localized: "摄像头已断开，已结束录制并保存已收到的内容。"))
         })
     }
 
@@ -358,7 +358,7 @@ final class CameraCapture: CameraFrameConsumer, @unchecked Sendable {
             guard let self, self.active else { return }
             let now = ProcessInfo.processInfo.systemUptime
             if now - (self.lastFrameAt ?? self.startedAt) > (self.lastFrameAt == nil ? 8 : 3) {
-                self.fail("摄像头未持续提供画面，已结束录制并保留现有素材。")
+                self.fail(String(localized: "摄像头未持续提供画面，已结束录制并保留现有素材。"))
             }
         }
         watchdog = timer

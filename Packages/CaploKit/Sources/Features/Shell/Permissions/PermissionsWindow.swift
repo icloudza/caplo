@@ -25,14 +25,14 @@ final class PermissionsWindow: NSObject, NSWindowDelegate {
     func show(_ context: Context, focus: PermissionKind? = nil) {
         self.context = context
         let center = PermissionCenter.shared
-        let view = PermissionsView(center: center, continueTitle: context == .launch ? "开始使用" : "完成",
+        let view = PermissionsView(center: center, continueTitle: context == .launch ? String(localized: "开始使用") : String(localized: "完成"),
                                    requiresScreen: context == .launch || focus == .screen, focus: focus,
                                    onContinue: { [weak self] in self?.finish() }, onLater: { [weak self] in self?.finish() })
             .ignoresSafeArea()
         if let controller {
             controller.replaceContent(view)
         } else {
-            let controller = StudioWindowController(identifier: Self.identifier, title: "权限", content: view,
+            let controller = StudioWindowController(identifier: Self.identifier, title: String(localized: "权限"), content: view,
                                                     sizing: .fixed(PermissionsView.size), chrome: .hiddenTitle)
             WindowRegistry.register(controller)
             controller.window?.delegate = self

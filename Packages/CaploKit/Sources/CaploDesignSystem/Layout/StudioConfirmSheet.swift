@@ -14,7 +14,7 @@ public struct StudioConfirmSheet: View {
     private let suppressionTitle: String
 
     public init(title: String, message: String, confirmTitle: String, danger: Bool = false,
-                suppression: Binding<Bool>? = nil, suppressionTitle: String = "不再提示",
+                suppression: Binding<Bool>? = nil, suppressionTitle: String = String(localized: "不再提示"),
                 confirm: @escaping () -> Void, cancel: @escaping () -> Void) {
         self.title = title; self.message = message; self.confirmTitle = confirmTitle; self.danger = danger
         self.suppression = suppression; self.suppressionTitle = suppressionTitle

@@ -23,31 +23,32 @@ struct AudioPanel: View {
 
     var body: some View {
         if !model.audioTracks.isEmpty {
-            PanelSection("剪辑") {
+            PanelSection(String(localized: "剪辑")) {
                 Toggle(isOn: Binding(get: { model.audioFollowsPicture }, set: { $0 ? model.attachAudio() : model.detachAudio() })) {
-                    SettingLabel("声音跟随画面", systemImage: "link")
+                    SettingLabel(String(localized: "声音跟随画面"), systemImage: "link")
                 }
                 .toggleStyle(StudioToggleStyle())
-                PanelNote(model.audioFollowsPicture ? "切开、拖动、删除画面时声音一起走。要单独剪声音就关掉。" : "声音单独成轨。打开会丢掉单独做过的声音剪辑。")
+                PanelNote(model.audioFollowsPicture ? String(localized: "切开、拖动、删除画面时声音一起走。要单独剪声音就关掉。") : String(localized: "声音单独成轨。打开会丢掉单独做过的声音剪辑。"))
             }
         }
         if let block = selectedBlock {
-            PanelSection("选中的\(block.track == .system ? "系统声音" : "麦克风")块 \(block.number)", info: "与轨道音量相乘，仅作用于此块") {
-                EditorFill(model: model, title: "这一块的音量", value: blockGain(block.clip.id, role: block.role, track: block.track),
+            let trackName = block.track == .system ? String(localized: "系统声音") : String(localized: "麦克风")
+            PanelSection(String(localized: "选中的\(trackName)块 \(block.number)"), info: String(localized: "与轨道音量相乘，仅作用于此块")) {
+                EditorFill(model: model, title: String(localized: "这一块的音量"), value: blockGain(block.clip.id, role: block.role, track: block.track),
                            range: 0...2, suffix: "%", percentage: true, defaultValue: 1, detents: [1])
             }
         } else if let picture = selectedPicture {
-            PanelSection("选中片段的声音", info: "与轨道音量相乘，仅作用于这一段画面") {
+            PanelSection(String(localized: "选中片段的声音"), info: String(localized: "与轨道音量相乘，仅作用于这一段画面")) {
                 ForEach(AudioTrack.allCases.filter { model.audioTracks.contains($0) }) { track in
-                    EditorFill(model: model, title: track == .system ? "系统声音" : "麦克风", value: pictureGain(picture.id, track: track),
+                    EditorFill(model: model, title: track == .system ? String(localized: "系统声音") : String(localized: "麦克风"), value: pictureGain(picture.id, track: track),
                                range: 0...2, suffix: "%", percentage: true, defaultValue: 1, detents: [1])
                 }
             }
         }
         ForEach(AudioTrack.allCases) { track in
-            PanelSection(track == .system ? "系统声音" : "麦克风") {
+            PanelSection(track == .system ? String(localized: "系统声音") : String(localized: "麦克风")) {
                 if model.audioTracks.contains(track) {
-                    EditorFill(model: model, title: "音量", value: Binding(get: { Double(model.edit.audio[track]) }, set: { model.edit.audio[track] = Float($0) }), range: 0...1, suffix: "%", percentage: true, defaultValue: 1)
+                    EditorFill(model: model, title: String(localized: "音量"), value: Binding(get: { Double(model.edit.audio[track]) }, set: { model.edit.audio[track] = Float($0) }), range: 0...1, suffix: "%", percentage: true, defaultValue: 1)
                     HStack(spacing: CaploMetrics.Spacing.s) {
                         Button("静音") { model.toggleMute(track) }
                             .buttonStyle(StudioButtonStyle(model.edit.audio.muted.contains(track) ? .primary : .secondary, size: .small))
@@ -59,22 +60,22 @@ struct AudioPanel: View {
                     if track == .microphone {
                         // 离线语音处理：以系统声音轨为参考消除扬声器串进麦克风的声音，再压底噪；处理一次后预览与导出共用。
                         Toggle(isOn: Binding(get: { model.edit.audio.voiceProcessing }, set: { model.setVoiceProcessing($0) })) {
-                            SettingLabel("回声消除与降噪", systemImage: "waveform.badge.magnifyingglass")
+                            SettingLabel(String(localized: "回声消除与降噪"), systemImage: "waveform.badge.magnifyingglass")
                         }
                         .toggleStyle(StudioToggleStyle())
                         .disabled({ if case .processing = model.voiceProcessingState { return true } else { return false } }())
                         switch model.voiceProcessingState {
-                        case .processing(let value): PanelNote("正在处理麦克风 \(Int(value * 100))%，完成后自动切换。")
-                        case .failed(let message): PanelNote("处理失败：\(message)")
-                        case .idle: PanelNote("以系统声音轨为参考消掉扬声器串进麦克风的声音，并压制底噪；离线处理一次，之后预览与导出共用，关闭即回到原始声音。")
+                        case .processing(let value): PanelNote(String(localized: "正在处理麦克风 \(Int(value * 100))%，完成后自动切换。"))
+                        case .failed(let message): PanelNote(String(localized: "处理失败：\(message)"))
+                        case .idle: PanelNote(String(localized: "以系统声音轨为参考消掉扬声器串进麦克风的声音，并压制底噪；离线处理一次，之后预览与导出共用，关闭即回到原始声音。"))
                         }
                     }
                 } else {
-                    PanelNote("此录制没有这条音轨。")
+                    PanelNote(String(localized: "此录制没有这条音轨。"))
                 }
             }
         }
-        PanelNote("静音保留原音量。“仅播放此轨”开启后只播放勾选的轨道；静音优先。调整即时试听，并应用于导出。")
+        PanelNote(String(localized: "静音保留原音量。“仅播放此轨”开启后只播放勾选的轨道；静音优先。调整即时试听，并应用于导出。"))
     }
 
     private func pictureGain(_ id: UUID, track: AudioTrack) -> Binding<Double> {

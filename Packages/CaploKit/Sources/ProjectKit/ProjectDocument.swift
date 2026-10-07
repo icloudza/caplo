@@ -71,10 +71,10 @@ public final class ProjectLease: @unchecked Sendable {
     private let descriptor: Int32
     public init(url: URL) throws {
         let fd = Darwin.open(url.appendingPathComponent(".lock").path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
-        guard fd >= 0 else { throw ProjectError.invalid("无法锁定工程。") }
+        guard fd >= 0 else { throw ProjectError.invalid(String(localized: "无法锁定工程。")) }
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
             close(fd)
-            throw ProjectError.invalid("工程正在录制或被其他窗口修改，请稍后再试。")
+            throw ProjectError.invalid(String(localized: "工程正在录制或被其他窗口修改，请稍后再试。"))
         }
         descriptor = fd
     }
@@ -108,7 +108,7 @@ public enum ProjectStorage {
     public static func load(_ url: URL) throws -> ProjectDocument {
         let data = try Data(contentsOf: url.appendingPathComponent("manifest.json"))
         let document = try JSONDecoder().decode(ProjectDocument.self, from: data)
-        guard document.schemaVersion == 1 else { throw ProjectError.invalid("此工程版本暂不支持，请使用创建它的 Caplo 版本打开。") }
+        guard document.schemaVersion == 1 else { throw ProjectError.invalid(String(localized: "此工程版本暂不支持，请使用创建它的 Caplo 版本打开。")) }
         try validate(document.segments, in: url, checkingFiles: false)
         return document
     }
@@ -137,11 +137,11 @@ public enum ProjectStorage {
     /// 仅改工程显示名称，不移动文件包；独占租约防止覆盖录制或编辑中的元数据。
     public static func rename(_ url: URL, to name: String) throws {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { throw ProjectError.invalid("项目名称不能为空。") }
+        guard !trimmed.isEmpty else { throw ProjectError.invalid(String(localized: "项目名称不能为空。")) }
         let lease = try ProjectLease(url: url)
         defer { withExtendedLifetime(lease) {} }
         var document = try load(url)
-        guard document.state != .recording else { throw ProjectError.invalid("请先完成录制或恢复工程，再修改名称。") }
+        guard document.state != .recording else { throw ProjectError.invalid(String(localized: "请先完成录制或恢复工程，再修改名称。")) }
         document.name = trimmed
         try save(document, to: url)
     }
@@ -184,7 +184,7 @@ public enum ProjectStorage {
         }
         document.segments = recovered.values.sorted { $0.id < $1.id }
         document.state = .recovered
-        document.warning = "上次录制意外中断，已恢复所有提交片段。正在写入及尚未完成提交的尾段可能缺失。"
+        document.warning = String(localized: "上次录制意外中断，已恢复所有提交片段。正在写入及尚未完成提交的尾段可能缺失。")
         try save(document, to: url)
         return document
     }
@@ -195,7 +195,7 @@ public enum ProjectStorage {
         let result = root.appendingPathComponent(path).resolvingSymlinksInPath().standardizedFileURL
         guard path.hasPrefix("Media/"), !path.contains(".."),
               result.path.hasPrefix(root.path + "/Media/") else {
-            throw ProjectError.invalid("工程包含无效素材路径。")
+            throw ProjectError.invalid(String(localized: "工程包含无效素材路径。"))
         }
         return result
     }
@@ -205,7 +205,7 @@ public enum ProjectStorage {
         let root = project.resolvingSymlinksInPath().standardizedFileURL
         let result = root.appendingPathComponent(path).resolvingSymlinksInPath().standardizedFileURL
         guard path.hasPrefix("Backgrounds/"), !path.contains(".."), result.path.hasPrefix(root.path + "/Backgrounds/") else {
-            throw ProjectError.invalid("工程包含无效背景图路径。")
+            throw ProjectError.invalid(String(localized: "工程包含无效背景图路径。"))
         }
         return result
     }
@@ -231,14 +231,14 @@ public enum ProjectStorage {
         for segment in segments {
             guard segment.id >= 0, ids.insert(segment.id).inserted,
                   segment.duration.isFinite, segment.duration > 0,
-                  segment.files[.screen] != nil else { throw ProjectError.invalid("工程片段索引损坏。") }
+                  segment.files[.screen] != nil else { throw ProjectError.invalid(String(localized: "工程片段索引损坏。")) }
             for (role, offset) in segment.mediaOffsets ?? [:] {
                 guard segment.files[role] != nil, offset.isFinite, offset >= 0, offset < segment.duration,
-                      role != .screen || offset == 0 else { throw ProjectError.invalid("工程素材时间偏移损坏。") }
+                      role != .screen || offset == 0 else { throw ProjectError.invalid(String(localized: "工程素材时间偏移损坏。")) }
             }
             for path in segment.files.values {
                 let file = try mediaURL(path, in: url)
-                guard !checkingFiles || FileManager.default.fileExists(atPath: file.path) else { throw ProjectError.invalid("工程素材丢失：\(path)") }
+                guard !checkingFiles || FileManager.default.fileExists(atPath: file.path) else { throw ProjectError.invalid(String(localized: "工程素材丢失：\(path)")) }
             }
         }
     }

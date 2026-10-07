@@ -46,11 +46,12 @@ def render(scale: int) -> Image.Image:
         r = stroke / 2
         draw.ellipse([x - r, yy - r, x + r, yy + r], fill=color)
 
-    # 底部一句安装提示。
-    font = ImageFont.truetype(FONT, s(14))
-    text = "将 Caplo 拖到“应用程序”即可安装"
-    box = draw.textbbox((0, 0), text, font=font)
-    draw.text(((w - (box[2] - box[0])) / 2, s(318)), text, font=font, fill=(110, 106, 126, 255))
+    # 底部安装提示：中英双语（安装包只有一份，系统语言不同的用户看到同一张背景）。
+    for text, size, top, color in (("将 Caplo 拖到\u201C应用程序\u201D即可安装", 14, 306, (110, 106, 126, 255)),
+                                   ("Drag Caplo to Applications to install", 12, 330, (140, 136, 156, 255))):
+        font = ImageFont.truetype(FONT, s(size))
+        box = draw.textbbox((0, 0), text, font=font)
+        draw.text(((w - (box[2] - box[0])) / 2, s(top)), text, font=font, fill=color)
     return image.convert("RGB").resize(final, Image.LANCZOS)
 
 

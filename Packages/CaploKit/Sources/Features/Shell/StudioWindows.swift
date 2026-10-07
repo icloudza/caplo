@@ -56,7 +56,7 @@ public enum StudioWindows {
     /// 录制条收起时恢复普通层级。
     public static func showSettings() {
         // 标题保持窗口语义，视觉标题由设置页承担，避免 Aqua 的深色标题压在玻璃背景上。
-        if settings == nil { settings = make(title: "设置", content: CaploSettingsView().ignoresSafeArea(), size: CaploSettingsView.size, resizable: false, chrome: .hiddenTitle, identifier: "caplo-settings") }
+        if settings == nil { settings = make(title: String(localized: "设置"), content: CaploSettingsView().ignoresSafeArea(), size: CaploSettingsView.size, resizable: false, chrome: .hiddenTitle, identifier: "caplo-settings") }
         settings?.level = recordBar?.window?.isVisible == true ? StudioLevel.bar : .normal
         present(settings)
     }
@@ -81,7 +81,7 @@ public enum StudioWindows {
         guard !terminating, !ScreenRecorder.shared.isBusy else { return }
         hideRecorder()
         if recordBar == nil {
-            let controller = StudioWindowController(identifier: "caplo-record-bar", title: "录制条", content: RecordBarView(model: model),
+            let controller = StudioWindowController(identifier: "caplo-record-bar", title: String(localized: "录制条"), content: RecordBarView(model: model),
                                                     sizing: .fixed(RecordBarView.panelSize), chrome: .borderlessPanel(activating: true))
             WindowRegistry.register(controller)
             recordBar = controller
@@ -289,7 +289,7 @@ public final class ProjectLibraryWindow {
         if !restoring, window?.isVisible != true { origin = StudioWindows.preparationVisible ? .recorder : .none }
         if window == nil {
             // 与编辑器一样把内容延伸到统一标题栏之下：顶栏自行为红黄绿预留空间，不再出现系统标题栏的浅色断层。
-            let window = StudioWindows.make(title: "项目中心", content: ProjectLibraryView().ignoresSafeArea(), size: CGSize(width: 900, height: 620), chrome: .unifiedTitle)
+            let window = StudioWindows.make(title: String(localized: "项目中心"), content: ProjectLibraryView().ignoresSafeArea(), size: CGSize(width: 900, height: 620), chrome: .unifiedTitle)
             Self.configureManagementWindow(window)
             window.identifier = NSUserInterfaceItemIdentifier("caplo-project-library")
             window.contentMinSize = CGSize(width: 720, height: 460)
@@ -340,8 +340,8 @@ public final class VideoEditorWindow: NSObject, NSWindowDelegate {
     func show(project: URL, origin explicit: WindowOrigin?) {
         guard !ScreenRecorder.shared.isBusy else {
             let alert = NSAlert()
-            alert.messageText = "请先结束当前录制"
-            alert.informativeText = "录制保存后即可打开其他工程。"
+            alert.messageText = String(localized: "请先结束当前录制")
+            alert.informativeText = String(localized: "录制保存后即可打开其他工程。")
             alert.runModal()
             return
         }
@@ -385,7 +385,7 @@ public final class VideoEditorWindow: NSObject, NSWindowDelegate {
             } catch {
                 guard openingID == id else { return }
                 let alert = NSAlert()
-                alert.messageText = "无法打开工程"
+                alert.messageText = String(localized: "无法打开工程")
                 alert.informativeText = error.localizedDescription
                 // 打不开时什么都没收起（收起在打开成功之后），原来的界面原样留着，不再另弹方式条。
                 alert.runModal()

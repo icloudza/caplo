@@ -174,7 +174,7 @@ public final class RecordBarModel {
     }
 
     /// 离屏预览用的静态模型，不枚举真实来源。
-    public static func preview(mode: String = "全屏", sourceTitle: String = "主显示器") -> RecordBarModel {
+    public static func preview(mode: String = String(localized: "全屏"), sourceTitle: String = String(localized: "主显示器")) -> RecordBarModel {
         let mode = RecordingMode(rawValue: mode) ?? .display
         return RecordBarModel(mode: mode, source: CaptureSource(id: "preview", title: sourceTitle, kind: mode.kind))
     }

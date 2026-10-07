@@ -52,7 +52,7 @@ final class UpdateFlow {
     /// 窗口要求关闭（按钮或红色关闭钮）。
     @ObservationIgnored var close: () -> Void = {}
 
-    init(currentVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "开发版") {
+    init(currentVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? String(localized: "开发版")) {
         self.currentVersion = currentVersion
     }
 

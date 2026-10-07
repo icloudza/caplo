@@ -54,13 +54,13 @@ final class MicrophoneCapture: @unchecked Sendable {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
             queue.async { [self] in
                 do {
-                    guard !consumed else { throw RecordingError.message("麦克风会话已使用，请重新开始录制。") }
+                    guard !consumed else { throw RecordingError.message(String(localized: "麦克风会话已使用，请重新开始录制。")) }
                     consumed = true
                     guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
-                        throw RecordingError.message("麦克风访问未获允许，请在系统设置中开启权限。")
+                        throw RecordingError.message(String(localized: "麦克风访问未获允许，请在系统设置中开启权限。"))
                     }
                     let device = Self.audioDeviceID(forUID: deviceID)
-                    guard device != kAudioObjectUnknown, AVCaptureDevice(uniqueID: deviceID) != nil else { throw RecordingError.message("所选麦克风未连接。") }
+                    guard device != kAudioObjectUnknown, AVCaptureDevice(uniqueID: deviceID) != nil else { throw RecordingError.message(String(localized: "所选麦克风未连接。")) }
                     let deliver: @Sendable (CMSampleBuffer, Float) -> Void = { [weak self] sample, value in self?.deliver(sample, level: value) }
                     let failure: @Sendable (String) -> Void = { [weak self] message in
                         self?.onFailure(message)
@@ -109,7 +109,7 @@ final class MicrophoneCapture: @unchecked Sendable {
         if !logged, let description = sample.formatDescription?.audioStreamBasicDescription {
             logged = true
             NSLog("Caplo：麦克风样本 %.0f Hz、%d 声道、%d 位%@", description.mSampleRate, description.mChannelsPerFrame, description.mBitsPerChannel,
-                  description.mFormatFlags & kAudioFormatFlagIsFloat != 0 ? "浮点" : "整数")
+                  description.mFormatFlags & kAudioFormatFlagIsFloat != 0 ? String(localized: "浮点") : String(localized: "整数"))
         }
         let now = ProcessInfo.processInfo.systemUptime
         var range = levelRange ?? (level, level, now)
@@ -350,7 +350,7 @@ final class VoiceIOEngine: @unchecked Sendable {
             MicrophoneCapture.rememberSwitch(from: current, to: device)
             guard MicrophoneCapture.setDefaultInputDevice(device) else {
                 MicrophoneCapture.forgetSwitch()
-                throw RecordingError.message("无法把系统默认输入切到所选麦克风。")
+                throw RecordingError.message(String(localized: "无法把系统默认输入切到所选麦克风。"))
             }
             restoreDefaultInput = current
             // 切换默认输入是异步生效的；紧接着建单元会抓到旧设备。这里在麦克风串行队列上，不占主线程。
@@ -358,19 +358,19 @@ final class VoiceIOEngine: @unchecked Sendable {
         }
         var componentDescription = AudioComponentDescription(componentType: kAudioUnitType_Output, componentSubType: kAudioUnitSubType_VoiceProcessingIO,
                                                              componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0)
-        guard let component = AudioComponentFindNext(nil, &componentDescription) else { restore(); throw RecordingError.message("系统没有语音处理单元。") }
+        guard let component = AudioComponentFindNext(nil, &componentDescription) else { restore(); throw RecordingError.message(String(localized: "系统没有语音处理单元。")) }
         var instance: AudioUnit?
-        try check(AudioComponentInstanceNew(component, &instance), "创建语音处理单元")
-        guard let unit = instance else { restore(); throw RecordingError.message("创建语音处理单元失败。") }
+        try check(AudioComponentInstanceNew(component, &instance), String(localized: "创建语音处理单元"))
+        guard let unit = instance else { restore(); throw RecordingError.message(String(localized: "创建语音处理单元失败。")) }
         self.unit = unit
         do {
             var enabled: UInt32 = 1
-            try check(AudioUnitSetProperty(unit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &enabled, UInt32(MemoryLayout<UInt32>.size)), "启用输入")
-            try check(AudioUnitSetProperty(unit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Output, 0, &enabled, UInt32(MemoryLayout<UInt32>.size)), "启用输出")
+            try check(AudioUnitSetProperty(unit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &enabled, UInt32(MemoryLayout<UInt32>.size)), String(localized: "启用输入"))
+            try check(AudioUnitSetProperty(unit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Output, 0, &enabled, UInt32(MemoryLayout<UInt32>.size)), String(localized: "启用输出"))
             var asbd = format
             let size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-            try check(AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &asbd, size), "设置输入格式")
-            try check(AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &asbd, size), "设置输出格式")
+            try check(AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &asbd, size), String(localized: "设置输入格式"))
+            try check(AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &asbd, size), String(localized: "设置输出格式"))
             if #available(macOS 14.0, *) {
                 // 不压低其他应用的声音：录制的正是系统声音。
                 var ducking = AUVoiceIOOtherAudioDuckingConfiguration(mEnableAdvancedDucking: false, mDuckingLevel: .min)
@@ -378,11 +378,11 @@ final class VoiceIOEngine: @unchecked Sendable {
             }
             let reference = Unmanaged.passUnretained(self).toOpaque()
             var inputCallback = AURenderCallbackStruct(inputProc: voiceInputCallback, inputProcRefCon: reference)
-            try check(AudioUnitSetProperty(unit, kAudioOutputUnitProperty_SetInputCallback, kAudioUnitScope_Global, 1, &inputCallback, UInt32(MemoryLayout<AURenderCallbackStruct>.size)), "设置输入回调")
+            try check(AudioUnitSetProperty(unit, kAudioOutputUnitProperty_SetInputCallback, kAudioUnitScope_Global, 1, &inputCallback, UInt32(MemoryLayout<AURenderCallbackStruct>.size)), String(localized: "设置输入回调"))
             var outputCallback = AURenderCallbackStruct(inputProc: voiceOutputCallback, inputProcRefCon: reference)
-            try check(AudioUnitSetProperty(unit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &outputCallback, UInt32(MemoryLayout<AURenderCallbackStruct>.size)), "设置输出回调")
-            try check(AudioUnitInitialize(unit), "初始化语音处理单元")
-            try check(AudioOutputUnitStart(unit), "启动语音处理单元")
+            try check(AudioUnitSetProperty(unit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &outputCallback, UInt32(MemoryLayout<AURenderCallbackStruct>.size)), String(localized: "设置输出回调"))
+            try check(AudioUnitInitialize(unit), String(localized: "初始化语音处理单元"))
+            try check(AudioOutputUnitStart(unit), String(localized: "启动语音处理单元"))
             running = true
             listen()
         } catch {
@@ -415,7 +415,7 @@ final class VoiceIOEngine: @unchecked Sendable {
         var defaultAddress = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultInputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         let defaultBlock: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             guard let self, self.running, MicrophoneCapture.defaultInputDevice() != self.device else { return }
-            self.fail("系统默认输入被换成了其他设备，为免录进别的麦克风，已停止麦克风采集。")
+            self.fail(String(localized: "系统默认输入被换成了其他设备，为免录进别的麦克风，已停止麦克风采集。"))
         }
         if AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &defaultAddress, listenerQueue, defaultBlock) == noErr {
             defaultInputListener = defaultBlock
@@ -426,7 +426,7 @@ final class VoiceIOEngine: @unchecked Sendable {
             var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceIsAlive, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
             var alive: UInt32 = 1
             var size = UInt32(MemoryLayout<UInt32>.size)
-            if AudioObjectGetPropertyData(self.device, &address, 0, nil, &size, &alive) != noErr || alive == 0 { self.fail("麦克风已断开。") }
+            if AudioObjectGetPropertyData(self.device, &address, 0, nil, &size, &alive) != noErr || alive == 0 { self.fail(String(localized: "麦克风已断开。")) }
         }
         if AudioObjectAddPropertyListenerBlock(device, &aliveAddress, listenerQueue, aliveBlock) == noErr {
             aliveListener = aliveBlock
@@ -453,7 +453,7 @@ final class VoiceIOEngine: @unchecked Sendable {
     }
 
     private func check(_ status: OSStatus, _ step: String) throws {
-        guard status == noErr else { throw RecordingError.message("\(step)失败（\(status)）。") }
+        guard status == noErr else { throw RecordingError.message(String(localized: "\(step)失败（\(status)）。")) }
     }
 
     /// 输入回调：向单元拉取这一块处理后的麦克风数据，算电平并封成主机时钟时间戳的样本。
@@ -467,7 +467,7 @@ final class VoiceIOEngine: @unchecked Sendable {
         guard status == noErr else {
             // 约一秒（48 kHz 下每块 10 毫秒左右）一直拉不到数据才算中断；以前这里只把错误码还给单元，录到的是一段静默。
             renderFailures += 1
-            if renderFailures == 100 { fail("麦克风采集中断（\(status)）。") }
+            if renderFailures == 100 { fail(String(localized: "麦克风采集中断（\(status)）。")) }
             return status
         }
         renderFailures = 0
@@ -513,22 +513,22 @@ final class SessionEngine: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
     }
 
     func start(deviceID: String) throws {
-        guard let device = AVCaptureDevice(uniqueID: deviceID) else { throw RecordingError.message("所选麦克风未连接。") }
+        guard let device = AVCaptureDevice(uniqueID: deviceID) else { throw RecordingError.message(String(localized: "所选麦克风未连接。")) }
         let input = try AVCaptureDeviceInput(device: device)
         session.beginConfiguration()
         do {
             defer { session.commitConfiguration() }
-            guard session.canAddInput(input) else { throw RecordingError.message("无法使用所选麦克风。") }
+            guard session.canAddInput(input) else { throw RecordingError.message(String(localized: "无法使用所选麦克风。")) }
             session.addInput(input)
             output.setSampleBufferDelegate(self, queue: queue)
-            guard session.canAddOutput(output) else { throw RecordingError.message("无法建立麦克风输出。") }
+            guard session.canAddOutput(output) else { throw RecordingError.message(String(localized: "无法建立麦克风输出。")) }
             session.addOutput(output)
         }
         session.startRunning()
-        guard session.isRunning else { throw RecordingError.message("麦克风会话未能启动。") }
+        guard session.isRunning else { throw RecordingError.message(String(localized: "麦克风会话未能启动。")) }
         observer = NotificationCenter.default.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil) { [weak self] note in
-            let reason = (note.userInfo?[AVCaptureSessionErrorKey] as? NSError)?.localizedDescription ?? "采集出错"
-            self?.onFailure("麦克风采集中断：\(reason)")
+            let reason = (note.userInfo?[AVCaptureSessionErrorKey] as? NSError)?.localizedDescription ?? String(localized: "采集出错")
+            self?.onFailure(String(localized: "麦克风采集中断：\(reason)"))
         }
     }
 
@@ -572,10 +572,10 @@ final class SessionEngine: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
 
     public static func name(_ mode: AVCaptureDevice.MicrophoneMode) -> String {
         switch mode {
-        case .standard: "标准"
-        case .wideSpectrum: "宽谱"
-        case .voiceIsolation: "语音突显"
-        @unknown default: "未知"
+        case .standard: String(localized: "标准")
+        case .wideSpectrum: String(localized: "宽谱")
+        case .voiceIsolation: String(localized: "语音突显")
+        @unknown default: String(localized: "未知")
         }
     }
     public static func showSystemPicker() { AVCaptureDevice.showSystemUserInterface(.microphoneModes) }

@@ -57,7 +57,7 @@ public actor ThumbnailGenerator {
     private func generator(for path: String) async throws -> (generator: AVAssetImageGenerator, range: CMTimeRange) {
         if let cached = generators[path] { return cached }
         let asset = AVURLAsset(url: try ProjectStorage.mediaURL(path, in: url))
-        guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw ProjectError.invalid("素材缺少视频轨道。") }
+        guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw ProjectError.invalid(String(localized: "素材缺少视频轨道。")) }
         let range = try await track.load(.timeRange)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.maximumSize = maximumSize

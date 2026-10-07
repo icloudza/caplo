@@ -131,7 +131,7 @@ struct ModeSegment: View {
         Button(action: action) {
             HStack(spacing: CaploMetrics.Spacing.xs + 2) {
                 Image(systemName: mode.symbol).font(.system(size: 13, weight: .medium)).frame(width: CaploMetrics.Icon.control)
-                Text(mode.rawValue).font(CaploFont.bodyMedium).lineLimit(1)
+                Text(mode.title).font(CaploFont.bodyMedium).lineLimit(1)
             }
             .padding(.horizontal, 10)
             .frame(height: 30)
@@ -145,6 +145,6 @@ struct ModeSegment: View {
         .focused($focused)
         .focusEffectDisabled()
         .help("\(mode.hint) \(ShortcutStore.shared.display(shortcut))")
-        .accessibilityLabel("\(mode.rawValue)录制，\(mode.hint)")
+        .accessibilityLabel("\(mode.title)录制，\(mode.hint)")
     }
 }

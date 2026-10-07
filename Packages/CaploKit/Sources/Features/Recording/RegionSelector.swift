@@ -256,9 +256,9 @@ private final class RegionOverlay: NSView {
 
     private func drawHint() {
         let hint: String
-        if drag != nil { hint = "松开鼠标完成 · 单击生成最小 32 × 32 框" }
-        else if selection.isEmpty { hint = "拖动框选要录制的区域 · Esc 取消" }
-        else { hint = "拖动内部移动、拖动手柄调整，在底部录制条按 REC 开始 · Esc 取消" }
+        if drag != nil { hint = String(localized: "松开鼠标完成 · 单击生成最小 32 × 32 框") }
+        else if selection.isEmpty { hint = String(localized: "拖动框选要录制的区域 · Esc 取消") }
+        else { hint = String(localized: "拖动内部移动、拖动手柄调整，在底部录制条按 REC 开始 · Esc 取消") }
         let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 14, weight: .medium), .foregroundColor: NSColor.white]
         let hintSize = (hint as NSString).size(withAttributes: attributes)
         let pill = CGRect(x: bounds.midX - hintSize.width / 2 - 18, y: 44, width: hintSize.width + 36, height: hintSize.height + 16)

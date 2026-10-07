@@ -7,8 +7,8 @@ public enum WallpaperSeries: String, CaseIterable, Sendable, Identifiable {
     public var id: String { rawValue }
     public var title: String {
         switch self {
-        case .echoes: "色彩回响"
-        case .silk: "暗夜流丝"
+        case .echoes: String(localized: "色彩回响")
+        case .silk: String(localized: "暗夜流丝")
         }
     }
     static let count = 9

@@ -72,13 +72,13 @@ final class OnboardingTour {
     }
 
     static let steps: [OnboardingStep] = [
-        OnboardingStep(target: "bar", title: "欢迎使用 Caplo", body: "这条浮动条就是全部入口。选一种录制方式就能开始，录完自动进入编辑器。", padding: 10, radius: 20),
-        OnboardingStep(target: "display", title: "录整个屏幕", body: "有多台显示器时会先问录哪一块。开始录制时屏幕四角会打上标记，不会挡住内容。"),
-        OnboardingStep(target: "region", title: "框一块区域", body: "拖出范围后录制条会贴在框的下方，位置和大小随时能改，录制中也看得到边界。"),
-        OnboardingStep(target: "window", title: "只录一个窗口", body: "点选窗口后其余部分压暗，被选中的窗口照常操作。窗口移动时录制条会跟着走。"),
-        OnboardingStep(target: "recent", title: "回到最近的录制", body: "打开项目中心，继续编辑上一段，或者直接导出。"),
-        OnboardingStep(target: "settings", title: "设置", body: "帧率、麦克风降噪、摄像头格式和快捷键都在这里。录制时也能从齿轮菜单打开。"),
-        OnboardingStep(target: "bar", title: "准备好了", body: "选一种方式开始第一次录制吧。这个引导以后可以在设置里重新打开。", padding: 10, radius: 20, last: true),
+        OnboardingStep(target: "bar", title: String(localized: "欢迎使用 Caplo"), body: String(localized: "这条浮动条就是全部入口。选一种录制方式就能开始，录完自动进入编辑器。"), padding: 10, radius: 20),
+        OnboardingStep(target: "display", title: String(localized: "录整个屏幕"), body: String(localized: "有多台显示器时会先问录哪一块。开始录制时屏幕四角会打上标记，不会挡住内容。")),
+        OnboardingStep(target: "region", title: String(localized: "框一块区域"), body: String(localized: "拖出范围后录制条会贴在框的下方，位置和大小随时能改，录制中也看得到边界。")),
+        OnboardingStep(target: "window", title: String(localized: "只录一个窗口"), body: String(localized: "点选窗口后其余部分压暗，被选中的窗口照常操作。窗口移动时录制条会跟着走。")),
+        OnboardingStep(target: "recent", title: String(localized: "回到最近的录制"), body: String(localized: "打开项目中心，继续编辑上一段，或者直接导出。")),
+        OnboardingStep(target: "settings", title: String(localized: "设置"), body: String(localized: "帧率、麦克风降噪、摄像头格式和快捷键都在这里。录制时也能从齿轮菜单打开。")),
+        OnboardingStep(target: "bar", title: String(localized: "准备好了"), body: String(localized: "选一种方式开始第一次录制吧。这个引导以后可以在设置里重新打开。"), padding: 10, radius: 20, last: true),
     ]
 
     /// 方式条显示后调用：没看过才开始。

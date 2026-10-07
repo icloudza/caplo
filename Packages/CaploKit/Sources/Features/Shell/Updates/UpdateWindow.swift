@@ -1,3 +1,4 @@
+import EditingCore
 import AppKit
 import SwiftUI
 import CaploDesignSystem
@@ -46,7 +47,7 @@ final class UpdateWindow: NSObject, NSWindowDelegate {
     private func makeWindowIfNeeded() -> NSWindow {
         if let window = controller?.window { return window }
         let size = flow.phase.showsRelease ? Self.fullSize : Self.compactSize
-        let controller = StudioWindowController(identifier: Self.identifier, title: "软件更新",
+        let controller = StudioWindowController(identifier: Self.identifier, title: String(localized: "软件更新"),
                                                 content: UpdateView(flow: flow).ignoresSafeArea(),
                                                 sizing: .fixed(size), chrome: .hiddenTitle)
         WindowRegistry.register(controller)
@@ -147,7 +148,7 @@ private struct ReleaseLayout: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: CaploMetrics.Spacing.s) {
                         Text("Caplo \(release.version)").font(.system(size: 17, weight: .semibold))
-                        if release.critical { UpdateBadge("重要更新") }
+                        if release.critical { UpdateBadge(String(localized: "重要更新")) }
                     }
                     Text(subtitle).font(CaploFont.caption).foregroundStyle(CaploColor.textSecondary)
                 }
@@ -163,9 +164,9 @@ private struct ReleaseLayout: View {
 
     /// "当前 0.4.2 · 46 MB · 2026年10月7日"：只列有的项。
     private var subtitle: String {
-        var parts = ["当前 \(flow.currentVersion)"]
+        var parts = [String(localized: "当前 \(flow.currentVersion)")]
         if let size = release.size { parts.append(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)) }
-        if let date = release.date { parts.append(date.formatted(.dateTime.year().month().day().locale(Locale(identifier: "zh_CN")))) }
+        if let date = release.date { parts.append(date.formatted(.dateTime.year().month().day().locale(AppLocale.current))) }
         return parts.joined(separator: " · ")
     }
 
@@ -184,13 +185,13 @@ private struct ReleaseLayout: View {
                     .keyboardShortcut(.defaultAction)
             }
         case .downloading(let received, let expected):
-            ProgressFooter(title: "正在下载", detail: expected > 0 ? "\(bytes(received)) / \(bytes(expected))" : bytes(received),
+            ProgressFooter(title: String(localized: "正在下载"), detail: expected > 0 ? "\(bytes(received)) / \(bytes(expected))" : bytes(received),
                            fraction: expected > 0 ? Double(received) / Double(expected) : nil) {
                 Button("取消") { flow.cancel() }.buttonStyle(StudioButtonStyle(.secondary, size: .medium))
                     .keyboardShortcut(.cancelAction)
             }
         case .extracting(let progress):
-            ProgressFooter(title: "正在校验", detail: nil, fraction: progress > 0 ? progress : nil) { EmptyView() }
+            ProgressFooter(title: String(localized: "正在校验"), detail: nil, fraction: progress > 0 ? progress : nil) { EmptyView() }
         case .ready:
             HStack(spacing: CaploMetrics.Spacing.s) {
                 Label("已就绪", systemImage: "checkmark.circle.fill")
@@ -309,9 +310,9 @@ private struct StatusLayout: View {
 
     private var title: String {
         switch flow.phase {
-        case .checking: "正在检查更新"
-        case .upToDate: "已是最新版本"
-        case .failed: flow.release == nil ? "检查更新失败" : "更新失败"
+        case .checking: String(localized: "正在检查更新")
+        case .upToDate: String(localized: "已是最新版本")
+        case .failed: flow.release == nil ? String(localized: "检查更新失败") : String(localized: "更新失败")
         default: ""
         }
     }

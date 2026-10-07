@@ -25,7 +25,7 @@ final class CanvasPresetStore {
         var stored = layout
         stored.backgroundImage = nil
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let preset = CanvasPreset(name: trimmed.isEmpty ? "预设 \(presets.count + 1)" : trimmed, layout: stored)
+        let preset = CanvasPreset(name: trimmed.isEmpty ? String(localized: "预设 \(presets.count + 1)") : trimmed, layout: stored)
         presets.removeAll { $0.name == preset.name }
         presets.append(preset)
         persist()

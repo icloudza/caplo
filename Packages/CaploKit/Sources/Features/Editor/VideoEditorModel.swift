@@ -97,7 +97,9 @@ final class VideoEditorModel {
     private(set) var rebuilding = false
     var ready = false
     var error: String?
-    var saveStatus = "正在打开…"
+    var saveStatus = String(localized: "正在打开…")
+    /// 状态文字是本地化过的，判断"保存失败"要和同一份本地化结果比，不能拿中文原文比。
+    var saveFailed: Bool { saveStatus == String(localized: "保存失败") }
     var analysis = TimelineAnalysis()
     var progress = 0.0
     var exporting = false
@@ -217,13 +219,13 @@ final class VideoEditorModel {
             edit = loaded
             selectedClip = edit.clips.first?.id
             selectedClipIDs = Set(edit.clips.prefix(1).map(\.id))
-            ready = true; saveStatus = "已保存"
+            ready = true; saveStatus = String(localized: "已保存")
             VideoEditorSessions.current = self
             // 初次自动生成的镜头、旧工程的迁移也落一次盘，重新打开时结果相同。交给存盘队列：关窗前 flush 会等它写完再放掉租约。
             // 以前在读盘的后台任务里直接写，窗口关掉、工程被重新打开之后它还可能写进来，盖掉新会话刚保存的修改。
             saver = EditSaveQueue(url: entry.url, document: entry.document)
             save()
-            if missing > 0 { error = "工程缺少 \(missing) 个素材文件（外置盘未连接或文件被移走），对应时段显示为空白、没有声音。" }
+            if missing > 0 { error = String(localized: "工程缺少 \(missing) 个素材文件（外置盘未连接或文件被移走），对应时段显示为空白、没有声音。") }
             installTimeObserver()
             // 播放到结尾自动回到暂停态，播放头停在末尾；再按播放从头开始（togglePlayback 已处理）。
             endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] note in
@@ -239,7 +241,7 @@ final class VideoEditorModel {
             // 指针事件先在后台解出来（reload 也在等同一份）：第一次用到相机时不必在主线程上同步读盘。
             pointerPreloadTask = Task { [weak self] in _ = await self?.loadPointers() }
             reloadAnalysis()
-        } catch { self.error = error.localizedDescription; saveStatus = "未能打开编辑"; ready = false; loading = false; lease = nil }
+        } catch { self.error = error.localizedDescription; saveStatus = String(localized: "未能打开编辑"); ready = false; loading = false; lease = nil }
     }
 
     func commit(_ change: (inout VideoEdit) -> Void) {
@@ -277,8 +279,8 @@ final class VideoEditorModel {
         catch {
             edit = previous
             // 这里是"这次修改被拒"，不是读盘失败：不能沿用"版本不支持……已保留原文件"那句。
-            if let reason = error as? EditError, case .tooMany = reason { self.error = (reason.errorDescription ?? "") + "这次修改已撤回。" }
-            else { self.error = "这次修改会让工程数据无效，已撤回。" }
+            if let reason = error as? EditError, case .tooMany = reason { self.error = (reason.errorDescription ?? "") + String(localized: "这次修改已撤回。") }
+            else { self.error = String(localized: "这次修改会让工程数据无效，已撤回。") }
             restorePlayheadFrame(); return
         }
         history.record(previous)
@@ -314,7 +316,7 @@ final class VideoEditorModel {
         // 主线程上排着的旧回调可能晚于 flush 的结果到达：编号不比已反映的新就丢掉，免得把成功又改回失败。
         guard !closed, outcome.number > appliedSave || outcome.number == 0 else { return }
         appliedSave = max(appliedSave, outcome.number)
-        if let message = outcome.error { saveStatus = "保存失败"; error = message } else { saveStatus = "已保存" }
+        if let message = outcome.error { saveStatus = String(localized: "保存失败"); error = message } else { saveStatus = String(localized: "已保存") }
     }
     func undo() {
         settleInteraction()
@@ -531,7 +533,7 @@ final class VideoEditorModel {
     private func defaultFocusRange() -> (Double, Double)? {
         guard let clip = edit.clips.first(where: { $0.id == selectedClip }) ?? edit.clip(atTimeline: position) else { return nil }
         // 卡片上没有录屏，推近没有对象。
-        guard clip.card == nil else { error = "卡片上没有录制画面，聚焦请加在录制画面上。"; return nil }
+        guard clip.card == nil else { error = String(localized: "卡片上没有录制画面，聚焦请加在录制画面上。"); return nil }
         let start = clip.timelineStart ?? 0
         let anchor = position >= start && position < start + clip.duration ? position : start
         return (anchor, min(2, start + clip.duration - anchor))
@@ -609,8 +611,8 @@ final class VideoEditorModel {
             if let created { edit.moveLayer(created, before: edit.orderedLayerIDs.first) }
         }
         guard let created, edit.mask(id: created) != nil else {
-            if edit.clip(atTimeline: anchor) == nil { error = "播放头不在任何录制画面上，请先把它移到画面块里再添加遮罩。" }
-            else if edit.card(atTimeline: anchor) != nil { error = "卡片上没有录制画面，不需要遮罩。" }
+            if edit.clip(atTimeline: anchor) == nil { error = String(localized: "播放头不在任何录制画面上，请先把它移到画面块里再添加遮罩。") }
+            else if edit.card(atTimeline: anchor) != nil { error = String(localized: "卡片上没有录制画面，不需要遮罩。") }
             return nil
         }
         clearSelection(); selectedMask = created
@@ -661,7 +663,7 @@ final class VideoEditorModel {
             if let created { edit.moveLayer(created, before: edit.orderedLayerIDs.first) }
         }
         guard let created, edit.text(id: created) != nil else {
-            if edit.clip(atTimeline: anchor) == nil { error = "播放头不在任何录制画面上，请先把它移到画面块里再添加文字。" }
+            if edit.clip(atTimeline: anchor) == nil { error = String(localized: "播放头不在任何录制画面上，请先把它移到画面块里再添加文字。") }
             return nil
         }
         clearSelection(); selectedText = created
@@ -718,7 +720,7 @@ final class VideoEditorModel {
         let engine = SpeechTranscriber()
         let locale = captionLocale, url = entry.url, document = entry.document
         let token = UUID(); transcriptionID = token
-        transcription = (0, "正在准备…")
+        transcription = (0, String(localized: "正在准备…"))
         transcriptionTask = Task { @MainActor [weak self] in
             defer { if self?.transcriptionID == token { self?.transcriptionTask = nil; self?.transcription = nil; self?.transcriptionID = nil } }
             switch await engine.availability(locale: locale) {
@@ -734,19 +736,19 @@ final class VideoEditorModel {
                 self?.error = reason; return
             }
             guard let self, !Task.isCancelled else { return }
-            self.transcription = (0, "正在转写…")
+            self.transcription = (0, String(localized: "正在转写…"))
             self.dictationDisabled = false
             do {
                 let cues = try await ProjectTranscription.run(url: url, document: document, source: source,
                                                               locale: locale, engine: engine) { value in
                     Task { @MainActor [weak self] in
                         guard self?.transcriptionID == token else { return }
-                        self?.transcription = (value, "正在转写…")
+                        self?.transcription = (value, String(localized: "正在转写…"))
                     }
                 }
                 guard !Task.isCancelled else { return }
                 self.commit { $0.mergeTranscription(cues) }
-                if cues.isEmpty { self.error = "这段声音里没有识别出可用的语音。" }
+                if cues.isEmpty { self.error = String(localized: "这段声音里没有识别出可用的语音。") }
             } catch is CancellationError {
             } catch {
                 if case TranscriptionError.dictationDisabled = error { self.dictationDisabled = true }
@@ -761,10 +763,10 @@ final class VideoEditorModel {
     /// 导入 SRT / VTT。时间按成片时间换算回源时间，导入的句子一律锁住。
     func importCaptions(from url: URL) {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else {
-            error = "读不出这个字幕文件，请确认它是 UTF-8 编码的 SRT 或 VTT。"; return
+            error = String(localized: "读不出这个字幕文件，请确认它是 UTF-8 编码的 SRT 或 VTT。"); return
         }
         let cues = CaptionFile.parse(text, into: edit)
-        guard !cues.isEmpty else { error = "这个字幕文件里没有可用的句子，或者它们都落在已经剪掉的画面上。"; return }
+        guard !cues.isEmpty else { error = String(localized: "这个字幕文件里没有可用的句子，或者它们都落在已经剪掉的画面上。"); return }
         // 导入的内容说了算：与它重叠的旧句子让位，不重叠的保留。
         // 反过来做会让同一段话变成两条，导出时每句输出两遍。
         commit { $0.mergeImportedCaptions(cues) }
@@ -860,26 +862,26 @@ final class VideoEditorModel {
     private func observeFailures(of item: AVPlayerItem) {
         itemStatusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             guard item.status == .failed else { return }
-            Task { @MainActor in self?.reportPlaybackFailure(item.error, stage: "播放项就绪失败") }
+            Task { @MainActor in self?.reportPlaybackFailure(item.error, stage: String(localized: "播放项就绪失败")) }
         }
         if let itemFailureObserver { NotificationCenter.default.removeObserver(itemFailureObserver) }
         itemFailureObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: item, queue: .main) { [weak self] note in
             let error = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
-            Task { @MainActor in self?.reportPlaybackFailure(error, stage: "播放中断") }
+            Task { @MainActor in self?.reportPlaybackFailure(error, stage: String(localized: "播放中断")) }
         }
     }
     private func reportPlaybackFailure(_ failure: Error?, stage: String) {
         let nsError = failure as NSError?
-        let underlying = (nsError?.userInfo[NSUnderlyingErrorKey] as? NSError).map { "，底层 \($0.domain) \($0.code)" } ?? ""
-        let detail = nsError.map { "\($0.localizedDescription)（\($0.domain) \($0.code)\(underlying)）" } ?? "没有错误详情"
+        let underlying = (nsError?.userInfo[NSUnderlyingErrorKey] as? NSError).map { String(localized: "，底层 \($0.domain) \($0.code)") } ?? ""
+        let detail = nsError.map { "\($0.localizedDescription)（\($0.domain) \($0.code)\(underlying)）" } ?? String(localized: "没有错误详情")
         NSLog("Caplo：%@：%@", stage, detail)
-        error = stage + "：" + (nsError?.localizedDescription ?? "未知原因")
+        error = stage + "：" + (nsError?.localizedDescription ?? String(localized: "未知原因"))
         playing = false; playAfterSeek = false
     }
 
     func togglePlayback() {
         if playing || playAfterSeek { pause(); return }
-        if let item = player.currentItem, item.status == .failed { reportPlaybackFailure(item.error, stage: "播放项就绪失败"); return }
+        if let item = player.currentItem, item.status == .failed { reportPlaybackFailure(item.error, stage: String(localized: "播放项就绪失败")); return }
         let wasSkimming = skimPosition != nil
         skimPosition = nil
         if position >= edit.duration - 0.04 { seek(0) }
@@ -904,10 +906,10 @@ final class VideoEditorModel {
             guard let self, playing, !closed else { return }
             let now = player.currentTime().seconds
             guard now - started < 0.2 else { return }
-            let reason = player.reasonForWaitingToPlay?.rawValue ?? "无"
+            let reason = player.reasonForWaitingToPlay?.rawValue ?? String(localized: "无")
             let status = player.currentItem?.status.rawValue ?? -1
             NSLog("Caplo：起播 2 秒画面没动：时间 %.2f → %.2f，控制状态 %d，等待原因 %@，播放项状态 %d，错误 %@", started, now, player.timeControlStatus.rawValue, reason, status,
-                  (player.currentItem?.error ?? player.error)?.localizedDescription ?? "无")
+                  (player.currentItem?.error ?? player.error)?.localizedDescription ?? String(localized: "无"))
             // 播放项本身就绪却不动：本进程的播放器时钟坏了（录完一段后常见），换一个新播放器重来一次。
             if status == AVPlayerItem.Status.readyToPlay.rawValue, !recoveredFromStall {
                 recoveredFromStall = true
@@ -915,7 +917,7 @@ final class VideoEditorModel {
                 replacePlayerAndRetry()
                 return
             }
-            if error == nil { error = "播放器起播后画面没有前进（等待原因：\(reason)）；请把日志里“Caplo：”开头的几行发来。" }
+            if error == nil { error = String(localized: "播放器起播后画面没有前进（等待原因：\(reason)）；请把日志里“Caplo：”开头的几行发来。") }
         }
     }
     func pause() {
@@ -1074,7 +1076,7 @@ final class VideoEditorModel {
                 try Task.checkCancellation()
                 guard let self, !self.closed else { return }
                 self.analysis = result
-            } catch is CancellationError {} catch { self?.error = "时间线预览生成失败：\(error.localizedDescription)" }
+            } catch is CancellationError {} catch { self?.error = String(localized: "时间线预览生成失败：\(error.localizedDescription)") }
         }
     }
     /// 没有可用播放项时的兜底：离线解码并合成当前时间的静帧。串行处理，只保留最后一次请求。
@@ -1213,8 +1215,8 @@ enum VideoEditorSessions {
         guard let current else { return true }
         guard (close ? current.close() : current.flush()) else {
             let alert = NSAlert()
-            alert.messageText = "编辑尚未保存"
-            alert.informativeText = "请检查磁盘空间和工程目录权限，然后重试保存。当前编辑仍保留在窗口中。"
+            alert.messageText = String(localized: "编辑尚未保存")
+            alert.informativeText = String(localized: "请检查磁盘空间和工程目录权限，然后重试保存。当前编辑仍保留在窗口中。")
             alert.runModal(); return false
         }
         return true

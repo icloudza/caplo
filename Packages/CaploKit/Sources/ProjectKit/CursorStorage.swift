@@ -4,14 +4,14 @@ import EditingCore
 /// 每个光标仅保存一次；工程复制和移动时一并携带，不依赖应用缓存。
 public enum CursorStorage {
     private static func file(_ id: String, in root: URL) throws -> URL {
-        guard id.count == 64, id.allSatisfy({ "0123456789abcdef".contains($0) }) else { throw ProjectError.invalid("光标标识无效。") }
+        guard id.count == 64, id.allSatisfy({ "0123456789abcdef".contains($0) }) else { throw ProjectError.invalid(String(localized: "光标标识无效。")) }
         let base = root.resolvingSymlinksInPath().standardizedFileURL
         let file = base.appendingPathComponent("Cursors/\(id).json").resolvingSymlinksInPath().standardizedFileURL
-        guard file.path.hasPrefix(base.path + "/Cursors/") else { throw ProjectError.invalid("光标路径无效。") }
+        guard file.path.hasPrefix(base.path + "/Cursors/") else { throw ProjectError.invalid(String(localized: "光标路径无效。")) }
         return file
     }
     public static func save(_ asset: CapturedCursor, in root: URL) throws {
-        guard asset.isValid else { throw ProjectError.invalid("光标图像无效。") }
+        guard asset.isValid else { throw ProjectError.invalid(String(localized: "光标图像无效。")) }
         let url = try file(asset.id, in: root)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         if !FileManager.default.fileExists(atPath: url.path) { try JSONEncoder().encode(asset).write(to: url, options: .atomic) }
