@@ -51,7 +51,7 @@ struct MaskPanel: View {
     }
 
     var body: some View {
-        PanelSection("遮罩", info: "遮罩贴在录制内容上，镜头推近时跟着内容一起放大，不会因为相机移动而露出被挡的东西。时间记在原素材上，剪掉中间一段，遮罩会自己裂成两段。") {
+        PanelSection("遮罩", info: "随画面缩放，剪切后自动拆分") {
             if let id = model.selectedMask, let mask = model.edit.mask(id: id) {
                 // 高亮画成"虚线框里有一块亮区"，与敏感遮罩的空心虚线框成对；别写没有的符号名（"spotlight" 不存在，图标会整个空掉）。
                 PanelSelection(symbol: mask.kind == .highlight

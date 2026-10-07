@@ -42,7 +42,7 @@ struct FocusPanel: View {
     var body: some View {
         Toggle(isOn: Binding(get: { model.edit.automaticFocus }, set: { value in model.commit { $0.automaticFocus = value } })) {
             SettingLabel("自动聚焦", systemImage: "sparkles",
-                         tip: "按点击推近，提前读取鼠标轨迹并平滑跟随。不点鼠标的讲解也能聚焦：在时间线右键“在此处添加聚焦”，镜头会推近到指针所在并跟着走。相邻镜头间隔小于合并间隔时直接平移过去，不拉远。手动指定水平或垂直位置后改为固定聚焦。")
+                         tip: "按点击推近并平滑跟随鼠标")
         }.toggleStyle(StudioToggleStyle())
         // 默认收起，专注于各镜头的参数；需要时展开调整。状态随偏好保留。
         PanelSection("自动聚焦设置", expanded: $autoParametersExpanded) {

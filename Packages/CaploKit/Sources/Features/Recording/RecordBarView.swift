@@ -45,7 +45,7 @@ public struct RecordBarView: View {
             }
             FloatingBar {
                 Button { StudioWindows.hideRecordBar(); StudioWindows.showRecorder() } label: { Image(systemName: "xmark") }
-                    .buttonStyle(StudioIconButtonStyle(size: .small)).help("返回录制方式").accessibilityLabel("返回录制方式")
+                    .buttonStyle(StudioIconButtonStyle(size: .small)).help("返回").accessibilityLabel("返回录制方式")
                     .keyboardShortcut(.cancelAction)
                 modeGlyph
                 settingsDropdown
@@ -86,7 +86,7 @@ public struct RecordBarView: View {
     }
 
     private var settingsDropdown: some View {
-        IconDropdown(symbol: "gearshape", accessibilityName: "录制设置", help: "来源与录制设置 · \(model.sourceTitle)") {
+        IconDropdown(symbol: "gearshape", accessibilityName: "录制设置", help: "录制设置") {
             var entries: [PopupMenuEntry] = [.header(model.mode == .window ? "窗口" : "显示器")]
             entries += model.sources.map { source in .item(source.title, checked: source.id == model.source?.id) { model.choose(source) } }
             if model.mode == .region { entries.append(.item("重新框选区域…") { Task { await model.pickRegion() } }) }

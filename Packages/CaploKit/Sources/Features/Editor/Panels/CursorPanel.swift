@@ -42,7 +42,7 @@ struct CursorPanel: View {
                 }
             }
             // 光标样式：上面按形状分类（箭头 / 指针 / 抓取 / 更多）切换预览，下面的格子是样式；录制始终单独保存真实光标轨迹，这里选的是回放时画成什么样。
-            PanelSection("光标样式", info: "上面是样式分组，下面是组内的样式；样式只换箭头，手形、文字等其他形状保持录制时的真实光标。") {
+            PanelSection("光标样式", info: "只替换箭头，其他光标形状保持原样") {
                 CursorCategoryBar(selection: $category)
                 if category.styles.isEmpty {
                     PanelNote("此分组暂无样式。")

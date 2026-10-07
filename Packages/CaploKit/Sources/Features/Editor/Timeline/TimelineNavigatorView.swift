@@ -73,7 +73,7 @@ final class TimelineNavigatorView: NSView {
         handles.lineWidth = 1.5
         handles.lineCap = .round
         playheadLayer.cornerRadius = 0.5
-        toolTip = "拖动视窗浏览时间线；拖动两端缩放；双击显示全部"
+        toolTip = "拖动浏览 · 拖两端缩放 · 双击全览"
         setAccessibilityElement(true)
         setAccessibilityRole(.scrollBar)
         setAccessibilityOrientation(.horizontal)

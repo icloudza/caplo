@@ -103,7 +103,7 @@ public struct AngleDial: View {
             default: break
             }
         }
-        .hoverTip("拖动旋转，按住 ⇧ 每 15° 一档，双击恢复默认")
+        .hoverTip("⇧ 15° 一档 · 双击复位")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
         .accessibilityValue("\(Int(value.rounded())) 度")

@@ -28,24 +28,61 @@ public struct CaploAppCommands: Commands {
     public init() {}
     public var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("新建录制") { StudioWindows.showRecorder() }.keyboardShortcut("n")
-            Button("打开工程…") { ProjectLibraryModel.shared.importProject() }.keyboardShortcut("o").disabled(ScreenRecorder.shared.isBusy)
-            Button("项目中心") { ProjectLibraryWindow.shared.show() }.keyboardShortcut("p", modifiers: [.command, .shift]).disabled(ScreenRecorder.shared.isBusy)
+            Button("新建录制") { StudioWindows.showRecorder() }.shortcut(.newRecording)
+            Button("打开工程…") { ProjectLibraryModel.shared.importProject() }.shortcut(.openProject).disabled(ScreenRecorder.shared.isBusy)
+            Button("项目中心") { ProjectLibraryWindow.shared.show() }.shortcut(.projectLibrary).disabled(ScreenRecorder.shared.isBusy)
         }
         CommandGroup(replacing: .appSettings) {
-            Button("设置…") { StudioWindows.showSettings() }.keyboardShortcut(",")
+            Button("设置…") { StudioWindows.showSettings() }.shortcut(.settings)
         }
     }
 }
 
-/// 菜单栏状态始终反映共享会话，录制窗口关闭后仍有明确的录制提示。
+/// 菜单栏状态始终反映共享会话，录制窗口关闭后仍有明确的录制提示：录制中 C 中心的点变红并缓慢呼吸。
 public struct RecordingMenuLabel: View {
     public init() {}
     public var body: some View {
-        let recording = ScreenRecorder.shared.isBusy
-        (recording ? CaploBrand.menuBarRecordingIcon : CaploBrand.menuBarIcon)
-            .resizable().scaledToFit().frame(width: 18, height: 18)
-            .accessibilityLabel(recording ? "Caplo · 录制中" : "Caplo")
+        if ScreenRecorder.shared.isBusy {
+            Image(nsImage: CaploBrand.menuBarRecordingImage(dotOpacity: MenuBarPulse.shared.opacity))
+                .accessibilityLabel("Caplo · 录制中")
+        } else {
+            CaploBrand.menuBarIcon
+                .resizable().scaledToFit().frame(width: 18, height: 18)
+                .accessibilityLabel("Caplo")
+        }
+    }
+}
+
+/// 菜单栏红点的呼吸：只在正式录制时跑，约 2.4 秒一个来回，不透明度 0.4 ↔ 0.9（偏淡，不抢眼）。
+/// 暂停时停在 0.4（看得出"还在录、但没在走"），倒计时、启动、收尾等过渡状态停在 0.75；减少动态效果时一律不动。
+/// 菜单栏标签里的 SwiftUI 动画不会逐帧刷新，所以用 12 fps 的计时器改值，让标签重画。
+@MainActor @Observable
+final class MenuBarPulse {
+    static let shared = MenuBarPulse()
+    static let period = 2.4
+    private(set) var opacity: CGFloat = 0.75
+    @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var start = Date()
+
+    func update(phase: ScreenRecorder.Phase) {
+        let breathing = phase == .recording && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if breathing {
+            guard timer == nil else { return }
+            start = Date()
+            let timer = Timer(timeInterval: 1.0 / 12, repeats: true) { _ in MainActor.assumeIsolated { MenuBarPulse.shared.tick() } }
+            RunLoop.main.add(timer, forMode: .common)
+            self.timer = timer
+            tick()
+        } else {
+            timer?.invalidate(); timer = nil
+            opacity = phase == .paused || phase == .pausing ? 0.4 : 0.75
+        }
+    }
+
+    private func tick() {
+        // 从最亮开始，余弦缓入缓出。
+        let t = Date().timeIntervalSince(start) / Self.period
+        opacity = 0.65 + 0.25 * cos(2 * .pi * t)
     }
 }
 
@@ -59,11 +96,14 @@ public final class RecordingAppDelegate: NSObject, NSApplicationDelegate {
         MicrophoneDefaultInput.restoreIfLeftBehind()
         RecordingPresentation.shared.observe()
         CameraPreviewCoordinator.startObserving()
-        NSApp.setActivationPolicy(.regular)
+        // 隐藏 Dock 图标时以 .accessory 启动，编辑器 / 项目中心 / 设置开着时临时回到 Dock。
+        AppPresence.start()
+        // 登录时由系统拉起：只在菜单栏待命，不弹录制方式条。标记只在启动回调里读得到，先取出来。
+        let quietLaunch = AppPresence.launchedAsLoginItem
         // 文件打开事件可能紧随启动到达；延后一轮，避免直接打开工程时闪现准备窗口。
         Task { @MainActor in
             await Task.yield()
-            if !openedFromFile, !VideoEditorWindow.shared.opening, !VideoEditorWindow.shared.isVisible { StudioWindows.showRecorder() }
+            if !quietLaunch, !openedFromFile, !VideoEditorWindow.shared.opening, !VideoEditorWindow.shared.isVisible { StudioWindows.showRecorder() }
         }
     }
 

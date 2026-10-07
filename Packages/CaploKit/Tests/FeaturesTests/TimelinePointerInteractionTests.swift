@@ -148,6 +148,21 @@ extension WindowLifecycleTests {
         harness.view.keyDown(with: selectAll)
         #expect(model.selectedMask == nil, "⌘A 之后遮罩还处于选中")
         #expect(model.selectedClipIDs == Set(model.edit.clips.map(\.id)))
+
+        // 改键：与同范围或全局命令撞键的组合不收；改成功后时间线按新键分派，旧键不再触发。
+        let shortcuts = ShortcutStore.shared
+        defer { shortcuts.resetAll() }
+        #expect(shortcuts.problem(assigning: KeyCombo("b", command: true), to: .selectAllClips) != nil, "和分割撞键的 ⌘B 被收下了")
+        #expect(shortcuts.problem(assigning: KeyCombo("n", command: true), to: .selectAllClips) != nil, "和全局新建录制撞键的 ⌘N 被收下了")
+        #expect(shortcuts.problem(assigning: KeyCombo("k"), to: .selectAllClips) == nil)
+        shortcuts.assign(KeyCombo("k"), to: .selectAllClips)
+        model.selectedClipIDs = []; model.selectedClip = nil
+        harness.view.keyDown(with: selectAll)
+        #expect(model.selectedClipIDs.isEmpty, "改键后旧的 ⌘A 还在全选")
+        let remapped = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: harness.window.windowNumber,
+                                                     context: nil, characters: "k", charactersIgnoringModifiers: "k", isARepeat: false, keyCode: 40))
+        harness.view.keyDown(with: remapped)
+        #expect(model.selectedClipIDs == Set(model.edit.clips.map(\.id)), "改成 K 之后按 K 没有全选")
     }
 
 }

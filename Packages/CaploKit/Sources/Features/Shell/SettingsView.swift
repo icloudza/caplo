@@ -5,18 +5,18 @@ import CaptureKit
 import ProjectKit
 import ExportKit
 
-/// 设置：左侧栏（录制 / 导出 / 存储 / 快捷键 / 关于）+ 右侧分组卡片，680×460 固定窗口。
+/// 设置：左侧栏（通用 / 录制 / 导出 / 存储 / 快捷键 / 关于）+ 右侧分组卡片，680×460 固定窗口。
 /// 内容延伸到标题栏之下，红黄绿落在侧栏顶部；每个设置项一行，说明写在标题下面，控件靠右。
 public struct CaploSettingsView: View {
     public static let size = CGSize(width: 680, height: 460)
     static let sidebarWidth: CGFloat = 176
 
     enum Section: String, CaseIterable, Identifiable {
-        case recording = "录制", export = "导出", storage = "存储", shortcuts = "快捷键", about = "关于"
+        case general = "通用", recording = "录制", export = "导出", storage = "存储", shortcuts = "快捷键", about = "关于"
         var id: Self { self }
         var symbol: String {
             switch self {
-            case .recording: "record.circle"; case .export: "square.and.arrow.up"; case .storage: "internaldrive"
+            case .general: "gearshape"; case .recording: "record.circle"; case .export: "square.and.arrow.up"; case .storage: "internaldrive"
             case .shortcuts: "keyboard"; case .about: "info.circle"
             }
         }
@@ -28,16 +28,22 @@ public struct CaploSettingsView: View {
     @AppStorage("recording.systemAudio") private var systemAudio = false
     @AppStorage("recording.camera") private var camera = false
     @AppStorage(ExportSettings.revealKey) private var revealAfterExport = true
-    @State private var section: Section = .recording
+    @State private var section: Section = .general
+    @State private var launchAtLogin = AppPresence.loginItemState
+    @State private var loginItemError: String?
+    @AppStorage(AppPresence.hidesDockIconKey) private var hidesDockIcon = false
     @State private var externalProjects = 0
     @State private var exportFolder = ExportSettings.defaultFolder()
     @State private var customExportFolder = ExportSettings.hasCustomFolder()
     @State private var rememberExport = ExportSettings.remembersChoices()
     @State private var rememberedExport = ExportSettings.hasRememberedSettings()
+    @State private var recordingShortcut: ShortcutAction?
+    @State private var shortcutProblem: (ShortcutAction, String)?
+    private let shortcutStore = ShortcutStore.shared
 
     public init() {}
     /// 离屏预览直接打开到某一页（按侧栏标题）。
-    public init(previewSection title: String) { _section = State(initialValue: Section(rawValue: title) ?? .recording) }
+    public init(previewSection title: String) { _section = State(initialValue: Section(rawValue: title) ?? .general) }
 
     public var body: some View {
         HStack(spacing: 0) {
@@ -48,6 +54,7 @@ public struct CaploSettingsView: View {
                     Text(section.rawValue).font(CaploFont.panelTitle).foregroundStyle(CaploColor.textPrimary)
                         .padding(.top, CaploMetrics.compactTitleBarHeight - CaploMetrics.Spacing.s)
                     switch section {
+                    case .general: general
                     case .recording: recording
                     case .export: export
                     case .storage: storage
@@ -66,6 +73,8 @@ public struct CaploSettingsView: View {
         .tint(CaploColor.accent)
         .preferredColorScheme(.dark)
         .onAppear {
+            // 登录项可能在系统设置里被改过：每次打开重读系统状态。
+            launchAtLogin = AppPresence.loginItemState
             externalProjects = UserDefaults.standard.stringArray(forKey: "externalProjects")?.count ?? 0
             // 导出窗口可能刚改过默认位置与记住的参数：每次打开设置页重读。
             exportFolder = ExportSettings.defaultFolder(); customExportFolder = ExportSettings.hasCustomFolder()
@@ -90,6 +99,40 @@ public struct CaploSettingsView: View {
         .frame(width: Self.sidebarWidth)
         .frame(maxHeight: .infinity)
         .background(CaploMaterialBackground(.panel))
+    }
+
+    // MARK: 通用
+
+    @ViewBuilder private var general: some View {
+        SettingsGroup("启动") {
+            SettingsRow("登录时启动", caption: loginCaption) {
+                Toggle("登录时启动", isOn: Binding(get: { launchAtLogin != .off && launchAtLogin != .unavailable }, set: { on in
+                    loginItemError = AppPresence.setLaunchesAtLogin(on)
+                    launchAtLogin = AppPresence.loginItemState
+                }))
+                .toggleStyle(StudioToggleStyle(embedded: true))
+                .disabled(launchAtLogin == .unavailable)
+            }
+            if launchAtLogin == .needsApproval {
+                SettingsRow("需要系统授权", caption: "在登录项中允许 Caplo。") {
+                    Button("打开登录项") { AppPresence.openLoginItemsSettings() }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
+                }
+            }
+        }
+        SettingsGroup("外观", footer: "编辑器、项目中心或设置打开时临时显示。") {
+            SettingsRow("隐藏 Dock 图标", caption: "仅在菜单栏显示。") {
+                Toggle("隐藏 Dock 图标", isOn: Binding(get: { hidesDockIcon }, set: { AppPresence.hidesDockIcon = $0 }))
+                    .toggleStyle(StudioToggleStyle(embedded: true))
+            }
+        }
+    }
+
+    private var loginCaption: String {
+        if let loginItemError { return loginItemError }
+        switch launchAtLogin {
+        case .unavailable: return "请将 Caplo 移到\u{201C}应用程序\u{201D}文件夹后再试。"
+        default: return "登录后在菜单栏待命。"
+        }
     }
 
     // MARK: 录制
@@ -185,24 +228,60 @@ public struct CaploSettingsView: View {
 
     // MARK: 快捷键
 
+    /// 可改的动作一行一个改键框；方向键、删除、Esc、回车、⌘1–⌘9 与滚轮手势是固定约定，单列在"固定"里只读展示。
     @ViewBuilder private var shortcuts: some View {
-        SettingsGroup("全局") {
-            shortcutRows([("新建录制", "⌘N"), ("打开工程…", "⌘O"), ("项目中心", "⇧⌘P"), ("设置", "⌘,")])
+        SettingsGroup("全局", footer: "需包含 ⌘ 或 ⌃。") {
+            editableRows([.newRecording, .openProject, .projectLibrary, .settings])
         }
         SettingsGroup("录制方式条") {
-            shortcutRows([("全屏 / 自定义区域 / 窗口", "1 / 2 / 3"), ("关闭", "Esc")])
+            editableRows([.recordDisplay, .recordRegion, .recordWindow])
             // 用标准设置行：原来是裸 HStack，没有行内边距与行高，标题顶到卡片左缘、按钮贴着右边框。
             SettingsRow("首次使用引导", caption: "只在第一次打开录制方式条时出现。") {
                 Button("重新显示") { OnboardingTour.reset(); StudioWindows.showRecorder() }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
             }
         }
         SettingsGroup("项目中心") {
-            shortcutRows([("搜索", "⌘F"), ("全选", "⌘A"), ("打开选中", "回车"), ("删除选中", "⌫")])
+            editableRows([.librarySearch, .librarySelectAll])
         }
         SettingsGroup("编辑器") {
-            shortcutRows([("切换面板", "⌘1 – ⌘9"), ("播放 / 暂停", "空格"), ("分割", "⌘B"), ("撤销 / 重做", "⌘Z / ⇧⌘Z"),
-                          ("复制片段", "⌘D"), ("全选片段", "⌘A"), ("导出", "⌘E"), ("逐帧定位", "← / →，⇧ 跳 10 帧"), ("删除选中", "⌫"),
-                          ("缩放时间线", "⌥ 滚轮"), ("纵向浏览轨道", "滚轮"), ("横向平移时间线", "⇧ 滚轮"), ("临时关闭吸附", "拖动时按住 ⌥")])
+            editableRows([.playPause, .split, .undo, .redo, .duplicate, .selectAllClips, .export])
+        }
+        SettingsGroup("固定", footer: "系统通用约定，不可修改。") {
+            shortcutRows([("关闭录制方式条 / 取消", "Esc"), ("打开选中的项目", "回车"), ("删除选中", "⌫"), ("切换编辑器面板", "⌘1 – ⌘9"),
+                          ("逐帧定位", "← / →，⇧ 跳 10 帧"), ("缩放时间线", "⌥ 滚轮"), ("纵向浏览轨道", "滚轮"), ("横向平移时间线", "⇧ 滚轮"),
+                          ("临时关闭吸附", "拖动时按住 ⌥")])
+        }
+        HStack {
+            Spacer()
+            Button("全部恢复默认") { shortcutStore.resetAll(); recordingShortcut = nil; shortcutProblem = nil }
+                .buttonStyle(StudioButtonStyle(.quiet, size: .small)).disabled(!shortcutStore.isCustomized)
+        }
+    }
+
+    @ViewBuilder private func editableRows(_ actions: [ShortcutAction]) -> some View {
+        ForEach(actions) { action in
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: CaploMetrics.Spacing.s) {
+                    Text(action.title).font(CaploFont.body).foregroundStyle(CaploColor.textPrimary)
+                    Spacer()
+                    // 改过的键旁边给一个回到默认的小按钮；没改过就不占位置。
+                    if shortcutStore.combo(action) != action.defaultCombo {
+                        Button { shortcutStore.reset(action); if shortcutProblem?.0 == action { shortcutProblem = nil } } label: {
+                            Image(systemName: "arrow.uturn.backward")
+                        }
+                        .buttonStyle(StudioIconButtonStyle(size: .small))
+                        .help("恢复 \(action.defaultCombo.display)").accessibilityLabel("恢复\(action.title)的默认快捷键")
+                    }
+                    ShortcutRecorderField(action: action, recording: $recordingShortcut, problem: $shortcutProblem)
+                }
+                if let problem = shortcutProblem, problem.0 == action {
+                    Text(problem.1).font(CaploFont.caption).foregroundStyle(CaploColor.warning)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
+            .padding(.horizontal, CaploMetrics.Spacing.l)
+            .padding(.vertical, 6)
+            .frame(minHeight: 36)
         }
     }
 

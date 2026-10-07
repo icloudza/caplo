@@ -85,7 +85,7 @@ struct CanvasPanel: View {
                 EditorSlider(model: model, title: "距离", value: Binding(get: { model.edit.layout.shadowOffset }, set: { model.edit.layout.shadowOffset = $0 }), range: -40...40, decimals: 0, defaultValue: CanvasLayout.defaultShadowOffset, detents: [0])
             }
         }
-        PanelSection("预设", info: "预设保存比例、背景、边距、圆角、阴影与裁切；自定义图片属于工程，不进预设。") {
+        PanelSection("预设", info: "不含自定义背景图片") {
             // 预设用下拉选择：当前布局与哪个预设一致就显示哪个，否则显示占位；没有预设时下拉禁用并给一行说明。
             SelectField(value: matchingPreset?.name, placeholder: presets.presets.isEmpty ? "还没有预设" : "选择预设…", accessibilityName: "布局预设", sections: [
                 SelectField.Section(items: presets.presets.map { preset in

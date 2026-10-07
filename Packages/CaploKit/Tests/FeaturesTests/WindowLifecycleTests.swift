@@ -110,6 +110,15 @@ struct WindowLifecycleTests {
         _ = try await assertTransparentGlassHost(in: editor)
         editor.performClose(nil)
         try await waitFor { recorder.isVisible }
+
+        // 方式条没开着时（从菜单栏、访达打开）关掉编辑器只是关掉，不凭空弹出方式条。
+        StudioWindows.hideRecorder()
+        VideoEditorWindow.shared.show(project: url)
+        try await waitFor { VideoEditorSessions.current?.ready == true }
+        editor.performClose(nil)
+        try await waitFor { VideoEditorSessions.current == nil }
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(!recorder.isVisible, "从菜单栏打开的编辑器关掉后弹出了录制方式条")
     }
 
     /// 生产入口允许底图穿过窗口与宿主，由唯一 behindWindow 材质层采样；不把配置断言当作桌面像素证据。

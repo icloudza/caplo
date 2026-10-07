@@ -261,18 +261,18 @@ public struct ProjectLibraryView: View {
                     // 批量动作只用图标，数量在标题下方的"已选 N / M"里；文字按钮会把顶栏挤得很满。
                     Button { requestTrash(selectedEntries) } label: { Image(systemName: "trash").foregroundStyle(CaploColor.record) }
                         .buttonStyle(StudioIconButtonStyle())
-                        .help("删除选中的 \(selection.count) 项 ⌫").accessibilityLabel("删除选中的 \(selection.count) 项")
+                        .help("删除 ⌫").accessibilityLabel("删除选中的 \(selection.count) 项")
                 }
                 // 全选：常驻顶栏（列表为空时禁用）；当前列表（含搜索结果）已全部选中时禁用。
                 Button { selectAll() } label: { Image(systemName: "checkmark.circle") }
-                    .buttonStyle(StudioIconButtonStyle()).help("全选 ⌘A").accessibilityLabel("全选")
+                    .buttonStyle(StudioIconButtonStyle()).help("全选 \(ShortcutStore.shared.display(.librarySelectAll))").accessibilityLabel("全选")
                     .disabled(filtered.isEmpty || filtered.allSatisfy { selection.contains($0.url) })
                 if !selection.isEmpty {
                     Button { selection.removeAll() } label: { Image(systemName: "xmark.circle") }
-                        .buttonStyle(StudioIconButtonStyle()).help("取消选择 · Esc").accessibilityLabel("取消选择")
+                        .buttonStyle(StudioIconButtonStyle()).help("取消选择 Esc").accessibilityLabel("取消选择")
                 }
                 Button { Task { await model.refresh() } } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(StudioIconButtonStyle()).help("刷新项目").accessibilityLabel("刷新项目")
+                    .buttonStyle(StudioIconButtonStyle()).help("刷新").accessibilityLabel("刷新项目")
                     .disabled(model.loading || previewOnly)
                 Button { model.importProject() } label: { Label("打开工程", systemImage: "folder") }.buttonStyle(StudioButtonStyle(.secondary, size: .large))
                 Button { StudioWindows.showRecorder() } label: { Label("新建录制", systemImage: "plus") }.buttonStyle(StudioButtonStyle(.primary, size: .large))
@@ -311,18 +311,16 @@ public struct ProjectLibraryView: View {
                 // 取消选择走顶栏的 ⊗ 按钮或 Esc。
                 .onTapGesture { focus = .list }
                 .onExitCommand { selection.removeAll() }
-                .onKeyPress("f", phases: .down) { press in
-                    guard press.modifiers.contains(.command) else { return .ignored }
-                    focus = .search; return .handled
+                // 搜索与全选按快捷键表匹配（可在设置里改键）。
+                .onKeyPress(phases: .down) { press in
+                    if ShortcutStore.shared.combo(.librarySearch).matches(press) { focus = .search; return .handled }
+                    if ShortcutStore.shared.combo(.librarySelectAll).matches(press) { selectAll(); return .handled }
+                    return .ignored
                 }
                 .onDeleteCommand { requestTrash(selectedEntries) }
                 .onKeyPress(.return) {
                     guard let url = selection.first, selection.count == 1 else { return .ignored }
                     VideoEditorWindow.shared.show(project: url); return .handled
-                }
-                .onKeyPress("a", phases: .down) { press in
-                    guard press.modifiers.contains(.command) else { return .ignored }
-                    selectAll(); return .handled
                 }
             }
             if let error = model.error {
@@ -512,7 +510,7 @@ private struct ProjectRow<Actions: View>: View {
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .foregroundStyle(CaploColor.textSecondary)
                 .environment(\.colorScheme, .dark)
-                .help("项目操作").accessibilityLabel("\(entry.document.name)的操作")
+                .help("更多").accessibilityLabel("\(entry.document.name)的操作")
                 .opacity(hovered || selected ? 1 : 0.55)
         }
         .padding(.horizontal, CaploMetrics.Spacing.m).frame(height: ProjectRowMetrics.height)

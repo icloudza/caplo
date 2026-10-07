@@ -110,7 +110,7 @@ struct ExportSheet: View {
             HStack(alignment: .bottom, spacing: CaploMetrics.Spacing.s) {
                 VStack(alignment: .leading, spacing: 6) {
                     Toggle("记住这些设置", isOn: $remember).toggleStyle(.checkbox)
-                        .help("格式、分辨率、帧率、画质、声音与这次的保存位置，下次打开导出窗口直接用。不勾则下次回到默认值。")
+                        .help("下次导出沿用这些参数与位置")
                     Toggle("完成后在访达中显示", isOn: $settings.revealsInFinder).toggleStyle(.checkbox)
                         .onChange(of: settings.revealsInFinder) { _, value in UserDefaults.standard.set(value, forKey: ExportSettings.revealKey) }
                 }

@@ -25,7 +25,7 @@ struct TextPanel: View {
     private var editingID: UUID? { model.editingTextID }
 
     var body: some View {
-        PanelSection("预设", info: "预设只是一组排版与动画的初值，套用之后每一项都还能单独改。") {
+        PanelSection("预设", info: "套用后仍可逐项修改") {
             let current = editingID.flatMap { model.edit.text(id: $0) }
             let matched = current.flatMap { TextPreset.matching($0) }
             // 一行三个、格子矮一点：八个预设两行多就能看完，不占面板一大截。

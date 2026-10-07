@@ -34,12 +34,12 @@ public struct ModePickerView: View {
             FloatingBar {
                 Button { StudioWindows.hideRecorder() } label: { Image(systemName: "xmark") }
                     .buttonStyle(StudioIconButtonStyle(size: .small))
-                    .help("关闭录制方式 · 菜单栏图标或 ⌘N 再次打开").accessibilityLabel("关闭录制方式")
+                    .help("关闭").accessibilityLabel("关闭录制方式")
                     .keyboardShortcut(.cancelAction)
                     .onboardingTarget("close")
                 HStack(spacing: CaploMetrics.Spacing.xs) {
-                    ForEach(Array(RecordingMode.allCases.enumerated()), id: \.element) { index, mode in
-                        ModeSegment(mode: mode, shortcut: Character(String(index + 1))) { pick(mode) }
+                    ForEach(RecordingMode.allCases, id: \.self) { mode in
+                        ModeSegment(mode: mode, shortcut: mode.shortcutAction) { pick(mode) }
                             .onboardingTarget(mode.onboardingID)
                             .disabled(busy || recorder.isBusy)
                             .matchedGeometryEffect(id: mode, in: segmentSpace, isSource: true)
@@ -66,10 +66,10 @@ public struct ModePickerView: View {
                 .background(CaploColor.textPrimary.opacity(0.04), in: RoundedRectangle(cornerRadius: CaploMetrics.Radius.control + 3))
                 FloatingBarDivider()
                 Button { ProjectLibraryWindow.shared.show() } label: { Image(systemName: "clock.arrow.circlepath") }
-                    .buttonStyle(StudioIconButtonStyle()).help("项目中心 · ⇧⌘P").accessibilityLabel("项目中心")
+                    .buttonStyle(StudioIconButtonStyle()).help("项目中心 \(ShortcutStore.shared.display(.projectLibrary))").accessibilityLabel("项目中心")
                     .onboardingTarget("recent")
                 Button { StudioWindows.showSettings() } label: { Image(systemName: "gearshape") }
-                    .buttonStyle(StudioIconButtonStyle()).help("设置 · ⌘,").accessibilityLabel("设置")
+                    .buttonStyle(StudioIconButtonStyle()).help("设置 \(ShortcutStore.shared.display(.settings))").accessibilityLabel("设置")
                     .onboardingTarget("settings")
             }
             .onboardingTarget("bar")
@@ -107,10 +107,10 @@ public struct ModePickerView: View {
     }
 }
 
-/// 方式分段项：图标 + 名称，30 点高；悬停底由外层的滑动高亮统一绘制，这里只画键盘焦点描边；数字键直接选择。
+/// 方式分段项：图标 + 名称，30 点高；悬停底由外层的滑动高亮统一绘制，这里只画键盘焦点描边；按快捷键表（默认数字键）直接选择。
 struct ModeSegment: View {
     let mode: RecordingMode
-    let shortcut: Character
+    let shortcut: ShortcutAction
     let action: () -> Void
     @Environment(\.isEnabled) private var enabled
     @FocusState private var focused: Bool
@@ -129,10 +129,10 @@ struct ModeSegment: View {
             .opacity(enabled ? 1 : 0.4)
         }
         .buttonStyle(.plain)
-        .keyboardShortcut(KeyEquivalent(shortcut), modifiers: [])
+        .shortcut(shortcut)
         .focused($focused)
         .focusEffectDisabled()
-        .help("\(mode.hint) · \(String(shortcut))")
+        .help("\(mode.hint) \(ShortcutStore.shared.display(shortcut))")
         .accessibilityLabel("\(mode.rawValue)录制，\(mode.hint)")
     }
 }

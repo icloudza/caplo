@@ -106,7 +106,7 @@ public struct ValueStepper: View {
                     }
             )
             .simultaneousGesture(TapGesture(count: 2).onEnded { if let defaultValue { commit(defaultValue) } })
-            .hoverTip("左右拖动快速调整，双击恢复默认")
+            .hoverTip("左右拖动 · 双击复位")
     }
 
     private func stepButton(symbol: String, delta: Double) -> some View {

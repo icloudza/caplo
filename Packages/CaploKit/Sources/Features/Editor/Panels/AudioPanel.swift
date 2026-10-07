@@ -17,7 +17,7 @@ struct AudioPanel: View {
 
     var body: some View {
         if let block = selectedBlock {
-            PanelSection("选中的\(block.track == .system ? "系统声音" : "麦克风")块 \(block.number)", info: "与轨道音量相乘，只影响时间线上选中的这一块。") {
+            PanelSection("选中的\(block.track == .system ? "系统声音" : "麦克风")块 \(block.number)", info: "与轨道音量相乘，仅作用于此块") {
                 EditorFill(model: model, title: "这一块的音量", value: blockGain(block.clip.id, role: block.role, track: block.track),
                            range: 0...2, suffix: "%", percentage: true, defaultValue: 1, detents: [1])
             }

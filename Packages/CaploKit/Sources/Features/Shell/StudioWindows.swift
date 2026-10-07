@@ -4,6 +4,17 @@ import CaptureKit
 import ProjectKit
 import CaploDesignSystem
 
+/// 项目中心、编辑器打开时替换掉的界面；关闭时只回到这里，不再一律弹出录制方式条
+/// （从菜单栏打开项目中心再关掉，以前会凭空冒出方式条）。
+enum WindowOrigin {
+    /// 从菜单栏、快捷键、访达等处打开：关掉就只是关掉。
+    case none
+    /// 替换了录制方式条或录制条（含录制结束后自动打开编辑器）：关掉回到方式条。
+    case recorder
+    /// 从项目中心打开编辑器：关掉回到项目中心。
+    case library
+}
+
 /// 统一管理录制、项目中心和编辑器的路由；原生窗口不依赖 NSHostingView 之外的 Scene 环境。
 @MainActor
 public enum StudioWindows {
@@ -51,6 +62,18 @@ public enum StudioWindows {
     }
 
     static func hideRecorder() { OnboardingTour.dismiss(); recorder?.orderOut(nil) }
+    /// 录制方式条或录制条正显示着（新打开的窗口会把它们收起，关掉时要回来）。
+    static var preparationVisible: Bool { recorder?.isVisible == true || recordBar?.window?.isVisible == true }
+
+    /// 项目中心或编辑器关闭后按来处收尾。
+    static func returnTo(_ origin: WindowOrigin) {
+        guard !terminating, !ScreenRecorder.shared.isBusy else { return }
+        switch origin {
+        case .none: break
+        case .recorder: showRecorder()
+        case .library: ProjectLibraryWindow.shared.show(restoring: true)
+        }
+    }
 
     /// 贴底录制条：替换方式选择窗口；同一模型复用面板，新模型重建内容。
     /// `focusTarget`：窗口模式下不激活本应用，转而把所选窗口的应用带到最前（虚线框随之可见）。
@@ -216,6 +239,7 @@ public enum StudioWindows {
         hideRecordBar(stopMonitors: stopMonitors)
         ProjectLibraryWindow.shared.hide()
         settings?.orderOut(nil)
+        AppPresence.update()
     }
 
     /// 录制取消或启动失败后回到准备阶段：有录制条模型就回到录制条，否则回到方式选择。
@@ -233,6 +257,8 @@ public enum StudioWindows {
     static func present(_ window: NSWindow?) {
         if window?.isMiniaturized == true { window?.deminiaturize(nil) }
         window?.makeKeyAndOrderFront(nil)
+        // 隐藏 Dock 图标时，编辑器 / 项目中心 / 设置一出现就要回到 Dock；不能只等成为关键窗口的通知（应用未激活时可能不发）。
+        AppPresence.update()
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -253,9 +279,14 @@ public final class ProjectLibraryWindow {
     public static let shared = ProjectLibraryWindow()
     private var window: NSWindow?
     private var closeObserver: NSObjectProtocol?
-    /// 打开项目中心时收起录制方式条；关闭项目中心且没有编辑器在前时，方式条回来。
-    public func show() {
+    private var origin = WindowOrigin.none
+    /// 打开项目中心时收起录制方式条；关闭时只有当初替换了方式条才把它放回来。
+    /// `restoring`：编辑器关闭后回到项目中心，沿用项目中心自己当初的来处，不按此刻（什么都没显示）重算。
+    public func show() { show(restoring: false) }
+    func show(restoring: Bool) {
         guard !ScreenRecorder.shared.isBusy else { RecordingPresentation.shared.revealControls(); return }
+        // 已经开着就沿用原来的来处；从编辑器顶栏打开时编辑器还在，关掉项目中心什么都不用做。
+        if !restoring, window?.isVisible != true { origin = StudioWindows.preparationVisible ? .recorder : .none }
         if window == nil {
             // 与编辑器一样把内容延伸到统一标题栏之下：顶栏自行为红黄绿预留空间，不再出现系统标题栏的浅色断层。
             let window = StudioWindows.make(title: "项目中心", content: ProjectLibraryView().ignoresSafeArea(), size: CGSize(width: 900, height: 620), chrome: .unifiedTitle)
@@ -263,11 +294,12 @@ public final class ProjectLibraryWindow {
             window.identifier = NSUserInterfaceItemIdentifier("caplo-project-library")
             window.contentMinSize = CGSize(width: 720, height: 460)
             self.window = window
-            closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
+            closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    guard !StudioWindows.terminating, !ScreenRecorder.shared.isBusy, !VideoEditorWindow.shared.isVisible else { return }
-                    // 下一轮再恢复方式条，避免在 AppKit 的关闭回调内改变关键窗口。
-                    Task { @MainActor in StudioWindows.showRecorder() }
+                    guard let self, !VideoEditorWindow.shared.isVisible else { return }
+                    let origin = self.origin; self.origin = .none
+                    // 下一轮再回到来处，避免在 AppKit 的关闭回调内改变关键窗口。
+                    Task { @MainActor in StudioWindows.returnTo(origin) }
                 }
             }
         }
@@ -283,7 +315,8 @@ public final class ProjectLibraryWindow {
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
     }
-    func hide() { window?.orderOut(nil) }
+    func hide() { window?.orderOut(nil); AppPresence.update() }
+    var isVisible: Bool { window?.isVisible == true }
 }
 
 /// 编辑器持有独立窗口和会话；同一工程重复打开仅置前，切换工程先验证文件，再结束旧会话。
@@ -297,9 +330,14 @@ public final class VideoEditorWindow: NSObject, NSWindowDelegate {
     /// 当前编辑器保存失败、没能切换过去的工程（多半是刚录完的那一段）：编辑器关掉之后接着打开它，
     /// 不再就此"丢"在项目中心里——录制结束的自动打开只会触发一次。
     private var deferredProject: URL?
+    /// 编辑器替换掉的界面，关闭时回到那里。
+    private var origin = WindowOrigin.none
     var isVisible: Bool { window?.isVisible == true || window?.isMiniaturized == true }
 
-    public func show(project: URL) {
+    /// `origin` 不给就按此刻屏上的界面判断：项目中心开着 → 回项目中心；方式条 / 录制条开着 → 回方式条；
+    /// 编辑器已经开着（切换工程）→ 沿用原来的来处；都没有 → 关掉就只是关掉。
+    public func show(project: URL) { show(project: project, origin: nil) }
+    func show(project: URL, origin explicit: WindowOrigin?) {
         guard !ScreenRecorder.shared.isBusy else {
             let alert = NSAlert()
             alert.messageText = "请先结束当前录制"
@@ -308,6 +346,8 @@ public final class VideoEditorWindow: NSObject, NSWindowDelegate {
             return
         }
         let url = project.resolvingSymlinksInPath().standardizedFileURL
+        let candidate: WindowOrigin? = explicit ?? (ProjectLibraryWindow.shared.isVisible ? .library
+            : StudioWindows.preparationVisible ? .recorder : isVisible ? nil : WindowOrigin.none)
         let id = UUID(); openingID = id
         if model?.entry.url == url {
             opening = false
@@ -324,6 +364,8 @@ public final class VideoEditorWindow: NSObject, NSWindowDelegate {
                 guard openingID == id, !ScreenRecorder.shared.isBusy, !StudioWindows.terminating else { return }
                 guard VideoEditorSessions.closeCurrent() else { deferredProject = url; reveal(); return }
                 deferredProject = nil
+                // 打开成功才记来处：打不开时屏上什么都没换，原来的窗口留着。
+                if let candidate { origin = candidate }
                 let model = VideoEditorModel(entry: LibraryEntry(url: url, document: document))
                 self.model = model
                 VideoEditorSessions.current = model
@@ -345,8 +387,8 @@ public final class VideoEditorWindow: NSObject, NSWindowDelegate {
                 let alert = NSAlert()
                 alert.messageText = "无法打开工程"
                 alert.informativeText = error.localizedDescription
+                // 打不开时什么都没收起（收起在打开成功之后），原来的界面原样留着，不再另弹方式条。
                 alert.runModal()
-                if !isVisible { StudioWindows.showRecorder() }
             }
         }
     }
@@ -355,6 +397,7 @@ public final class VideoEditorWindow: NSObject, NSWindowDelegate {
     func pauseAndHide() {
         model?.pause()
         window?.orderOut(nil)
+        AppPresence.update()
     }
     public func windowShouldClose(_ sender: NSWindow) -> Bool { VideoEditorSessions.closeCurrent() }
     public func windowWillClose(_ notification: Notification) {
@@ -364,9 +407,10 @@ public final class VideoEditorWindow: NSObject, NSWindowDelegate {
         // 之前因为保存失败没能切过去的工程，现在编辑器关了，接着打开它；否则下一轮恢复准备面板
         // （都放到下一轮，避免在 AppKit 的关闭回调内改变关键窗口）。
         let next = deferredProject; deferredProject = nil
+        let origin = self.origin; self.origin = .none
         Task { @MainActor in
             guard !StudioWindows.terminating else { return }
-            if let next { self.show(project: next) } else { StudioWindows.showRecorder() }
+            if let next { self.show(project: next, origin: origin) } else { StudioWindows.returnTo(origin) }
         }
     }
 }

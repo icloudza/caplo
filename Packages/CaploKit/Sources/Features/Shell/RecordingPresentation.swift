@@ -16,6 +16,7 @@ final class RecordingPresentation {
     func observe() {
         withObservationTracking {
             let recorder = ScreenRecorder.shared
+            MenuBarPulse.shared.update(phase: recorder.phase)
             if recorder.isBusy {
                 wasBusy = true
                 StudioWindows.hidePreparationWindows(keepRegionOutline: true, stopMonitors: false)
@@ -31,7 +32,8 @@ final class RecordingPresentation {
                     if let url = recorder.completedURL, url != lastOpened {
                         lastOpened = url
                         RegionSession.dismiss()
-                        VideoEditorWindow.shared.show(project: url)
+                        // 录制从方式条开始：编辑完关掉回到方式条，接着录下一段。
+                        VideoEditorWindow.shared.show(project: url, origin: .recorder)
                     } else if returnedFromRecording { StudioWindows.returnToPreparation() }
                 }
             }

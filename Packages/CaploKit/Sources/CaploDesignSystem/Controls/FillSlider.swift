@@ -103,7 +103,7 @@ public struct FillSlider: View {
             default: break
             }
         }
-        .hoverTip(defaultValue == nil ? "拖动调整，按住 ⌥ 精调" : "拖动调整，按住 ⌥ 精调，双击恢复默认")
+        .hoverTip(defaultValue == nil ? "⌥ 精调" : "⌥ 精调 · 双击复位")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
         .accessibilityValue(format(value))

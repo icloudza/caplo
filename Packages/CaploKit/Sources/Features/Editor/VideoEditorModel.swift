@@ -1111,7 +1111,7 @@ final class VideoEditorModel {
         if posterTask == nil { runFallbackWorker() }
     }
 
-    /// 顶栏"导出"（⌘E）：先弹导出窗口选格式、分辨率、帧率、画质、声音与保存位置。每次打开都按记住的设置重新填。
+    /// 顶栏"导出"（默认 ⌘E，可在设置里改键）：先弹导出窗口选格式、分辨率、帧率、画质、声音与保存位置。每次打开都按记住的设置重新填。
     func export() {
         endInteraction()
         guard ready, !exporting else { return }

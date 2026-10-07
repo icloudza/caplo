@@ -17,6 +17,10 @@ enum RecordingMode: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self { case .display: "display"; case .region: "rectangle.dashed"; case .window: "macwindow" }
     }
+    /// 方式条上直接选这种方式的快捷键（默认 1 / 2 / 3，可在设置里改）。
+    var shortcutAction: ShortcutAction {
+        switch self { case .display: .recordDisplay; case .region: .recordRegion; case .window: .recordWindow }
+    }
     /// 来源下拉为空时的占位。
     var sourcePlaceholder: String { self == .window ? "选择窗口" : "选择显示器" }
 }

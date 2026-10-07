@@ -23,7 +23,7 @@ struct CaptionPanel: View {
     }
 
     var body: some View {
-        PanelSection("转写", info: "转写全部在本机完成，音频不会上传。改过的句子会被保护，重新转写不会冲掉它们。") {
+        PanelSection("转写", info: "本机转写，音频不上传；改过的句子不会被覆盖") {
             if let progress = model.transcription {
                 ProgressView(value: progress.progress).progressViewStyle(.linear)
                 Text(progress.message).font(CaploFont.caption).foregroundStyle(CaploColor.textSecondary)
@@ -77,12 +77,12 @@ struct CaptionPanel: View {
                     Toggle(isOn: boolBinding(\.evenSplit)) {
                         // 别用 textformat 一类的符号：中文环境下 SwiftUI 会挑本地化变体，画出来是「甲乙丙」三个汉字。
                         SettingLabel("按字均分", systemImage: "metronome",
-                                     tip: "中文的词级时间戳普遍很粗，整句常常只给一两段。打开后按字数在句内均分，点亮更均匀；关掉则严格按识别出的词边界走。")
+                                     tip: "按字数均分句内时间，点亮更均匀")
                     }.toggleStyle(StudioToggleStyle())
                 }
                 Toggle(isOn: boolBinding(\.burnIn)) {
                     SettingLabel("烧录到画面", systemImage: "square.and.arrow.down",
-                                 tip: "关掉之后导出的视频里不带字幕，只能靠导出的 SRT 外挂。")
+                                 tip: "关闭后成片不含字幕，可另导出 SRT")
                 }.toggleStyle(StudioToggleStyle())
                 if !model.edit.captionStyleOrDefault.burnIn {
                     PanelNote("字幕不会烧进导出的视频，记得把 SRT 一起交付。")

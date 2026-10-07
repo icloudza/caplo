@@ -144,7 +144,7 @@ private struct EditorTopBar: View {
         HStack(spacing: CaploMetrics.Spacing.m) {
             Spacer().frame(width: CaploMetrics.trafficLightsInset - CaploMetrics.Spacing.l)
             Button { model.pause(); back() } label: { Image(systemName: "square.grid.2x2") }
-                .buttonStyle(StudioIconButtonStyle()).help("项目中心 · ⇧⌘P").accessibilityLabel("项目中心")
+                .buttonStyle(StudioIconButtonStyle()).help("项目中心 \(ShortcutStore.shared.display(.projectLibrary))").accessibilityLabel("项目中心")
             VStack(alignment: .leading, spacing: 1) {
                 Text(model.entry.document.name).font(CaploFont.bodyMedium).foregroundStyle(CaploColor.textPrimary).lineLimit(1)
                 Text(model.saveStatus).font(CaploFont.caption).foregroundStyle(CaploColor.textSecondary)
@@ -156,7 +156,7 @@ private struct EditorTopBar: View {
                 Button("取消") { model.cancelExport() }.buttonStyle(StudioButtonStyle(.quiet))
             } else {
                 Button { model.export() } label: { Label("导出", systemImage: "square.and.arrow.up") }
-                    .buttonStyle(StudioButtonStyle(.primary, size: .large)).keyboardShortcut("e", modifiers: .command)
+                    .buttonStyle(StudioButtonStyle(.primary, size: .large)).shortcut(.export)
                     .disabled(!model.ready || (model.edit.duration <= 0) || model.loading)
             }
         }

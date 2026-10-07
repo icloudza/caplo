@@ -26,5 +26,4 @@ emit() { # <imageset 名> <svg>
 JSON
 }
 emit MenuBarIcon Design/MenuBarIcon/Caplo-MenuBar.svg
-emit MenuBarIconRecording Design/MenuBarIcon/Caplo-MenuBar-Recording.svg
 echo "已生成菜单栏模板图 -> $CATALOG"

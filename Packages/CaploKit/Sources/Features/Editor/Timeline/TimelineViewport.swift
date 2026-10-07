@@ -1509,20 +1509,24 @@ final class TimelineViewportView: NSView {
             resizingTrack = nil
         }
         if drag != nil, event.keyCode != 53 { model.cancelInteraction(); clearDrag() }
-        let command = event.modifierFlags.contains(.command), shift = event.modifierFlags.contains(.shift)
-        if command {
-            switch event.charactersIgnoringModifiers?.lowercased() {
+        // 可改键的动作按快捷键表分派；方向键、Home / End、删除、Esc 是固定约定。
+        if let action = ShortcutStore.shared.action(for: event, in: .editor) {
+            switch action {
             // 全选的是画面片段：先清掉其他类别，否则删除键会先删掉还选着的字幕 / 文字 / 遮罩。
-            case "a": model.clearSelection(); model.selectedClipIDs = Set(edit.clips.map(\.id)); model.selectedClip = edit.clips.first?.id
-            case "d": model.duplicateSelection()
-            case "b": model.split()
-            case "z": if shift { model.redo() } else { model.undo() }
+            case .selectAllClips: model.clearSelection(); model.selectedClipIDs = Set(edit.clips.map(\.id)); model.selectedClip = edit.clips.first?.id
+            case .duplicate: model.duplicateSelection()
+            case .split: model.split()
+            case .undo: model.undo()
+            case .redo: model.redo()
+            case .playPause: model.togglePlayback()
+            case .export: if model.edit.duration > 0, !model.loading { model.export() }
             default: super.keyDown(with: event)
             }
             return
         }
+        if event.modifierFlags.contains(.command) { super.keyDown(with: event); return }
+        let shift = event.modifierFlags.contains(.shift)
         switch event.keyCode {
-        case 49: model.togglePlayback()
         case 123: model.seek(TimelineTime.quantized(model.position) - (shift ? 10 : 1) / 30.0)
         case 124: model.seek(TimelineTime.quantized(model.position) + (shift ? 10 : 1) / 30.0)
         case 115: model.seek(0)
