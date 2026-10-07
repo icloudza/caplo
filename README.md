@@ -9,7 +9,7 @@
 <p>
   <a href="https://github.com/icloudza/caplo/releases/latest"><img src="https://img.shields.io/github/v/release/icloudza/caplo?style=flat-square&label=release&color=065DFC" alt="Release"></a>
   <img src="https://img.shields.io/badge/macOS-15%2B-111111?style=flat-square&logo=apple&logoColor=white" alt="macOS 15+">
-  <img src="https://img.shields.io/badge/Apple%20Silicon%20%7C%20Intel-555555?style=flat-square" alt="Apple Silicon | Intel">
+  <img src="https://img.shields.io/badge/Apple%20Silicon-555555?style=flat-square" alt="Apple Silicon">
   <img src="https://img.shields.io/badge/Swift-6-F05138?style=flat-square&logo=swift&logoColor=white" alt="Swift 6">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-555555?style=flat-square" alt="License"></a>
 </p>
