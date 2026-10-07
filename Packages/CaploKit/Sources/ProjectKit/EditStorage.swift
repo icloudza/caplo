@@ -119,7 +119,7 @@ public enum EditStorage {
             let root = url.resolvingSymlinksInPath().standardizedFileURL.path + "/Events/"
             let file = url.appendingPathComponent(path).resolvingSymlinksInPath().standardizedFileURL
             guard path.hasPrefix("Events/"), !path.contains(".."), file.path.hasPrefix(root) else { throw ProjectError.invalid("事件路径无效。") }
-            let samples = try JSONDecoder().decode([PointerSample].self, from: Data(contentsOf: file))
+            let samples = try PointerEventFile.events(from: Data(contentsOf: file))
             for var sample in samples where sample.time.isFinite && sample.time >= 0 && sample.time < segment.duration && (0...1).contains(sample.x) && (0...1).contains(sample.y) {
                 sample.time += cursor; result.append(sample)
             }

@@ -202,16 +202,28 @@ final class VideoEditorModel {
         guard lease == nil, !closed, !Task.isCancelled else { return }
         do {
             lease = try ProjectLease(url: entry.url)
-            edit = try EditStorage.load(in: entry.url, document: entry.document, wallpaper: DesktopWallpaper.currentURL())
-            edit.prepareLayerEditing(camera: entry.document.segments.contains { $0.files[.camera] != nil }, system: audioTracks.contains(.system), microphone: audioTracks.contains(.microphone))
+            // 读盘、首次生成镜头（要解出全部指针事件）、旧工程迁移与首次落盘都放到后台：两小时的工程在主线程上
+            // 解码 + 编码要一百多毫秒，第一次打开还要解 36 MB 事件、跑一遍自动聚焦，界面会卡住一秒以上。
+            // 壁纸要问 NSScreen，只能在主线程取好再带过去。
+            let url = entry.url, document = entry.document, wallpaper = DesktopWallpaper.currentURL()
+            let camera = document.segments.contains { $0.files[.camera] != nil }
+            let system = audioTracks.contains(.system), microphone = audioTracks.contains(.microphone)
+            let (loaded, versions) = try await Task.detached(priority: .userInitiated) { () throws -> (VideoEdit, EditStorage.FileVersions?) in
+                var edit = try EditStorage.load(in: url, document: document, wallpaper: wallpaper)
+                edit.prepareLayerEditing(camera: camera, system: system, microphone: microphone)
+                // 初次自动生成镜头也落盘，重新打开时保持相同结果。之后的保存交给后台队列，它记得盘上的版本、不再回读旧文件。
+                var versions: EditStorage.FileVersions?
+                try EditStorage.save(edit, in: url, document: document, onDisk: &versions)
+                return (edit, versions)
+            }.value
+            // 读盘期间窗口可能已经关掉（close 会放掉租约）：什么都不再改。
+            guard !closed else { return }
+            edit = loaded
             selectedClip = edit.clips.first?.id
             selectedClipIDs = Set(edit.clips.prefix(1).map(\.id))
             ready = true; saveStatus = "已保存"
             VideoEditorSessions.current = self
-            // 初次自动生成镜头也落盘，重新打开时保持相同结果。之后的保存交给后台队列，它记得盘上的版本、不再回读旧文件。
-            var versions: EditStorage.FileVersions?
-            try EditStorage.save(edit, in: entry.url, document: entry.document, onDisk: &versions)
-            saver = EditSaveQueue(url: entry.url, document: entry.document, onDisk: versions)
+            saver = EditSaveQueue(url: entry.url, document: entry.document, onDisk: versions, written: loaded)
             installTimeObserver()
             // 播放到结尾自动回到暂停态，播放头停在末尾；再按播放从头开始（togglePlayback 已处理）。
             endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] note in

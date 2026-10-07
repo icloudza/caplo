@@ -302,8 +302,9 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
                             .mapValues { ($0.start - segment.start).seconds }
                         if !offsets.isEmpty { record.mediaOffsets = offsets }
                         if !segment.events.isEmpty {
-                            let path = String(format: "Events/%06d.json", segment.index)
-                            try JSONEncoder().encode(segment.events.filter { $0.time < duration }).write(to: project.appendingPathComponent(path), options: .atomic)
+                            // 无损压缩后约为明文的 1/12（见 PointerEventFile）；在提交队列上做，不占采集队列。
+                            let path = String(format: "Events/%06d.", segment.index) + PointerEventFile.pathExtension
+                            try PointerEventFile.data(for: segment.events.filter { $0.time < duration }).write(to: project.appendingPathComponent(path), options: .atomic)
                             record.eventsPath = path
                         }
                         try ProjectStorage.commit(record, to: project)

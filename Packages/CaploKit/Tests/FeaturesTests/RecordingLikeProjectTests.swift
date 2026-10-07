@@ -48,8 +48,9 @@ extension WindowLifecycleTests {
         }
         samples.append(PointerSample(time: 1.5, x: 0.7, y: 0.5, kind: .click))
         samples.append(PointerSample(time: 4.0, x: 0.3, y: 0.6, kind: .click))
-        let eventsPath = "Events/000000.json"
-        try JSONEncoder().encode(samples).write(to: url.appendingPathComponent(eventsPath))
+        // 与录制器同一写法：LZFSE 压缩的事件文件（明文旧格式由跨片段聚焦那组测试覆盖）。
+        let eventsPath = "Events/000000." + PointerEventFile.pathExtension
+        try PointerEventFile.data(for: samples).write(to: url.appendingPathComponent(eventsPath))
 
         var record = SegmentRecord(id: 0, duration: 6, files: [.screen: path])
         record.eventsPath = eventsPath

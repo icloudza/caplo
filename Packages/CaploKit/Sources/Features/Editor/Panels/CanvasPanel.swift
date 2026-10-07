@@ -168,9 +168,11 @@ struct CanvasPanel: View {
     @ViewBuilder private var imageControls: some View {
         if let path = model.edit.layout.backgroundImage, let file = try? ProjectStorage.backgroundURL(path, in: model.entry.url) {
             // 预览走缩略图缓存：原来在 body 里 `NSImage(contentsOf:)` 每次重绘都解整张 5K 图，是面板一动就卡的根源之一。
+            // 图片按填满缩放会超出 96 点高的框，clipShape 只裁画面、不裁点击区域：溢出的部分正好盖住上方"渐变 / 纯色"
+            // 那排按钮，设了图片之后就切不回去。图片只是展示，不参与命中测试。
             ZStack {
                 RoundedRectangle(cornerRadius: CaploMetrics.Radius.control).fill(CaploColor.surfaceRaised)
-                if let image = library.preview(forProjectImage: file) { Image(nsImage: image).resizable().aspectRatio(contentMode: .fill) }
+                if let image = library.preview(forProjectImage: file) { Image(nsImage: image).resizable().aspectRatio(contentMode: .fill).allowsHitTesting(false) }
             }
             .frame(height: 96).frame(maxWidth: .infinity).clipShape(RoundedRectangle(cornerRadius: CaploMetrics.Radius.control))
             .overlay(RoundedRectangle(cornerRadius: CaploMetrics.Radius.control).strokeBorder(CaploColor.separator))
@@ -245,11 +247,13 @@ struct BackdropTile: View {
         Button(action: action) {
             ZStack {
                 RoundedRectangle(cornerRadius: CaploMetrics.Radius.control).fill(CaploColor.surfaceRaised)
-                if let image { Image(nsImage: image).resizable().aspectRatio(contentMode: .fill) }
+                // 非 16:9 的壁纸填满后会溢出格子，溢出部分不能抢相邻格的点击（同上方预览）。
+                if let image { Image(nsImage: image).resizable().aspectRatio(contentMode: .fill).allowsHitTesting(false) }
                 if busy { ProgressView().controlSize(.small) }
             }
             .aspectRatio(16.0 / 9, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: CaploMetrics.Radius.control))
+            .contentShape(RoundedRectangle(cornerRadius: CaploMetrics.Radius.control))
             .overlay(RoundedRectangle(cornerRadius: CaploMetrics.Radius.control).strokeBorder(CaploColor.separator))
             .overlay {
                 if selected {

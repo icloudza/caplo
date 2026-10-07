@@ -447,7 +447,8 @@ private struct ProjectRow<Actions: View>: View {
                 .padding(.trailing, CaploMetrics.Spacing.s - CaploMetrics.Spacing.l)
             ZStack {
                 CaploColor.surfaceCanvasWell
-                if let thumbnail { Image(nsImage: thumbnail).resizable().scaledToFill() }
+                // 填满后溢出缩略图框的部分不参与点击，免得盖住左侧的选择圈。
+                if let thumbnail { Image(nsImage: thumbnail).resizable().scaledToFill().allowsHitTesting(false) }
                 else { Image(systemName: "film").font(.title2).foregroundStyle(CaploColor.textTertiary) }
             }
             .frame(width: ProjectRowMetrics.thumbnailSize.width, height: ProjectRowMetrics.thumbnailSize.height)
