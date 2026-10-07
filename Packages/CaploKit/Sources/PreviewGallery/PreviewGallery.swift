@@ -120,6 +120,7 @@ struct PreviewGallery {
         try await render(CaploSettingsView(), name: "settings", size: CaploSettingsView.size, scheme: .light, output: output)
         try await render(CaploSettingsView(), name: "settings-dark", size: CaploSettingsView.size, scheme: .dark, output: output)
         try await render(CaploSettingsView(previewSection: "导出"), name: "settings-export", size: CaploSettingsView.size, scheme: .dark, output: output)
+        try await render(CaploSettingsView(previewSection: "快捷键"), name: "settings-shortcuts", size: CaploSettingsView.size, scheme: .dark, output: output)
         if let argument = CommandLine.arguments.dropFirst(2).first {
             let path: String
             if ["--demo", "--camera-demo", "--pointer-demo"].contains(argument) { path = try await PreviewFixture.create(camera: argument != "--demo", pointer: argument == "--pointer-demo").path; print("合成工程：" + path) }

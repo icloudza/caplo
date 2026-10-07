@@ -189,11 +189,10 @@ public struct CaploSettingsView: View {
         SettingsGroup("全局") {
             shortcutRows([("新建录制", "⌘N"), ("打开工程…", "⌘O"), ("项目中心", "⇧⌘P"), ("设置", "⌘,")])
         }
-        SettingsGroup("录制方式条", footer: "首次使用引导只在第一次打开录制方式条时出现。") {
+        SettingsGroup("录制方式条") {
             shortcutRows([("全屏 / 自定义区域 / 窗口", "1 / 2 / 3"), ("关闭", "Esc")])
-            HStack {
-                Text("首次使用引导").font(CaploFont.body)
-                Spacer()
+            // 用标准设置行：原来是裸 HStack，没有行内边距与行高，标题顶到卡片左缘、按钮贴着右边框。
+            SettingsRow("首次使用引导", caption: "只在第一次打开录制方式条时出现。") {
                 Button("重新显示") { OnboardingTour.reset(); StudioWindows.showRecorder() }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
             }
         }
