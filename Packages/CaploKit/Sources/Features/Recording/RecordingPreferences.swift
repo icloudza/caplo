@@ -54,7 +54,7 @@ enum RecordingDeviceNames {
         if selected.count == 1, let id = selected.first {
             return applications.first(where: { $0.id == id })?.name ?? "所选应用未运行"
         }
-        return selected.isEmpty ? "选声音应用…" : "\(selected.count) 个应用"
+        return selected.isEmpty ? "选声音应用" : "\(selected.count) 个应用"
     }
     static func decodeApplications(_ data: Data) -> Set<String> {
         Set((try? JSONDecoder().decode([String].self, from: data)) ?? [])

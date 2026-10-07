@@ -1,0 +1,89 @@
+# 发布前检查：逐项验证发布所需的证书、公证密钥、更新签名密钥与 Cloudflare R2 配置。
+# 手动触发（Actions → Release Check → Run workflow），不构建、不发版、不上传安装包；
+# 各项互不依赖，一项失败其余照样检查，结果汇总在运行页面的 Summary 里。
+name: Release Check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ${{ vars.MACOS_RUNNER || 'macos-26' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 签名证书
+        env:
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          Scripts/release/import-certificate.sh
+          # 实际签一个小程序，并核对证书的团队 ID 与 APPLE_TEAM_ID 一致。
+          cp /usr/bin/true "$RUNNER_TEMP/sign-check"
+          codesign --force --timestamp --options runtime --sign "Developer ID Application" "$RUNNER_TEMP/sign-check"
+          team=$(codesign -dv "$RUNNER_TEMP/sign-check" 2>&1 | sed -n 's/^TeamIdentifier=//p')
+          [ "$team" = "$APPLE_TEAM_ID" ] || { echo "证书团队 $team 与 APPLE_TEAM_ID 不一致"; exit 1; }
+          echo "✅ 签名证书：Developer ID，团队 $team" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 公证密钥
+        if: always()
+        env:
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          xcrun notarytool history --key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" > /dev/null
+          echo "✅ 公证密钥：App Store Connect 认证通过" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 更新签名密钥
+        if: always()
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
+        run: |
+          tools=$(Scripts/release/sparkle-tools.sh)
+          head -c 4096 /dev/urandom > "$RUNNER_TEMP/sparkle-check"
+          signature=$(printf '%s' "$SPARKLE_PRIVATE_KEY" | "$tools/sign_update" --ed-key-file - -p "$RUNNER_TEMP/sparkle-check")
+          swift Scripts/release/verify-signature.swift "$SPARKLE_PUBLIC_KEY" "$signature" "$RUNNER_TEMP/sparkle-check" \
+            || { echo "私钥与 SPARKLE_PUBLIC_KEY 不是一对"; exit 1; }
+          echo "✅ 更新签名密钥：私钥与公钥成对" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cloudflare R2
+        if: always()
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          DOWNLOAD_BASE_URL: ${{ vars.DOWNLOAD_BASE_URL }}
+        run: |
+          command -v aws > /dev/null || brew install awscli > /dev/null
+          endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+          # 写入一个检查文件 → 从公开域名读回 → 删除：同时验证令牌的写权限与自定义域名绑定。
+          token="release-check-$GITHUB_RUN_ID"
+          echo "$token" > "$RUNNER_TEMP/r2-check.txt"
+          aws s3 cp "$RUNNER_TEMP/r2-check.txt" "s3://$R2_BUCKET/.release-check.txt" --endpoint-url "$endpoint" \
+            --content-type text/plain --cache-control no-store --only-show-errors
+          echo "✅ R2 写入：令牌可写存储桶 $R2_BUCKET" >> "$GITHUB_STEP_SUMMARY"
+          ok=false
+          for attempt in 1 2 3 4 5; do
+            if [ "$(curl -fsSL "$DOWNLOAD_BASE_URL/.release-check.txt?run=$GITHUB_RUN_ID" 2> /dev/null)" = "$token" ]; then ok=true; break; fi
+            sleep 3
+          done
+          aws s3 rm "s3://$R2_BUCKET/.release-check.txt" --endpoint-url "$endpoint" --only-show-errors
+          $ok || { echo "从 $DOWNLOAD_BASE_URL 读不到刚写入的文件：检查存储桶的自定义域名绑定"; exit 1; }
+          echo "✅ 下载域名：$DOWNLOAD_BASE_URL 可公开访问存储桶" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 清理
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/release.keychain-db" 2> /dev/null || true
+          rm -f "$RUNNER_TEMP/notary.p8"

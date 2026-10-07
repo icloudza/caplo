@@ -387,13 +387,13 @@ public struct ProjectLibraryView: View {
     private func row(for entry: LibraryEntry) -> some View {
         let editing = VideoEditorSessions.current?.entry.url == entry.url
         let inSelection = selection.contains(entry.url)
-        let deleteTitle = inSelection && selection.count > 1 ? "删除选中的 \(selection.count) 项…" : "删除到废纸篓…"
+        let deleteTitle = inSelection && selection.count > 1 ? "删除选中的 \(selection.count) 项" : "删除到废纸篓"
         return ProjectRow(entry: entry, selected: inSelection, selecting: !selection.isEmpty,
                           open: { VideoEditorWindow.shared.show(project: entry.url) },
                           select: { modifiers in select(entry, modifiers: modifiers) },
                           toggle: { toggle(entry) }) {
             Button("打开编辑器") { VideoEditorWindow.shared.show(project: entry.url) }
-            Button("重命名…") { newName = entry.document.name; renaming = entry }.disabled(editing)
+            Button("重命名") { newName = entry.document.name; renaming = entry }.disabled(editing)
             Button("复制") { Task { await model.duplicate(entry) } }
             Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([entry.url]) }
             Divider()

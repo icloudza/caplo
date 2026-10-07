@@ -5,7 +5,7 @@ import ExportKit
 
 /// 导出窗口：格式、分辨率、帧率、画质、声音、保存位置与导出后的动作，底部一行写清最终参数和预计大小。
 /// 分辨率从编辑器顶栏挪到这里（2026-10-06）：它只在导出时有意义，常驻顶栏只会被误以为是预览分辨率。
-/// 保存位置默认取设置页里的文件夹，这里随时可以另选（"选择…"）；同名文件先提示、点导出时再确认替换。
+/// 保存位置默认取设置页里的文件夹，这里随时可以另选（"选择"）；同名文件先提示、点导出时再确认替换。
 struct ExportSheet: View {
     let model: VideoEditorModel
     @State private var settings: ExportSettings
@@ -100,7 +100,7 @@ struct ExportSheet: View {
                             Text(Self.displayPath(folder)).font(CaploFont.caption).foregroundStyle(CaploColor.textPrimary)
                                 .lineLimit(1).truncationMode(.head).help(folder.path)
                             Spacer(minLength: CaploMetrics.Spacing.s)
-                            Button("选择…") { chooseFolder() }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
+                            Button("选择") { chooseFolder() }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
                                 .accessibilityLabel("选择保存位置")
                         }
                     }

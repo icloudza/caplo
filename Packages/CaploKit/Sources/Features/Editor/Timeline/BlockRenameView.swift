@@ -1,7 +1,7 @@
 import SwiftUI
 import CaploDesignSystem
 
-/// 时间线块改名框：从右键菜单"重命名…"弹出，文本框预填自定义名称、占位显示默认名称；回车或"确定"提交，留空恢复默认。
+/// 时间线块改名框：从右键菜单"重命名"弹出，文本框预填自定义名称、占位显示默认名称；回车或"确定"提交，留空恢复默认。
 struct BlockRenameView: View {
     let defaultTitle: String
     let commit: (String) -> Void

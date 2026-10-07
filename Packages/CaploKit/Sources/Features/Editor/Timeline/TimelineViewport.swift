@@ -1257,7 +1257,7 @@ final class TimelineViewportView: NSView {
         duplicate.target = self; menu.addItem(duplicate)
         // 字幕块的名字就是它的台词，改名没有意义；文本在字幕面板里编辑。
         if !block.caption {
-            let rename = NSMenuItem(title: "重命名…", action: #selector(renameBlock(_:)), keyEquivalent: "")
+            let rename = NSMenuItem(title: "重命名", action: #selector(renameBlock(_:)), keyEquivalent: "")
             rename.target = self; rename.representedObject = block.id
             menu.addItem(rename)
         }

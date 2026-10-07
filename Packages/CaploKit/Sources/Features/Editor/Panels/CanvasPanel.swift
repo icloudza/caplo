@@ -97,7 +97,7 @@ struct CanvasPanel: View {
                 PanelNote("调好布局后保存为预设，以后一键套用到其他工程。")
             }
             HStack(spacing: CaploMetrics.Spacing.s) {
-                Button("保存为预设…") { presetName = ""; namingPreset = true }
+                Button("保存为预设") { presetName = ""; namingPreset = true }
                     .buttonStyle(StudioButtonStyle(.secondary, size: .small))
                     .popover(isPresented: $namingPreset, arrowEdge: .bottom) {
                         VStack(alignment: .leading, spacing: CaploMetrics.Spacing.m) {
@@ -177,12 +177,12 @@ struct CanvasPanel: View {
             .frame(height: 96).frame(maxWidth: .infinity).clipShape(RoundedRectangle(cornerRadius: CaploMetrics.Radius.control))
             .overlay(RoundedRectangle(cornerRadius: CaploMetrics.Radius.control).strokeBorder(CaploColor.separator))
             HStack(spacing: CaploMetrics.Spacing.s) {
-                Button("更换图片…", action: importImage).buttonStyle(StudioButtonStyle(.secondary, size: .small))
+                Button("更换图片", action: importImage).buttonStyle(StudioButtonStyle(.secondary, size: .small))
                 Button("移除图片") { chosenBackdrop = nil; model.commit { $0.layout.backgroundImage = nil } }.buttonStyle(StudioButtonStyle(.quiet, size: .small))
             }
         } else {
             PanelNote("图片会按填满画面裁切，并随工程一起保存；导出与预览一致。")
-            Button { importImage() } label: { Label("导入图片…", systemImage: "photo.badge.plus") }.buttonStyle(StudioButtonStyle(.secondary))
+            Button { importImage() } label: { Label("导入图片", systemImage: "photo.badge.plus") }.buttonStyle(StudioButtonStyle(.secondary))
         }
         Text("内置壁纸").font(CaploFont.caption).foregroundStyle(CaploColor.textSecondary)
         ChipGroup(WallpaperSeries.allCases, selection: $series) { $0.title }

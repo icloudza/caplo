@@ -16,9 +16,10 @@ public struct CaploMenuView: View {
         }
         Button(ScreenRecorder.shared.isBusy ? "显示录制控制" : "新建录制") { StudioWindows.showRecorder() }
         Button("项目中心") { ProjectLibraryWindow.shared.show() }.disabled(ScreenRecorder.shared.isBusy)
-        Button("打开工程…") { ProjectLibraryModel.shared.importProject() }.disabled(ScreenRecorder.shared.isBusy)
+        Button("打开工程") { ProjectLibraryModel.shared.importProject() }.disabled(ScreenRecorder.shared.isBusy)
         Divider()
-        Button("设置…") { StudioWindows.showSettings() }
+        Button("设置") { StudioWindows.showSettings() }
+        UpdateMenuItem()
         Divider()
         Button("退出 Caplo") { NSApplication.shared.terminate(nil) }.keyboardShortcut("q")
     }
@@ -29,11 +30,24 @@ public struct CaploAppCommands: Commands {
     public var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("新建录制") { StudioWindows.showRecorder() }.shortcut(.newRecording)
-            Button("打开工程…") { ProjectLibraryModel.shared.importProject() }.shortcut(.openProject).disabled(ScreenRecorder.shared.isBusy)
+            Button("打开工程") { ProjectLibraryModel.shared.importProject() }.shortcut(.openProject).disabled(ScreenRecorder.shared.isBusy)
             Button("项目中心") { ProjectLibraryWindow.shared.show() }.shortcut(.projectLibrary).disabled(ScreenRecorder.shared.isBusy)
         }
         CommandGroup(replacing: .appSettings) {
-            Button("设置…") { StudioWindows.showSettings() }.shortcut(.settings)
+            Button("设置") { StudioWindows.showSettings() }.shortcut(.settings)
+        }
+        CommandGroup(after: .appInfo) { UpdateMenuItem() }
+    }
+}
+
+/// "检查更新"：始终在菜单里；开发版没有更新配置时置灰。有新版本等着处理时改成"安装 Caplo x.y.z"。
+struct UpdateMenuItem: View {
+    private let updater = AppUpdater.shared
+    var body: some View {
+        if let version = updater.pendingVersion {
+            Button("安装 Caplo \(version)") { updater.checkForUpdates() }
+        } else {
+            Button("检查更新") { updater.checkForUpdates() }.disabled(!updater.isEnabled || !updater.canCheck)
         }
     }
 }
@@ -98,6 +112,8 @@ public final class RecordingAppDelegate: NSObject, NSApplicationDelegate {
         CameraPreviewCoordinator.startObserving()
         // 隐藏 Dock 图标时以 .accessory 启动，编辑器 / 项目中心 / 设置开着时临时回到 Dock。
         AppPresence.start()
+        // 在线更新：发布包才启动；后台检查不会在录制或导出时弹窗。
+        AppUpdater.shared.start()
         // 登录时由系统拉起：只在菜单栏待命，不弹录制方式条。标记只在启动回调里读得到，先取出来。
         let quietLaunch = AppPresence.launchedAsLoginItem
         // 文件打开事件可能紧随启动到达；延后一轮，避免直接打开工程时闪现准备窗口。

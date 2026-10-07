@@ -89,8 +89,8 @@ public struct RecordBarView: View {
         IconDropdown(symbol: "gearshape", accessibilityName: "录制设置", help: "录制设置") {
             var entries: [PopupMenuEntry] = [.header(model.mode == .window ? "窗口" : "显示器")]
             entries += model.sources.map { source in .item(source.title, checked: source.id == model.source?.id) { model.choose(source) } }
-            if model.mode == .region { entries.append(.item("重新框选区域…") { Task { await model.pickRegion() } }) }
-            if model.mode == .window { entries.append(.item("在屏幕上选择窗口…") { Task { await model.pickWindow() } }) }
+            if model.mode == .region { entries.append(.item("重新框选区域") { Task { await model.pickRegion() } }) }
+            if model.mode == .window { entries.append(.item("在屏幕上选择窗口") { Task { await model.pickWindow() } }) }
             entries.append(.item("刷新来源") { Task { await model.refreshSources() } })
             entries += [
                 .separator, .header("录制"),
@@ -99,7 +99,7 @@ public struct RecordBarView: View {
                 }),
                 .submenu("帧率 · \(frameRate) fps", [30, 60].map { rate in choice("\(rate) fps", selected: frameRate == rate) { frameRate = rate } }),
                 .separator,
-                .item("更多设置…") { StudioWindows.showSettings() },
+                .item("更多设置") { StudioWindows.showSettings() },
             ]
             return entries
         }
@@ -143,7 +143,7 @@ public struct RecordBarView: View {
             if !devices.isEmpty { entries.append(.separator) }
             entries += devices.map { device in choice(device.name, selected: microphone && microphoneID == device.id) { microphone = true; microphoneID = device.id } }
             // 麦克风模式（语音隔离等）只能由用户在系统面板里选；回声消除与降噪在编辑器的声音面板里离线做。
-            entries += [.separator, .text("麦克风模式 · " + MicrophoneModes.shared.currentName), .item("更改麦克风模式…") { MicrophoneModes.showSystemPicker() }]
+            entries += [.separator, .text("麦克风模式 · " + MicrophoneModes.shared.currentName), .item("更改麦克风模式") { MicrophoneModes.showSystemPicker() }]
             return entries
         }
     }
@@ -154,7 +154,7 @@ public struct RecordBarView: View {
                        isOff: !systemAudio, accessibilityName: "系统声音", maxTitleWidth: 150) { [
             choice("关闭", selected: !systemAudio) { systemAudio = false },
             choice("全部系统声音", selected: systemAudio && scope == "all") { systemAudio = true; scope = "all" },
-            choice("仅指定应用…", selected: systemAudio && scope == "applications") {
+            choice("仅指定应用", selected: systemAudio && scope == "applications") {
                 systemAudio = true; scope = "applications"; applications = AudioInputCatalog.applications(); choosingApplications = true
             },
         ] }

@@ -40,6 +40,7 @@ public struct CaploSettingsView: View {
     @State private var recordingShortcut: ShortcutAction?
     @State private var shortcutProblem: (ShortcutAction, String)?
     private let shortcutStore = ShortcutStore.shared
+    private let updater = AppUpdater.shared
 
     public init() {}
     /// 离屏预览直接打开到某一页（按侧栏标题）。
@@ -125,6 +126,25 @@ public struct CaploSettingsView: View {
                     .toggleStyle(StudioToggleStyle(embedded: true))
             }
         }
+        // 自动检查 / 自动安装只在发布包里有意义；"检查更新"按钮在"关于"页。
+        if updater.isEnabled {
+            SettingsGroup("更新") {
+                SettingsRow("自动检查更新", caption: lastCheckCaption) {
+                    Toggle("自动检查更新", isOn: Binding(get: { updater.automaticallyChecks }, set: { updater.setAutomaticallyChecks($0) }))
+                        .toggleStyle(StudioToggleStyle(embedded: true))
+                }
+                SettingsRow("自动下载并安装", caption: "退出 Caplo 时安装。") {
+                    Toggle("自动下载并安装", isOn: Binding(get: { updater.automaticallyDownloads }, set: { updater.setAutomaticallyDownloads($0) }))
+                        .toggleStyle(StudioToggleStyle(embedded: true))
+                        .disabled(!updater.automaticallyChecks)
+                }
+            }
+        }
+    }
+
+    private var lastCheckCaption: String {
+        guard let date = updater.lastCheck else { return "每天检查一次。" }
+        return "上次检查：" + date.formatted(.relative(presentation: .named).locale(Locale(identifier: "zh_CN")))
     }
 
     private var loginCaption: String {
@@ -163,7 +183,7 @@ public struct CaploSettingsView: View {
         SettingsGroup("保存位置", footer: "导出窗口里可以随时另选位置；勾着\u{201C}记住这些设置\u{201D}导出时，那次的位置会成为这里的默认位置。") {
             SettingsRow("默认位置", caption: exportFolder.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")) {
                 HStack(spacing: CaploMetrics.Spacing.s) {
-                    Button("更改…") { chooseExportFolder() }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
+                    Button("更改") { chooseExportFolder() }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
                     Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([exportFolder]) }
                         .buttonStyle(StudioButtonStyle(.quiet, size: .small))
                 }
@@ -216,7 +236,7 @@ public struct CaploSettingsView: View {
                 Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([ProjectStoragePaths.libraryURL]) }
                     .buttonStyle(StudioButtonStyle(.secondary, size: .small))
             }
-            SettingsRow("外部工程记录", caption: externalProjects == 0 ? "通过\u{201C}打开工程…\u{201D}打开过的工程会记在这里，并出现在项目中心。" : "已记录 \(externalProjects) 个其他位置的工程，它们会出现在项目中心。") {
+            SettingsRow("外部工程记录", caption: externalProjects == 0 ? "通过\u{201C}打开工程\u{201D}打开过的工程会记在这里，并出现在项目中心。" : "已记录 \(externalProjects) 个其他位置的工程，它们会出现在项目中心。") {
                 Button("清除记录") {
                     UserDefaults.standard.set([String](), forKey: "externalProjects")
                     externalProjects = 0
@@ -308,7 +328,14 @@ public struct CaploSettingsView: View {
             }
         }
         SettingsGroup {
-            SettingsRow("版本") { Text(Self.version).font(CaploFont.value).foregroundStyle(CaploColor.textSecondary) }
+            SettingsRow("版本", caption: updater.isEnabled ? lastCheckCaption : "开发版不检查更新。") {
+                HStack(spacing: CaploMetrics.Spacing.m) {
+                    Text(Self.version).font(CaploFont.value).foregroundStyle(CaploColor.textSecondary)
+                    Button(updater.pendingVersion.map { "安装 \($0)" } ?? "检查更新") { updater.checkForUpdates() }
+                        .buttonStyle(StudioButtonStyle(.secondary, size: .small))
+                        .disabled(!updater.isEnabled || (!updater.canCheck && updater.pendingVersion == nil))
+                }
+            }
             SettingsRow("构建") { Text(Self.build).font(CaploFont.value).foregroundStyle(CaploColor.textSecondary) }
             SettingsRow("系统要求") { Text("macOS 15 及以上").font(CaploFont.value).foregroundStyle(CaploColor.textSecondary) }
         }

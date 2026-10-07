@@ -128,6 +128,17 @@ public final class StudioWindowController: NSWindowController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("StudioWindowController 不支持从 nib 创建") }
 
+    /// 固定尺寸窗口换一个固定尺寸（例如更新窗口在状态小窗与说明大窗之间切换），顶边与水平中心不动。
+    public func setFixedContentSize(_ size: CGSize, animate: Bool) {
+        guard case .fixed = sizing, let window else { return }
+        guard window.contentRect(forFrameRect: window.frame).size != size else { return }
+        window.contentMinSize = size
+        window.contentMaxSize = size
+        var frame = window.frameRect(forContentRect: CGRect(origin: .zero, size: size))
+        frame.origin = CGPoint(x: window.frame.midX - frame.width / 2, y: window.frame.maxY - frame.height)
+        window.setFrame(frame, display: true, animate: animate && window.isVisible)
+    }
+
     /// 替换内容视图，保持窗口与尺寸策略不变。
     public func replaceContent<V: View>(_ content: V) {
         guard let window else { return }

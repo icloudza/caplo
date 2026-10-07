@@ -53,8 +53,8 @@ struct CaptionPanel: View {
                 }
             }
             HStack(spacing: CaploMetrics.Spacing.s) {
-                Button("导入字幕…") { importFile() }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
-                Button("导出 SRT…") { exportFile(vtt: false) }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
+                Button("导入字幕") { importFile() }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
+                Button("导出 SRT") { exportFile(vtt: false) }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
                     .disabled(model.edit.captionList.isEmpty)
             }
         }

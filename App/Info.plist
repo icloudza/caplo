@@ -35,14 +35,26 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.video</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>用于录制讲解声音，麦克风素材会保存在本地工程中。</string>
 	<key>NSCameraUsageDescription</key>
 	<string>用于录制讲解人像，摄像头视频会作为独立素材保存在本地工程中。</string>
 	<key>NSCameraUseContinuityCameraDeviceType</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>用于录制讲解声音，麦克风素材会保存在本地工程中。</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>用于把录制的讲解声音转写成字幕。转写全部在本机完成，音频不会离开这台电脑。</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>$(CAPLO_UPDATE_FEED_URL)</string>
+	<key>SUPublicEDKey</key>
+	<string>$(CAPLO_UPDATE_PUBLIC_KEY)</string>
+	<key>SURequireSignedFeed</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>

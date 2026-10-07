@@ -1,0 +1,100 @@
+# 发布 Caplo：推送 vX.Y.Z 标签即触发（预发布用 vX.Y.Z-beta.N / vX.Y.Z-rc.N）。
+# 流程：Developer ID 签名 → 公证 → DMG → GitHub Release → 上传 Cloudflare R2（官网下载与应用内在线更新）。
+# 需要的 Secrets / Variables 见 Scripts/release/README.md。
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 要（重新）发布的已有标签，例如 v1.4.2
+        required: true
+
+permissions:
+  contents: write
+
+# 同一时间只跑一个发布，后来的排队，不取消正在公证或上传的那个。
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ${{ vars.MACOS_RUNNER || 'macos-26' }}
+    timeout-minutes: 90
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      # checkout 会把附注标签改写成轻量标签，重新取回才能读到标签里的更新说明。
+      - name: 取回标签
+        run: git fetch --force --tags origin
+
+      - name: 版本号
+        run: |
+          Scripts/release/version.sh "$TAG" | tee -a "$GITHUB_ENV"
+
+      - name: 选择 Xcode
+        run: |
+          xcode="${{ vars.XCODE_PATH }}"
+          if [ -z "$xcode" ]; then
+            xcode=$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)
+          fi
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+
+      - name: 导入签名证书
+        env:
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+        run: Scripts/release/import-certificate.sh
+
+      - name: 构建、签名、公证
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+          UPDATE_FEED_URL: ${{ vars.DOWNLOAD_BASE_URL }}/appcast.xml
+          SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
+        run: Scripts/release/build.sh "$TAG"
+
+      - name: 更新说明
+        run: Scripts/release/notes.sh "$TAG" > "$RUNNER_TEMP/notes.md" && cat "$RUNNER_TEMP/notes.md"
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dmg="build/release/Caplo-$VERSION.dmg"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$dmg" --clobber
+          else
+            flags=()
+            [ "$PRERELEASE" = true ] && flags+=(--prerelease)
+            gh release create "$TAG" "$dmg" --verify-tag --title "Caplo $VERSION" --notes-file "$RUNNER_TEMP/notes.md" "${flags[@]}"
+          fi
+
+      - name: 上传 Cloudflare R2
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
+          DOWNLOAD_BASE_URL: ${{ vars.DOWNLOAD_BASE_URL }}
+          SITE_URL: ${{ vars.SITE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: Scripts/release/publish.sh "$TAG"
+
+      - name: 清理钥匙串与密钥
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/release.keychain-db" 2> /dev/null || true
+          rm -f "$RUNNER_TEMP/notary.p8"

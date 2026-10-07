@@ -69,7 +69,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .newRecording: "新建录制"; case .openProject: "打开工程…"; case .projectLibrary: "项目中心"; case .settings: "设置"
+        case .newRecording: "新建录制"; case .openProject: "打开工程"; case .projectLibrary: "项目中心"; case .settings: "设置"
         case .recordDisplay: "全屏"; case .recordRegion: "自定义区域"; case .recordWindow: "窗口"
         case .librarySearch: "搜索"; case .librarySelectAll: "全选"
         case .playPause: "播放 / 暂停"; case .split: "分割"; case .undo: "撤销"; case .redo: "重做"

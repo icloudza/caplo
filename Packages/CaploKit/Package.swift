@@ -9,6 +9,10 @@ let package = Package(
         .library(name: "Features", targets: ["Features"]),
         .executable(name: "PreviewGallery", targets: ["PreviewGallery"])
     ],
+    dependencies: [
+        // 在线更新：下载、EdDSA 校验、替换应用与重启交给 Sparkle；界面由 Features 自绘（SPUUserDriver）。
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.10.0")
+    ],
     targets: [
         .target(name: "PlatformSupport"),
         .target(name: "CaploDesignSystem", dependencies: ["PlatformSupport"], resources: [.process("Resources")]),
@@ -19,7 +23,8 @@ let package = Package(
         .target(name: "CRNNoise", exclude: ["COPYING"]),
         .target(name: "ExportKit", dependencies: ["ProjectKit", "RenderKit", "EditingCore", "CRNNoise"]),
         .target(name: "RenderKit", dependencies: ["EditingCore"], resources: [.process("Resources")]),
-        .target(name: "Features", dependencies: ["CaploDesignSystem", "EditingCore", "RenderKit", "CaptureKit", "ProjectKit", "ExportKit"]),
+        .target(name: "Features", dependencies: ["CaploDesignSystem", "EditingCore", "RenderKit", "CaptureKit", "ProjectKit", "ExportKit",
+                                                .product(name: "Sparkle", package: "Sparkle")]),
         .executableTarget(name: "PreviewGallery", dependencies: ["Features", "ProjectKit", "EditingCore", "ExportKit", "CaploDesignSystem"]),
         .testTarget(name: "FeaturesTests", dependencies: ["Features", "ProjectKit", "EditingCore", "CaploDesignSystem", "ExportKit", "RenderKit"]),
         .testTarget(name: "EditingCoreTests", dependencies: ["EditingCore"]),
