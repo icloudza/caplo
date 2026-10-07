@@ -81,15 +81,3 @@ ReleaseNotes/             各版本更新说明
 ```
 
 修改 `Shaders/CaploKernels.metal` 后执行 `zsh Scripts/build-kernels.sh` 重新生成 `CaploKernels.metallib`；`LiquidGlass.swift` 中的 CIKL 兜底实现需同步修改。
-
-## 第三方代码
-
-| 组件 | 许可证 | 用途 |
-| --- | --- | --- |
-| [RNNoise](https://github.com/xiph/rnnoise) | BSD-3-Clause | 语音降噪 |
-| [Sparkle](https://sparkle-project.org) | MIT | 在线更新 |
-| Recordly | AGPL-3.0 | 指针运动曲线移植（`EditingCore/PointerMotion.swift`）、系统风格光标素材 |
-| Capptivo | MIT | 系统风格光标素材 |
-| OpenScreen | MIT | Recordly 上游，随其许可证保留 |
-
-许可证原文位于 `Sources/CRNNoise/COPYING` 与 `Sources/RenderKit/Resources/Licenses/`。因包含 AGPL-3.0 代码，分发本软件需遵守 AGPL-3.0 的源码公开与署名要求。
