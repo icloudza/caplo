@@ -28,8 +28,7 @@ enum PointerRenderer {
             CGPoint(x: sourceBounds.minX + sourceBounds.width * position.x, y: sourceBounds.minY + sourceBounds.height * (1 - position.y)).applying(transform)
         }
         var result = screen
-        let tint: (Double, Double, Double)
-        switch effects.tint { case .violet: tint = (0.45, 0.3, 1); case .blue: tint = (0.1, 0.65, 1); case .yellow: tint = (1, 0.75, 0.1) }
+        let tint = effects.tintRGB
         for click in frame.clicks {
             let center = point(click.position), radius = (9 + 22 * click.progress) * unit * effects.clickScale
             let alpha = (1 - click.progress) * (1 - click.progress)

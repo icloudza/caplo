@@ -116,12 +116,14 @@ else
 fi
 
 echo "▶ 制作 DMG"
-stage=$out/dmg
-mkdir -p "$stage"
-ditto "$app" "$stage/Caplo.app"
-ln -s /Applications "$stage/Applications"
-hdiutil create -volname "Caplo" -srcfolder "$stage" -fs HFS+ -format UDZO -imagekey zlib-level=9 -ov "$dmg" > /dev/null
-rm -rf "$stage"
+# dmgbuild 直接写窗口布局（背景、图标位置、卷图标），不用操控访达，CI 上也稳定。装在临时虚拟环境里，不污染系统 Python。
+venv="${out}/dmgbuild-venv"
+python3 -m venv "${venv}"
+"${venv}/bin/pip" install --quiet --disable-pip-version-check "dmgbuild==1.6.7"
+"${venv}/bin/dmgbuild" -s Scripts/release/dmg/dmg-settings.py -D app="${app}" \
+    -D background="${PWD}/Scripts/release/dmg/background.tiff" "Caplo" "${dmg}" > "${out}/dmgbuild.log" 2>&1 \
+    || { cat "${out}/dmgbuild.log" >&2; exit 1; }
+rm -rf "${venv}"
 codesign --force --timestamp --sign "$identity" "$dmg"
 
 if $notarizing; then

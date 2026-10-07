@@ -12,6 +12,8 @@ public struct PointerEffects: Codable, Equatable, Sendable {
     public var clicksVisible: Bool = true
     public var clickScale: Double = 1.0
     public var tint: Tint = .violet
+    /// 用户自定义的点击高亮颜色（`#RRGGBB`）；有值时覆盖 `tint` 的预设色。单独存一个键，旧版本读到时退回预设色。
+    public var customTint: String?
     public var style: Style = .original
     public var smoothing: Double = 0.0
     public var bounce: Double = 0.0
@@ -36,7 +38,7 @@ public struct PointerEffects: Codable, Equatable, Sendable {
     }
     /// `cursorVisible` 存在新键 `showsCursor` 下：旧键 `cursorVisible` 是 2026-09-08 去掉的"显示光标"开关留下的，
     /// 那之前存过的 false 早已作废（去掉开关时统一恢复显示），不能因为开关回来又把老工程的光标藏起来。
-    private enum CodingKeys: String, CodingKey { case cursorVisible = "showsCursor", cursorScale, clicksVisible, clickScale, tint, style, smoothing, bounce, bounceSpeed, sway, motionBlur, hideIdle, loop, clickEffect, angle, directionFollow, cursorStyle }
+    private enum CodingKeys: String, CodingKey { case cursorVisible = "showsCursor", cursorScale, clicksVisible, clickScale, tint, customTint, style, smoothing, bounce, bounceSpeed, sway, motionBlur, hideIdle, loop, clickEffect, angle, directionFollow, cursorStyle }
     /// 缺失字段使用旧效果默认值，已有工程不会因升级突然改变外观。
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -47,6 +49,7 @@ public struct PointerEffects: Codable, Equatable, Sendable {
         clicksVisible = try c.decodeIfPresent(Bool.self, forKey: .clicksVisible) ?? true
         clickScale = try c.decodeIfPresent(Double.self, forKey: .clickScale) ?? 1.0
         tint = try c.decodeIfPresent(Tint.self, forKey: .tint) ?? .violet
+        customTint = try c.decodeIfPresent(String.self, forKey: .customTint)
         // 已删除的素材主题回退为现代主题；旧 assetOverride 字段由解码器忽略。
         if try c.decodeIfPresent(String.self, forKey: .style) == "recordly" { style = .tahoe }
         else { style = try c.decodeIfPresent(Style.self, forKey: .style) ?? .original }
@@ -62,7 +65,21 @@ public struct PointerEffects: Codable, Equatable, Sendable {
         directionFollow = try c.decodeIfPresent(Double.self, forKey: .directionFollow) ?? 0
         cursorStyle = try c.decodeIfPresent(String.self, forKey: .cursorStyle)
     }
+    /// 点击高亮实际使用的 sRGB 颜色（0…1）：自定义色优先，认不出的自定义值退回预设色。
+    public var tintRGB: (red: Double, green: Double, blue: Double) {
+        if let customTint, case let palette = TextSegment.Palette(rawValue: customTint), palette.isCustom {
+            let rgb = palette.rgb
+            return (rgb.0, rgb.1, rgb.2)
+        }
+        switch tint {
+        case .violet: return (0.45, 0.3, 1)
+        case .blue: return (0.1, 0.65, 1)
+        case .yellow: return (1, 0.75, 0.1)
+        }
+    }
+
     public var isValid: Bool {
+        (customTint.map { TextSegment.Palette(rawValue: $0).isCustom } ?? true) &&
         cursorScale.isFinite && (PointerEffects.minimumCursorScale...3).contains(cursorScale) && clickScale.isFinite && (0.5...2).contains(clickScale)
         && smoothing.isFinite && (0...2).contains(smoothing) && bounce.isFinite && (0...0.4).contains(bounce)
         && bounceSpeed.isFinite && (0.5...2).contains(bounceSpeed) && sway.isFinite && (0...1).contains(sway)

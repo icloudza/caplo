@@ -180,7 +180,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.1;
+				MARKETING_VERSION = 0.1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(CAPLO_APP_IDENTIFIER)";
 				PRODUCT_NAME = "$(CAPLO_APP_NAME)";
 				SDKROOT = macosx;
@@ -207,7 +207,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.1;
+				MARKETING_VERSION = 0.1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(CAPLO_APP_IDENTIFIER)";
 				PRODUCT_NAME = "$(CAPLO_APP_NAME)";
 				SDKROOT = macosx;

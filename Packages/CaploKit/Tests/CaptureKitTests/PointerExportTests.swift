@@ -67,6 +67,20 @@ import RenderKit
     }
     #expect(affected > 500)
     #expect(Double(matched) / Double(max(1, affected)) > 0.85)
+    if mode == 0 {
+        // 自定义点击颜色：存盘读回不丢，且画面真的换成了自定义色（绿），不是仍按预设黄色画。
+        var custom = edit; custom.pointer?.customTint = "#00FF00"
+        try EditStorage.save(custom, in: url, document: document)
+        #expect(try EditStorage.load(in: url, document: document).pointer?.customTint == "#00FF00")
+        let green = pixels(try await renderer.render(url: url, document: document, edit: custom, time: 0.3))
+        var greener = 0
+        for index in stride(from: 0, to: expected.count, by: 4)
+            where (0..<3).map({ abs(Int(expected[index + $0]) - Int(base[index + $0])) }).max()! > 45 {
+            // 黄色点击环红分量高；换成绿色后同一位置红分量应明显下降、绿分量占优。
+            if Int(green[index]) + 40 < Int(expected[index]), green[index + 1] > green[index] { greener += 1 }
+        }
+        #expect(greener > 100, "自定义点击颜色没有生效")
+    }
     let item = try await ProjectMedia.playerItem(url: url, document: document, levels: edit.audio, edit: edit)
     let first = try #require(item.videoComposition?.instructions.first as? SceneInstruction)
     #expect(first.pointerFrame(at: 0.3).position != nil && first.pointerFrame(at: 0.3).clicks.count == 1)

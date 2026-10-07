@@ -2,6 +2,8 @@
 
 macOS 原生录屏与视频编辑工具。录完即进入编辑器，自动镜头、光标美化、画布与字幕处理后导出成片。
 
+[官网](https://caplo.app) · [下载最新版](https://download.caplo.app/Caplo.dmg) · [版本发布](https://github.com/icloudza/caplo/releases) · 需要 macOS 15 及以上，支持 Apple 芯片与 Intel
+
 ## 功能
 
 - **录制**：全屏、自定义区域、单个窗口；同时采集摄像头、麦克风与系统声音，录制浮层不进画面。

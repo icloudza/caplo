@@ -4,7 +4,7 @@
 
 1. 按标签换算版本号与构建号（`version.sh`）
 2. 归档、以 Developer ID 导出、重签 Sparkle 组件（`build.sh`）
-3. 公证并装订应用，打包 DMG，再公证并装订 DMG
+3. 公证并装订应用，用 dmgbuild 打包 DMG（背景、图标布局与卷图标见 `dmg/`），再公证并装订 DMG
 4. 创建 GitHub Release，附上 DMG 与更新说明（`notes.sh`）
 5. 签名安装包，生成并签名 `appcast.xml` 与 `latest.json`，上传到 Cloudflare R2（`publish.sh`）
 

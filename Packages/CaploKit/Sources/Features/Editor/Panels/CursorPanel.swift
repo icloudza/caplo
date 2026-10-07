@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import CaploDesignSystem
 import EditingCore
@@ -85,13 +86,12 @@ struct CursorPanel: View {
                 }.environment(\.colorScheme, .dark)
                 EditorSlider(model: model, title: "高亮大小", value: value(\.clickScale), range: 0.5...2, suffix: "×", defaultValue: 1, detents: [1])
                     .disabled(model.edit.pointer?.clicksVisible != true)
-                ChipGroup([PointerEffects.Tint.violet, .blue, .yellow], selection: Binding(get: { model.edit.pointer?.tint ?? .violet }, set: { tint in
+                ClickTintRow(effects: model.edit.pointer ?? PointerEffects()) { tint, custom in
                     model.commit { edit in
                         if edit.pointer == nil { edit.pointer = PointerEffects() }
                         edit.pointer?.tint = tint
+                        edit.pointer?.customTint = custom
                     }
-                })) { tint in
-                    switch tint { case .violet: "紫色"; case .blue: "蓝色"; case .yellow: "黄色" }
                 }
                 .disabled(model.edit.pointer?.clicksVisible != true)
             }
@@ -239,5 +239,73 @@ private struct CursorStyleTile: View {
         .hoverTip(theme.title)
         .accessibilityLabel(theme.title)
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// 点击高亮颜色：三个预设色块加一个自定义格，自定义格点开系统调色板（色轮 / 色卡 / 吸管）。
+/// 与文字层的颜色行同一套外观；没在用自定义色时自定义格盖一层色轮，一眼看出是"自己调"。
+private struct ClickTintRow: View {
+    let effects: PointerEffects
+    let apply: (PointerEffects.Tint, String?) -> Void
+    /// 上次调过的自定义色：切到预设再切回来，不用重新调。
+    @State private var remembered = Color(red: 1, green: 0.42, blue: 0.42)
+
+    private static let presets: [(PointerEffects.Tint, String)] = [(.violet, "紫色"), (.blue, "蓝色"), (.yellow, "黄色")]
+    private var isCustom: Bool { effects.customTint != nil }
+
+    var body: some View {
+        HStack(spacing: CaploMetrics.Spacing.xs) {
+            Text("颜色").font(CaploFont.body).foregroundStyle(CaploColor.textPrimary)
+            Spacer()
+            ForEach(Self.presets, id: \.0) { tint, name in
+                Button { apply(tint, nil) } label: {
+                    Self.color(for: tint)
+                        .frame(width: 22, height: 22)
+                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .overlay(ring(selected: !isCustom && effects.tint == tint))
+                }
+                .buttonStyle(.plain)
+                .help(name)
+                .accessibilityLabel(name)
+            }
+            ColorPicker(selection: custom, supportsOpacity: false) { EmptyView() }
+                .labelsHidden()
+                .frame(width: 22, height: 22)
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .overlay {
+                    if !isCustom {
+                        AngularGradient(colors: [.red, .yellow, .green, .cyan, .blue, .purple, .red], center: .center)
+                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                            .allowsHitTesting(false)
+                    }
+                }
+                .overlay(ring(selected: isCustom).allowsHitTesting(false))
+                .help("自定义颜色")
+                .accessibilityLabel("自定义颜色")
+        }
+    }
+
+    private var custom: Binding<Color> {
+        Binding(get: {
+            guard isCustom else { return remembered }
+            let rgb = effects.tintRGB
+            return Color(red: rgb.red, green: rgb.green, blue: rgb.blue)
+        }, set: { value in
+            remembered = value
+            let rgb = NSColor(value).usingColorSpace(.sRGB) ?? .white
+            apply(effects.tint, TextSegment.Palette(red: rgb.redComponent, green: rgb.greenComponent, blue: rgb.blueComponent).rawValue)
+        })
+    }
+
+    private func ring(selected: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .strokeBorder(selected ? CaploColor.accent : CaploColor.separator, lineWidth: selected ? 2 : 1)
+    }
+
+    private static func color(for tint: PointerEffects.Tint) -> Color {
+        var preset = PointerEffects()
+        preset.tint = tint
+        let rgb = preset.tintRGB
+        return Color(red: rgb.red, green: rgb.green, blue: rgb.blue)
     }
 }
