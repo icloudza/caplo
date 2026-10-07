@@ -4,6 +4,8 @@ macOS 原生录屏与视频编辑工具。录完即进入编辑器，自动镜�
 
 [官网](https://caplo.app) · [下载最新版](https://download.caplo.app/Caplo.dmg) · [版本发布](https://github.com/icloudza/caplo/releases) · 需要 macOS 15 及以上，支持 Apple 芯片与 Intel
 
+个人与非营利用途免费，禁止商用，详见[许可证](#许可证)。
+
 ## 功能
 
 - **录制**：全屏、自定义区域、单个窗口；同时采集摄像头、麦克风与系统声音，录制浮层不进画面。
@@ -83,3 +85,14 @@ ReleaseNotes/             各版本更新说明
 ```
 
 修改 `Shaders/CaploKernels.metal` 后执行 `zsh Scripts/build-kernels.sh` 重新生成 `CaploKernels.metallib`；`LiquidGlass.swift` 中的 CIKL 兜底实现需同步修改。
+
+## 许可证
+
+源码与官网发布的安装包均以 [PolyForm Noncommercial 1.0.0](LICENSE) 授权：允许个人学习、研究、爱好项目以及非营利机构使用、修改和分发；**禁止任何商业用途**，包括在公司或营利性工作中使用、出售，或作为商业产品与服务的一部分。商业授权请联系 cloudza@vip.qq.com。
+
+第三方组件保留各自的许可证：
+
+- [Sparkle](https://github.com/sparkle-project/Sparkle)：MIT，应用内更新，SwiftPM 依赖
+- [RNNoise](https://github.com/xiph/rnnoise)：BSD-3-Clause，见 `Packages/CaploKit/Sources/CRNNoise/COPYING`
+- [OpenScreen](https://github.com/getopenscreen/openscreen)：MIT，见 `Packages/CaploKit/Sources/RenderKit/Resources/Licenses/OpenScreen.txt`
+- [Capptivo](https://github.com/SECHAK-AG/capptivo) 光标素材：MIT，见 `Packages/CaploKit/Sources/RenderKit/Resources/Licenses/Capptivo.txt`
