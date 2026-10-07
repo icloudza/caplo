@@ -14,3 +14,10 @@ Docs/
 AGENTS.md
 .spec-workflow/
 .vscode/
+
+# 本机 AI 助手 / 编辑器的工作区配置，不入库
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.cursor/
+.idea/
