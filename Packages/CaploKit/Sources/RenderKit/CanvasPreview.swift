@@ -35,7 +35,7 @@ public struct CanvasPreview: View {
                         radius: layout.shadowBlur * proxy.size.width / 960 * 1.3, y: layout.shadowOffset * proxy.size.width / 960)
             }
         }
-        .aspectRatio(layout.ratio.value, contentMode: .fit)
+        .aspectRatio(layout.aspect, contentMode: .fit)
         .clipped()
         .accessibilityLabel(image == nil ? "演示画布，尚未载入素材" : "已导入的图片预览")
     }

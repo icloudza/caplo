@@ -7,7 +7,7 @@ import EditingCore
 import ExportKit
 
 extension WindowLifecycleTests {
-    /// 真正导出含前导空白、重叠覆盖、末帧保持和独立声音的工程，逐点比对静帧。
+    /// 真正导出含前导空白、重叠覆盖、末帧保持和独立声音的工程，逐点比对静帧；声音默认跟随画面，分离后才独立。
     @Test func layeredExportMatchesPreviewAcrossGapsOverlapAndHold() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -16,6 +16,17 @@ extension WindowLifecycleTests {
         var edit = VideoEdit(duration: 4)
         edit.prepareLayerEditing(camera: false, system: false, microphone: true)
         let first = edit.clips[0].id
+        // 默认声音跟随画面：不拆出单独的麦克风轨，画面挪到 1 秒处，声音跟着从 1 秒响到素材末尾（末帧保持区没有声音）。
+        #expect(edit.microphoneClips == nil, "声音默认被拆成了单独的轨")
+        var linked = edit
+        linked.dragMedia(.screen, id: first, edge: .body, delta: 1, sourceDuration: 4)
+        linked.dragMedia(.screen, id: first, edge: .trailing, delta: 2, sourceDuration: 4)
+        #expect(linked.microphoneClips == nil, "拖画面把声音拆了出来")
+        let (followed, _) = try await ProjectMedia.compose(url: url, document: document, levels: linked.audio, edit: linked)
+        let followedRanges = try #require(followed.tracks(withMediaType: .audio).first).segments.filter { !$0.isEmpty }.map { $0.timeMapping.target }
+        #expect(followedRanges.first?.start.seconds == 1 && followedRanges.last?.end.seconds == 5, "声音没有跟着画面走")
+        // 分离声音之后才是独立的一份，可以单独拖动。
+        edit.detachAudio()
         edit.dragMedia(.screen, id: first, edge: .body, delta: 1, sourceDuration: 4)
         edit.dragMedia(.screen, id: first, edge: .trailing, delta: 2, sourceDuration: 4)
         var top = VideoClip(sourceStart: 2, duration: 1); top.timelineStart = 1.5

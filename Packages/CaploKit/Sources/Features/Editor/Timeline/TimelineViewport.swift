@@ -165,6 +165,8 @@ final class TimelineViewportView: NSView {
             if role == .camera, !model.entry.document.segments.contains(where: { $0.files[.camera] != nil }) { continue }
             if role == .system, !model.audioTracks.contains(.system) { continue }
             if role == .microphone, !model.audioTracks.contains(.microphone) { continue }
+            // 跟随画面的声音没有自己的块：它就在录制画面块里（波形画在块的下半截）。
+            if edit.audioFollowsPicture(role) { continue }
             let clips = edit.mediaClips(role), timing = TimelineIndex(clips: clips)
             for (number, clip) in clips.enumerated() {
                 let hold = clip.holdSource != nil
@@ -223,7 +225,10 @@ final class TimelineViewportView: NSView {
             rows.insert(captionBlocks, at: insertion)
             blocks += captionBlocks
         }
-        rowByBlock.removeAll(); audioRows.removeAll()
+        rowByBlock.removeAll(); audioRows.removeAll(); nextStart.removeAll()
+        for row in rows where row.count > 1 {
+            for (current, next) in zip(row, row.dropFirst()) where next.start >= current.start { nextStart[current.id] = next.start }
+        }
         for (number, row) in rows.enumerated() {
             for block in row {
                 rowByBlock[block.id] = number
@@ -613,8 +618,11 @@ final class TimelineViewportView: NSView {
     }
     private func blockRect(_ block: Block, row: Int) -> CGRect {
         TimelineInteractionGeometry.blockRect(start: block.start, duration: block.duration, scale: scale, offset: offset,
-            header: timeOrigin, y: rowY(row) + Self.blockInset, height: rowHeight - 2 * Self.blockInset)
+            header: timeOrigin, y: rowY(row) + Self.blockInset, height: rowHeight - 2 * Self.blockInset,
+            limit: nextStart[block.id] ?? .infinity)
     }
+    /// 同一行里紧跟在后面那一块的起点：短块的最小外观宽度不越过它。
+    private var nextStart: [UUID: Double] = [:]
     private func color(for block: Block) -> NSColor {
         if block.caption { return CaploNSColor.caption }
         // 卡片是插进画面轨的一段文字画面，按文字层的颜色画，一眼看得出它不是录下来的画面。
@@ -1039,16 +1047,22 @@ final class TimelineViewportView: NSView {
         // 块从视口左边外开始时名字也看得见；块比名字窄就截断。以前标题固定在整块正中，
         // 长块的名字跑到几十秒之外，看不到是哪一块。
         var drewWaveform = false
-        if block.role == .system || block.role == .microphone,
-           let role = block.role, let clip = edit.mediaClips(role).first(where: { $0.id == block.id }) {
-            let samples = role == .system ? analysis.system : analysis.microphone
+        // 波形：声音块画自己那条声音；声音跟随画面时（默认）没有声音行，录制画面块的下半截画它带着的声音
+        // （系统声音与麦克风取较响的那一个），剪辑时照样看得出哪里有人说话。
+        let followRoles: [TimelineMedia] = block.role == .screen && !block.card && !block.hold
+            ? [TimelineMedia.system, .microphone].filter { edit.audioFollowsPicture($0) && model.audioTracks.contains($0 == .system ? .system : .microphone) } : []
+        let waveRoles: [TimelineMedia] = block.role == .system || block.role == .microphone ? [block.role!] : followRoles
+        let embedded = block.role == .screen
+        if !waveRoles.isEmpty, let clip = edit.mediaClips(waveRoles[0]).first(where: { $0.id == block.id }) ?? edit.clips.first(where: { $0.id == block.id }) {
+            let samples = waveRoles.contains(.system) && !analysis.system.isEmpty ? analysis.system : analysis.microphone
             if !samples.isEmpty {
                 // 上下对称的填充包络，以整块的垂直中线为轴（标题叠在上面，带一层阴影保证读得清）。
                 // 以前画在标题带下面那一截里，标题带没有底色，看上去整条波形偏下（2026-10-06 用户指出）。
                 // 每 1 点取这一点覆盖时间段的峰值（金字塔查询，缩得再小也不漏短促的声音）。
                 // 幅度按分贝映射（-48 dBFS 以下为 0、0 dBFS 满格）：按线性幅度画的话，-18 dBFS 的讲话只有一两点高，
                 // 整条看起来像一串点线。
-                let top = rect.minY + 3, bottom = rect.maxY - 3
+                // 画面块里只占标题下面那一截，不压标题。
+                let top = embedded ? rect.minY + 16 : rect.minY + 3, bottom = rect.maxY - 3
                 let center = (top + bottom) / 2, half = max(1, (bottom - top) / 2)
                 let left = max(timeOrigin, rect.minX + 2), right = min(bounds.width, rect.maxX - 2)
                 var upper: [CGPoint] = []
@@ -1057,7 +1071,7 @@ final class TimelineViewportView: NSView {
                     var level = 0.0
                     if finish > 0, begin < clip.playableDuration {
                         let start = clip.sourceStart + max(0, begin), end = clip.sourceStart + min(clip.playableDuration, finish)
-                        let peak = role == .system ? analysis.systemPeak(from: start, to: end) : analysis.microphonePeak(from: start, to: end)
+                        let peak = waveRoles.map { $0 == .system ? analysis.systemPeak(from: start, to: end) : analysis.microphonePeak(from: start, to: end) }.max() ?? 0
                         level = Self.waveformLevel(peak)
                     }
                     upper.append(CGPoint(x: pixel, y: center - level * half))
@@ -1068,9 +1082,10 @@ final class TimelineViewportView: NSView {
                     for point in upper { envelope.line(to: point) }
                     for point in upper.reversed() { envelope.line(to: CGPoint(x: point.x, y: 2 * center - point.y)) }
                     envelope.close()
-                    color.withAlphaComponent(0.8).setFill(); envelope.fill()
+                    let tint = embedded ? CaploNSColor.audio : color
+                    tint.withAlphaComponent(embedded ? 0.55 : 0.8).setFill(); envelope.fill()
                     // 中线：静音处也看得出这是一条声音。
-                    color.withAlphaComponent(0.45).setFill()
+                    tint.withAlphaComponent(embedded ? 0.3 : 0.45).setFill()
                     CGRect(x: upper[0].x, y: center - 0.25, width: upper[upper.count - 1].x - upper[0].x, height: 0.5).fill()
                     drewWaveform = true
                 }
@@ -1101,10 +1116,12 @@ final class TimelineViewportView: NSView {
         if isSelected(block) {
             // 选中描边画在块内部：外扩的描边在块贴着轨道左缘时会被裁掉一截。
             accent.setStroke(); let border = NSBezierPath(roundedRect: rect.insetBy(dx: 0.75, dy: 0.75), xRadius: 4.5, yRadius: 4.5); border.lineWidth = 1.5; border.stroke()
-            // 两端把手：2 点宽的小胶囊，圆角与块本身呼应。
+            // 两端把手：2 点宽、12 点高的小胶囊，在块里垂直居中，圆角与块本身呼应。
+            // 原来几乎撑满块高（36 点的块里 22 点），显得粗重（2026-10-07 用户指出）。
             accent.setFill()
+            let handle = min(12, max(4, rect.height - 14))
             for point in [rect.minX + 3, rect.maxX - 5] {
-                NSBezierPath(roundedRect: CGRect(x: point, y: rect.minY + 7, width: 2, height: rect.height - 14), xRadius: 1, yRadius: 1).fill()
+                NSBezierPath(roundedRect: CGRect(x: point, y: rect.midY - handle / 2, width: 2, height: handle), xRadius: 1, yRadius: 1).fill()
             }
         }
     }
@@ -1257,6 +1274,16 @@ final class TimelineViewportView: NSView {
                 menu.addItem(item)
             }
         }
+        // 声音默认跟着画面走；要单独剪声音时在录制画面上"分离声音"，分离之后在声音块上可以"声音跟随画面"收回来。
+        let follows = [TimelineMedia.system, .microphone].contains { edit.audioFollowsPicture($0) && model.audioTracks.contains($0 == .system ? .system : .microphone) }
+        if block.role == .screen, !block.card, follows {
+            menu.addItem(.separator())
+            let item = NSMenuItem(title: "分离声音", action: #selector(detachAudio(_:)), keyEquivalent: "")
+            item.target = self; menu.addItem(item)
+        } else if let role = block.role, role == .system || role == .microphone {
+            let item = NSMenuItem(title: "声音跟随画面", action: #selector(attachAudio(_:)), keyEquivalent: "")
+            item.target = self; menu.addItem(item)
+        }
         if siblings.count > 1 {
             menu.addItem(.separator())
             menu.addItem(rowMembersItem(siblings))
@@ -1317,6 +1344,8 @@ final class TimelineViewportView: NSView {
     func renameBlock(_ id: UUID, to title: String) { model.renameBlock(id, to: title) }
     @objc private func splitBlockAtPlayhead(_ sender: Any?) { model.split() }
     @objc private func deleteBlock(_ sender: Any?) { model.deleteSelection() }
+    @objc private func detachAudio(_ sender: Any?) { model.detachAudio() }
+    @objc private func attachAudio(_ sender: Any?) { model.attachAudio() }
     @objc private func duplicateBlock(_ sender: Any?) { model.duplicateSelection() }
     @objc private func toggleRowAudio(_ sender: NSMenuItem) {
         guard let name = sender.identifier?.rawValue else { return }

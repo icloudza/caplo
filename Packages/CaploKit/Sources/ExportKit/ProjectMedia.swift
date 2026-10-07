@@ -210,7 +210,7 @@ public enum ProjectMedia {
             let rate = item.videoComposition.map { 1 / $0.frameDuration.seconds } ?? 30
             item.videoComposition = try videoComposition(composition: composition, edit: edit, shortEdge: 1080, pointers: existing?.pointers ?? PointerTimeline(events: []), backgroundImage: background, frameRate: rate.isFinite && rate > 0 ? rate : 30, reusing: existing)
         }
-        if previous.audio != edit.audio {
+        if previous.audio != edit.audio || previous.gainSignature != edit.gainSignature {
             let mix = AVMutableAudioMix()
             mix.inputParameters = [MediaRole.systemAudio, .microphone].flatMap { role -> [AVMutableAudioMixInputParameters] in
                 let tracks = composition.tracks.filter { $0.mediaType == .audio && ($0.trackID == trackID(for: role) || ($0.trackID >= 100_002 && $0.trackID % 2 == (role == .systemAudio ? 0 : 1))) }.sorted { $0.trackID < $1.trackID }
@@ -312,7 +312,7 @@ public enum ProjectMedia {
         let cameras = edit.camera?.enabled == true ? routes.filter { $0.trackID >= 4 && $0.trackID % 2 == 0 } : []
         video.instructions = [SceneInstruction(trackID: track.trackID, edit: edit, screenRoutes: screens, cameraRoutes: cameras, pointers: pointers, backgroundImage: backgroundImage, reusing: previous)]
         // 短边按所选分辨率（720 / 1080 / 1440 / 2160），长边按比例伸展：方形以此为边长，横竖屏得到标准尺寸。
-        let size = edit.layout.ratio.outputSize(shortEdge: shortEdge)
+        let size = edit.layout.outputSize(shortEdge: shortEdge)
         video.renderSize = CGSize(width: size.width, height: size.height)
         // 输出帧率与录制帧率一致（旧工程 30）；60 fps 素材不再被折半。
         // 下限 5 而不是 24：GIF 按 10 / 15 帧出图，钳到 24 会白白多出六成的帧（体积跟着涨）。视频帧率由调用方保证 ≥ 24。

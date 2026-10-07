@@ -17,6 +17,7 @@ private func recording(_ duration: Double) -> VideoEdit {
     let inserted = edit.insertCard(at: 4, duration: 3)
     let id = try #require(inserted)
     try edit.validate(sourceDuration: 10)
+    #expect(edit.systemClips == nil && edit.microphoneClips == nil, "插卡片把跟随画面的声音拆成了单独的轨")
     #expect(abs(edit.duration - 13) < 0.001, "成片是 \(edit.duration) 秒")
     let card = try #require(edit.clips.first { $0.id == id })
     #expect(card.timelineStart == 4 && abs(card.duration - 3) < 0.001)
@@ -52,6 +53,19 @@ private func recording(_ duration: Double) -> VideoEdit {
     // 插入时切开的口子合回去了：画面与声音都还是一整块。
     #expect(edit.clips.count == 1 && abs(edit.clips[0].duration - 10) < 0.001)
     #expect(edit.mediaClips(.system).count == 1 && edit.mediaClips(.microphone).count == 1)
+
+    // 旧工程：声音轨与画面一一对得上（从没单独剪过）→ 打开时收回成跟随画面，单块音量挪到画面片段上；
+    // 用户分离过的再打开仍是独立的；收回时音量回到画面片段。
+    var legacy = recording(10)
+    legacy.detachAudio(); legacy.audioDetached = nil
+    legacy.systemClips?[0].systemGain = 0.5
+    legacy.prepareLayerEditing(camera: false, system: true, microphone: true)
+    #expect(legacy.systemClips == nil && legacy.microphoneClips == nil && legacy.clips[0].systemGain == 0.5, "没剪过的旧声音轨没有收回成跟随画面")
+    legacy.detachAudio()
+    legacy.prepareLayerEditing(camera: false, system: true, microphone: true)
+    #expect(legacy.systemClips != nil, "分离过的声音再打开又被收回了")
+    legacy.attachAudio()
+    #expect(legacy.systemClips == nil && legacy.clips[0].systemGain == 0.5)
 }
 
 /// 旧版"全屏卡段"（定格片段 + 绑着它的全屏文字 + 人像定格）读取时换成卡片，成片长度与文字都不变。

@@ -29,7 +29,7 @@ struct ExportSheet: View {
 
     private var recordedFrameRate: Double { model.entry.document.frameRate }
     private var ratio: CanvasRatio { model.edit.layout.ratio }
-    private var size: (width: Int, height: Int) { settings.outputSize(ratio: ratio) }
+    private var size: (width: Int, height: Int) { settings.outputSize(layout: model.edit.layout) }
     private var frameRate: Double { settings.outputFrameRate(recorded: recordedFrameRate) }
 
     var body: some View {
@@ -203,7 +203,7 @@ struct ExportSheet: View {
     }
 
     private var sizeLine: String {
-        guard let bytes = settings.estimatedBytes(ratio: ratio, recordedFrameRate: recordedFrameRate, duration: model.edit.duration) else {
+        guard let bytes = settings.estimatedBytes(layout: model.edit.layout, recordedFrameRate: recordedFrameRate, duration: model.edit.duration) else {
             return "GIF 的体积随画面变化，动得越多越大；较长的演示建议导出 MP4。"
         }
         return "预计约 " + ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)

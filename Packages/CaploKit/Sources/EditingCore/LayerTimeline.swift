@@ -8,6 +8,72 @@ extension VideoEdit {
         // 旧工程的声音轨没有独立列表时跟着画面片段走；卡片没有声音，不能被当成一段声音带过去。
         switch role { case .screen: orderedScreenClips; case .camera: orderedCameraClips; case .system: systemClips ?? mediaOnlyClips; case .microphone: microphoneClips ?? mediaOnlyClips }
     }
+    /// 这条轨有没有自己单独的一份片段。声音轨默认没有（nil）：跟着画面片段走，切开、拖边、删除、插卡片都自动一致，
+    /// 播放与导出按画面片段的可见段取声音（`resolvedMedia`）。只有用户"分离声音"之后才有自己的一份。
+    /// 逐轨处理片段的地方（切开、平移、合并）一律先问它：对跟随画面的轨调 `setMediaClips` 会把它悄悄拆出来。
+    public func ownsTrack(_ role: TimelineMedia) -> Bool {
+        switch role { case .screen: true; case .camera: cameraClips != nil; case .system: systemClips != nil; case .microphone: microphoneClips != nil }
+    }
+    public func audioFollowsPicture(_ role: TimelineMedia) -> Bool { (role == .system || role == .microphone) && !ownsTrack(role) }
+
+    /// 分离声音：声音轨各复制一份画面片段（新 ID，带着各块音量），之后可以单独拖动、剪辑。
+    public mutating func detachAudio() {
+        materializeLayers()
+        var added: [UUID] = []
+        for role in [TimelineMedia.system, .microphone] where !ownsTrack(role) {
+            let copies = mediaOnlyClips.map { clip -> VideoClip in
+                var copy = clip; copy.id = UUID(); copy.title = nil; copy.cursorHidden = false; return copy
+            }
+            added += copies.map(\.id)
+            setMediaClips(role, copies)
+        }
+        // 层序：声音放在最底下，与新工程的默认行序一致。
+        if !added.isEmpty, var order = layerOrder { order.removeAll { added.contains($0) }; order += added; layerOrder = order }
+        audioDetached = true
+        normalizeTimelineRows()
+    }
+    /// 声音跟随画面：丢掉单独剪过的声音轨，回到跟着画面片段走。各画面片段的单块音量取它开头那一刻所在声音块的音量。
+    public mutating func attachAudio() {
+        for role in [TimelineMedia.system, .microphone] where ownsTrack(role) {
+            let own = mediaClips(role), index = TimelineIndex(clips: own)
+            for number in clips.indices where clips[number].card == nil {
+                guard let hit = index.clipIndex(at: clips[number].timelineStart ?? 0) else { continue }
+                if role == .system { clips[number].systemGain = own[hit].systemGain } else { clips[number].microphoneGain = own[hit].microphoneGain }
+            }
+            let ids = Set(own.map(\.id))
+            layerOrder?.removeAll { ids.contains($0) }
+            rowGroups = rowGroups?.map { $0.filter { !ids.contains($0) } }.filter { !$0.isEmpty }
+            if role == .system { systemClips = nil } else { microphoneClips = nil }
+        }
+        audioDetached = nil
+        normalizeTimelineRows()
+    }
+    /// 旧工程打开时：声音轨跟画面片段一一对得上（位置、源起点、长度都没动过），说明从没单独剪过，
+    /// 收回成跟随画面，单块音量挪到对应的画面片段上。用户明确分离过的（`audioDetached`）不收。
+    mutating func collapseUnchangedAudio() {
+        guard audioDetached != true else { return }
+        let picture = mediaOnlyClips.sorted { ($0.timelineStart ?? 0) < ($1.timelineStart ?? 0) }
+        for role in [TimelineMedia.system, .microphone] where ownsTrack(role) {
+            let own = (role == .system ? systemClips : microphoneClips) ?? []
+            // 没录到这条声音的工程存的是空列表：保持原样（没有可跟随的声音）。
+            guard !own.isEmpty, own.count == picture.count else { continue }
+            let sorted = own.sorted { ($0.timelineStart ?? 0) < ($1.timelineStart ?? 0) }
+            let same = zip(sorted, picture).allSatisfy { a, b in
+                abs((a.timelineStart ?? 0) - (b.timelineStart ?? 0)) < 0.0005 && abs(a.sourceStart - b.sourceStart) < 0.0005
+                    && abs(a.duration - b.duration) < 0.0005 && abs(a.playableDuration - b.playableDuration) < 0.0005
+            }
+            guard same else { continue }
+            for (audio, clip) in zip(sorted, picture) {
+                guard let number = clips.firstIndex(where: { $0.id == clip.id }) else { continue }
+                if role == .system { clips[number].systemGain = audio.systemGain } else { clips[number].microphoneGain = audio.microphoneGain }
+            }
+            let ids = Set(own.map(\.id))
+            layerOrder?.removeAll { ids.contains($0) }
+            rowGroups = rowGroups?.map { $0.filter { !ids.contains($0) } }.filter { !$0.isEmpty }
+            if role == .system { systemClips = nil } else { microphoneClips = nil }
+        }
+    }
+
     /// 去掉卡片之后的画面片段：声音、人像轨按旧规则"跟随画面"时只能跟随真正引用素材的片段。
     var mediaOnlyClips: [VideoClip] {
         clips.contains { $0.card != nil } ? clips.filter { $0.card == nil } : clips
@@ -34,10 +100,8 @@ extension VideoEdit {
     public mutating func materializeLayers() {
         let index = TimelineIndex(clips: clips)
         for number in clips.indices { clips[number].timelineStart = index.boundaries[number] }
-        for role in [TimelineMedia.camera, .system, .microphone] {
-            let absent = role == .camera ? cameraClips == nil : role == .system ? systemClips == nil : microphoneClips == nil
-            if absent { setMediaClips(role, mediaOnlyClips.map { var copy = $0; copy.id = UUID(); return copy }) }
-        }
+        // 只展开人像轨；声音轨默认跟随画面，不在这里拆出来（见 `ownsTrack`）。
+        if cameraClips == nil { setMediaClips(.camera, mediaOnlyClips.map { var copy = $0; copy.id = UUID(); return copy }) }
     }
     /// 画面会不会不一样。**除了音量之外的任何差别都算**——这条判定必须是"反过来"写的：
     /// 逐个列举"哪些字段影响画面"的写法每加一个新图层就漏一次，而且漏了完全没有报错，
@@ -53,7 +117,16 @@ extension VideoEdit {
         // 卡片的增删、时长、位置仍算素材变化。
         // 层序只比素材块那一部分：文字、遮罩、镜头的层序只决定画面怎么叠，不改变素材怎么拼接。
         // 以前整份层序一起比，加一条文字或遮罩（会往层序里插一个 ID）就整个重建播放项，大工程每次要等好几秒。
-        mediaLayerOrder == other.mediaLayerOrder && Self.mediaShape(clips) == Self.mediaShape(other.clips) && cameraClips == other.cameraClips && systemClips == other.systemClips && microphoneClips == other.microphoneClips && duration == other.duration && audio.voiceProcessing == other.audio.voiceProcessing
+        // 单块音量也不算：它只改混音参数，播放项上换一份 audioMix 就行（见 `gainSignature`）；
+        // 以前拖一下"这一块的音量"滑条，每一帧都要整个重建播放项。
+        mediaLayerOrder == other.mediaLayerOrder && Self.mediaShape(clips) == Self.mediaShape(other.clips) && cameraClips == other.cameraClips
+            && (systemClips == nil) == (other.systemClips == nil) && Self.mediaShape(systemClips ?? []) == Self.mediaShape(other.systemClips ?? [])
+            && (microphoneClips == nil) == (other.microphoneClips == nil) && Self.mediaShape(microphoneClips ?? []) == Self.mediaShape(other.microphoneClips ?? [])
+            && duration == other.duration && audio.voiceProcessing == other.audio.voiceProcessing
+    }
+    /// 所有片段的单块音量，按轨依次排开：变了就要换一份混音参数。
+    public var gainSignature: [Float] {
+        [clips, systemClips ?? [], microphoneClips ?? []].flatMap { $0.flatMap { [$0.systemGain, $0.microphoneGain] } }
     }
     /// 层序里属于素材块（画面、人像、两条声音）的那些 ID，保持原顺序；没有层序时为 nil。
     var mediaLayerOrder: [UUID]? {
@@ -64,10 +137,11 @@ extension VideoEdit {
     }
     /// 比较素材用的片段列表：卡片只留"它在这里、多长"，内容抹掉。
     static func mediaShape(_ values: [VideoClip]) -> [VideoClip] {
-        guard values.contains(where: { $0.card != nil }) else { return values }
+        guard values.contains(where: { $0.card != nil || $0.systemGain != 1 || $0.microphoneGain != 1 }) else { return values }
         return values.map { clip in
-            guard clip.card != nil else { return clip }
-            var copy = clip; copy.card = TitleCard(text: TextSegment(start: 0, duration: 1)); copy.title = nil
+            var copy = clip; copy.systemGain = 1; copy.microphoneGain = 1
+            guard clip.card != nil else { return copy }
+            copy.card = TitleCard(text: TextSegment(start: 0, duration: 1)); copy.title = nil
             return copy
         }
     }
@@ -215,6 +289,8 @@ extension VideoEdit {
     public mutating func prepareLayerEditing(camera availableCamera: Bool, system: Bool, microphone: Bool) {
         normalizeSchemaVersion(layered: true)
         materializeLayers()
+        collapseUnchangedAudio()
+        // 没录到的声音存空列表（与"跟随画面"区分开：没有可跟随的声音）。
         if !availableCamera { cameraClips = [] }; if !system { systemClips = [] }; if !microphone { microphoneClips = [] }
         let appearances = focusSpans()
         for span in appearances { materializeFocus(span) }

@@ -45,6 +45,12 @@ struct CaptionPanel: View {
                 }.environment(\.colorScheme, .dark)
                 Button(model.edit.captionList.isEmpty ? "开始转写" : "重新转写") { model.transcribe() }
                     .buttonStyle(StudioButtonStyle(.primary))
+                if model.dictationDisabled {
+                    PanelNote("系统听写已关闭，打开后再转写。")
+                    Button("打开听写设置") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension") { NSWorkspace.shared.open(url) }
+                    }.buttonStyle(StudioButtonStyle(.secondary, size: .small))
+                }
             }
             HStack(spacing: CaploMetrics.Spacing.s) {
                 Button("导入字幕…") { importFile() }.buttonStyle(StudioButtonStyle(.secondary, size: .small))

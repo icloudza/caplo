@@ -185,7 +185,7 @@ extension VideoEdit {
     /// 把插入卡片时切开的两半合回去：两半在同一条轨上首尾相接于 `point`、源时间连续、片段级参数一致才合。
     /// 用户在这期间改过其中一半（挪走、裁短、调了单块音量）就保持现状。
     private mutating func rejoin(head: UUID, tail: UUID, at point: Double) {
-        for role in [TimelineMedia.screen, .camera, .system, .microphone] {
+        for role in [TimelineMedia.screen, .camera, .system, .microphone] where ownsTrack(role) {
             var values = role == .screen ? clips : mediaClips(role)
             guard let h = values.firstIndex(where: { $0.id == head }), let t = values.firstIndex(where: { $0.id == tail }) else { continue }
             let first = values[h], second = values[t]

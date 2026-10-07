@@ -88,8 +88,8 @@ public struct ExportSettings: Codable, Equatable, Sendable {
     }
 
     /// 成片像素尺寸。
-    public func outputSize(ratio: CanvasRatio) -> (width: Int, height: Int) {
-        ratio.outputSize(shortEdge: resolution.rawValue)
+    public func outputSize(layout: CanvasLayout) -> (width: Int, height: Int) {
+        layout.outputSize(shortEdge: resolution.rawValue)
     }
 
     /// 实际输出帧率：GIF 用它自己的帧率；视频按选择（不超过录制帧率），4K 封顶 60（H.264 / HEVC 硬件编码 4K 只到 60 帧）。
@@ -117,9 +117,9 @@ public struct ExportSettings: Codable, Equatable, Sendable {
 
     /// 预计文件大小（字节）：视频按码率、ProRes 按 Apple 白皮书的 422 档（1080p30 约 147 Mbps，按像素与帧率折算），
     /// 声音按 AAC 码率或 PCM。GIF 体积随画面内容变化太大，返回 nil。
-    public func estimatedBytes(ratio: CanvasRatio, recordedFrameRate: Double, duration: Double) -> Int64? {
+    public func estimatedBytes(layout: CanvasLayout, recordedFrameRate: Double, duration: Double) -> Int64? {
         guard format != .gif, duration.isFinite, duration > 0 else { return nil }
-        let size = outputSize(ratio: ratio), rate = outputFrameRate(recorded: recordedFrameRate)
+        let size = outputSize(layout: layout), rate = outputFrameRate(recorded: recordedFrameRate)
         let video: Double
         if let bitRate = videoBitRate(width: size.width, height: size.height, frameRate: rate) { video = Double(bitRate) }
         else { video = Double(size.width * size.height) * rate * (147_000_000 / (1920 * 1080 * 29.97)) }

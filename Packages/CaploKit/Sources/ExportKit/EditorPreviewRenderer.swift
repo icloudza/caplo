@@ -47,7 +47,7 @@ public actor EditorPreviewRenderer {
         let sourceImage = try await mediaImage(role: .screen, sourceTime: edit.sourceTime(at: time), url: url, document: document)
         let cameraTime = TimelineIndex(clips: edit.mediaClips(.camera)).sourceTime(at: time)
         let camera = edit.camera?.enabled == true ? try await mediaImage(role: .camera, sourceTime: cameraTime, url: url, document: document) : nil
-            let ratio = edit.layout.ratio.value
+            let ratio = edit.layout.aspect
             let size = CGSize(width: ratio >= 1 ? 1280 : 1280 * ratio, height: ratio >= 1 ? 1280 / ratio : 1280)
             if let path = edit.layout.backgroundImage {
                 if background?.path != path { background = (path, ProjectMedia.backgroundImage(for: edit.layout, in: url)) }

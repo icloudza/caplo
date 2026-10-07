@@ -271,6 +271,8 @@ final class VideoEditorModel {
         // 兜底：任何一条编辑路径把版本号写歪，都会在这里被按内容重新算对，
         // 而不是在校验时变成一句"版本不支持"甩给用户。
         edit.normalizeSchemaVersion()
+        // "原始"比例跟着录制画面走：裁剪、重置布局、套预设之后都按录制尺寸与当前裁剪重算。
+        edit.layout.syncOriginalAspect(capture: entry.document.capture?.pixelSize)
         do { try edit.validate(sourceDuration: entry.document.duration) }
         catch {
             edit = previous
@@ -457,6 +459,21 @@ final class VideoEditorModel {
     private func duplicatedStart(_ start: Double, duration: Double, pinned: Bool) -> Double {
         let limit = pinned ? max(edit.duration, duration) : entry.document.duration
         return max(0, min(start + duration, limit - duration))
+    }
+    /// 声音是否跟着画面走（默认）。任一条录到的声音还单独成轨就算"已分离"。
+    var audioFollowsPicture: Bool {
+        let recorded = audioTracks.map { $0 == .system ? TimelineMedia.system : .microphone }
+        return !recorded.isEmpty && recorded.allSatisfy { edit.audioFollowsPicture($0) }
+    }
+    /// 分离声音：之后声音单独成轨，可以单独拖动、剪辑。一步撤销。
+    func detachAudio() {
+        commit { $0.detachAudio() }
+        selectedMedia = nil; selectedMediaID = nil
+    }
+    /// 声音跟随画面：丢掉单独剪过的声音轨。一步撤销。
+    func attachAudio() {
+        commit { $0.attachAudio() }
+        if selectedMedia == .system || selectedMedia == .microphone { selectedMedia = nil; selectedMediaID = nil }
     }
     func duplicateSelection() {
         if let id = selectedCaption, var copy = edit.caption(id: id) {
@@ -671,6 +688,8 @@ final class VideoEditorModel {
 
     /// 转写进度；非空表示正在转写。
     private(set) var transcription: (progress: Double, message: String)?
+    /// 上一次转写因为系统听写关闭而失败：字幕面板据此给"打开听写设置"按钮。
+    private(set) var dictationDisabled = false
     @ObservationIgnored private var transcriptionTask: Task<Void, Never>?
     /// 当前这次转写的身份：取消后立刻重新开始时，旧任务收尾不能把新任务的引用和进度清掉。
     @ObservationIgnored private var transcriptionID: UUID?
@@ -713,6 +732,7 @@ final class VideoEditorModel {
             }
             guard let self, !Task.isCancelled else { return }
             self.transcription = (0, "正在转写…")
+            self.dictationDisabled = false
             do {
                 let cues = try await ProjectTranscription.run(url: url, document: document, source: source,
                                                               locale: locale, engine: engine) { value in
@@ -726,6 +746,7 @@ final class VideoEditorModel {
                 if cues.isEmpty { self.error = "这段声音里没有识别出可用的语音。" }
             } catch is CancellationError {
             } catch {
+                if case TranscriptionError.dictationDisabled = error { self.dictationDisabled = true }
                 self.error = error.localizedDescription
             }
         }

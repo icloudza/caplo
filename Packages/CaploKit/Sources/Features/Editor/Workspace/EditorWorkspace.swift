@@ -137,7 +137,7 @@ final class EditorWorkspaceView: NSSplitView, NSSplitViewDelegate {
                                          primary: model.selectedClip, focus: model.selectedFocus, mask: model.selectedMask, text: model.selectedText, caption: model.selectedCaption,
                                          zoom: viewport.zoom, fit: viewport.fitRequest, heights: viewport.trackHeights,
                                          reveal: model.revealRequest)
-            canvas.aspectRatio = model.edit.layout.ratio.value
+            canvas.aspectRatio = model.edit.layout.aspect
             canvas.isHiddenContent = (model.edit.duration <= 0)
             // 遮罩框跟着编辑内容、播放头与选中项走；播放中整层不画，所以顺带读一下 playing。
             maskEditor.refreshFor(edit: model.edit, time: model.skimPosition ?? model.position,

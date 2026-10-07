@@ -256,7 +256,9 @@ public enum SceneRenderer {
             rect = CGRect(x: inner.minX + max(0, inner.width - width) * (0.5 + ox / 2),
                           y: inner.minY + max(0, inner.height - height) * (0.5 - oy / 2), width: width, height: height)
         }
-        let radius = min(edit.layout.cornerRadius * size.width / 960, min(rect.width, rect.height) / 2)
+        // 画面铺满整块画布（原始比例、边距为 0）时不画圆角：四角会露出背景，原片就不是原片了。
+        let fills = rect.minX <= 0.5 && rect.minY <= 0.5 && rect.maxX >= size.width - 0.5 && rect.maxY >= size.height - 0.5
+        let radius = fills ? 0 : min(edit.layout.cornerRadius * size.width / 960, min(rect.width, rect.height) / 2)
         return Geometry(rect: rect, radius: max(0, radius))
     }
 

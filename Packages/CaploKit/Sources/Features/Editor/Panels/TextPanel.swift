@@ -143,7 +143,7 @@ struct TextPanel: View {
             EditorSlider(model: model, title: "行距", value: binding(id, \.lineHeight), range: 0.8...2.0, defaultValue: 1.30, detents: [1.0, 1.3])
             EditorSlider(model: model, title: "字间距", value: binding(id, \.tracking), range: -2...20, decimals: 1, defaultValue: 0, detents: [0])
             // 位置在画布比例的底板上拖（也可以直接在画布上拖文字）；靠近中线吸附。
-            EditorRegion(model: model, title: "位置", shape: .point, aspect: model.edit.layout.ratio.value,
+            EditorRegion(model: model, title: "位置", shape: .point, aspect: model.edit.layout.aspect,
                          region: positionBinding(id)) { EditorRegion.positionReadout($0.origin) }
             EditorSlider(model: model, title: "文本框宽度", value: binding(id, \.maxWidth), range: TextSegment.maxWidthRange, suffix: "%", percentage: true, defaultValue: 0.8)
         }

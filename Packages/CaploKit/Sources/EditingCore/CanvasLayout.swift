@@ -2,7 +2,10 @@ import Foundation
 import CoreGraphics
 
 /// 成片比例。名称即持久化值，新增项只能追加；`common` 是面板 chips 的顺序，其余比例经平台下拉进入。
+/// `original`（原始）跟着录制画面走（裁剪过就是裁剪后的比例），数值存在 `CanvasLayout.originalAspect`，
+/// 所以取画布比例一律用 `CanvasLayout.aspect`，不要直接读 `value`。新工程默认原始：边距为 0 时就是原片，不露背景。
 public enum CanvasRatio: String, CaseIterable, Codable, Sendable {
+    case original = "原始"
     case widescreen = "16:9"
     case standard = "4:3"
     case square = "1:1"
@@ -12,9 +15,10 @@ public enum CanvasRatio: String, CaseIterable, Codable, Sendable {
     case channels = "6:7"
     case ultrawide = "21:9"
 
+    /// 固定比例的数值；原始没有固定值（这里回 16:9 只是兜底，真正的值见 `CanvasLayout.aspect`）。
     public var value: Double {
         switch self {
-        case .widescreen: 16.0 / 9
+        case .original, .widescreen: 16.0 / 9
         case .standard: 4.0 / 3
         case .square: 1
         case .portrait: 9.0 / 16
@@ -33,11 +37,11 @@ public enum CanvasRatio: String, CaseIterable, Codable, Sendable {
     }
     public var orientation: Orientation { value > 1 ? .landscape : value < 1 ? .portrait : .square }
 
-    /// 面板里直接可点的常用比例；4:5、6:7 只从平台下拉进入。
-    public static let common: [CanvasRatio] = [.widescreen, .portrait, .standard, .tall, .square, .ultrawide]
+    /// 面板里直接可点的常用比例（一排只放得下六个）；4:5、6:7、21:9 只从平台下拉进入。
+    public static let common: [CanvasRatio] = [.original, .widescreen, .portrait, .standard, .tall, .square]
 
     /// 输出尺寸：短边固定（1080p 为 1080，4K 为 2160），长边按比例伸展并取偶数；面板提示与导出共用同一算法。
-    public func outputSize(shortEdge: Int) -> (width: Int, height: Int) {
+    public static func outputSize(aspect value: Double, shortEdge: Int) -> (width: Int, height: Int) {
         let base = Double(shortEdge)
         let width = value >= 1 ? base * value : base
         let height = value >= 1 ? base : base / value
@@ -197,7 +201,9 @@ public struct CropRect: Codable, Equatable, Sendable {
 }
 
 public struct CanvasLayout: Equatable, Codable, Sendable {
-    public var ratio: CanvasRatio = .widescreen
+    public var ratio: CanvasRatio = .original
+    /// 录制画面（裁剪后）的宽高比，"原始"比例用它。打开工程和每次编辑时按录制尺寸与裁剪重算（`syncOriginalAspect`）。
+    public var originalAspect: Double = 16.0 / 9
     public var background: CanvasBackground = .iris
     /// 工程包内的自定义背景图相对路径（`Backgrounds/…`）；存在时覆盖色板背景。
     public var backgroundImage: String?
@@ -243,8 +249,23 @@ public struct CanvasLayout: Equatable, Codable, Sendable {
         return crop
     }
 
+    /// 画布实际的宽高比：原始取录制画面，其余取固定比例。画布、预览、导出尺寸都读它。
+    public var aspect: Double { ratio == .original ? originalAspect : ratio.value }
+    public func outputSize(shortEdge: Int) -> (width: Int, height: Int) { CanvasRatio.outputSize(aspect: aspect, shortEdge: shortEdge) }
+
+    /// 按录制像素尺寸与当前裁剪重算原始比例；拿不到尺寸时不动。夹在 1:5…5:1，异常尺寸不至于把画布挤没。
+    public mutating func syncOriginalAspect(capture: CGSize?) {
+        guard let capture, capture.width > 0, capture.height > 0, capture.width.isFinite, capture.height.isFinite else { return }
+        let crop = effectiveCrop
+        let width = Double(capture.width) * (crop?.width ?? 1), height = Double(capture.height) * (crop?.height ?? 1)
+        guard width > 0, height > 0 else { return }
+        let value = min(5, max(0.2, width / height))
+        if abs(value - originalAspect) > 0.000_001 { originalAspect = value }
+    }
+
     private enum CodingKeys: String, CodingKey {
         case ratio, background, backgroundImage, backgroundBlur, padding, cornerRadius, shadow, shadowOpacity, shadowBlur, shadowOffset, crop, fixedFocusFrame, screenScale, screenOffsetX, screenOffsetY
+        case originalAspect
     }
 
     /// 旧工程没有阴影参数，按默认值解码，像素与之前完全一致。
@@ -266,6 +287,7 @@ public struct CanvasLayout: Equatable, Codable, Sendable {
         screenScale = try container.decodeIfPresent(Double.self, forKey: .screenScale) ?? 1
         screenOffsetX = try container.decodeIfPresent(Double.self, forKey: .screenOffsetX) ?? 0
         screenOffsetY = try container.decodeIfPresent(Double.self, forKey: .screenOffsetY) ?? 0
+        originalAspect = try container.decodeIfPresent(Double.self, forKey: .originalAspect) ?? 16.0 / 9
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -285,6 +307,7 @@ public struct CanvasLayout: Equatable, Codable, Sendable {
         try container.encode(screenScale, forKey: .screenScale)
         try container.encode(screenOffsetX, forKey: .screenOffsetX)
         try container.encode(screenOffsetY, forKey: .screenOffsetY)
+        try container.encode(originalAspect, forKey: .originalAspect)
     }
 }
 

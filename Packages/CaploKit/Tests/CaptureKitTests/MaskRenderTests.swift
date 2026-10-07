@@ -64,8 +64,9 @@ private func sensitiveEdit(effect: MaskSegment.Effect, width: Double = 0.4, heig
 @Test(arguments: [MaskSegment.Effect.blur, .pixelate])
 func maskDestroysDetailInsideAndTouchesNothingOutside(effect: MaskSegment.Effect) {
     // 预编译的 Metal 内核要随包带着、建得出来：读不到时会静默退回已弃用的运行时编译内核（新系统上可能没有），
-    // 卡片圆角、阴影与玻璃光标随之失效，平时却看不出来。
-    #expect(MetalKernels.kernel("liquidGlass") != nil && MetalKernels.colorKernel("cardCoverage") != nil && MetalKernels.colorKernel("cardShadow") != nil,
+    // 卡片圆角、阴影与玻璃光标（圆片、手指与十字）随之失效，平时却看不出来。
+    #expect(MetalKernels.kernel("liquidGlass") != nil && MetalKernels.kernel("shapedGlass") != nil
+            && MetalKernels.colorKernel("cardCoverage") != nil && MetalKernels.colorKernel("cardShadow") != nil,
             "资源包里的 CaploKernels.metallib 缺失或建不出内核")
     let source = checkerboard(width: 1280, height: 720)
     let edit = sensitiveEdit(effect: effect)

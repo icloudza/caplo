@@ -74,16 +74,21 @@ enum PointerRenderer {
                     .concatenating(CGAffineTransform(translationX: center.x, y: center.y))
                 return image.transformed(by: placement).applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: opacity)])
             }
-            // "透明玻璃"不贴图：箭头形状时在画面上做一枚 Liquid Glass 透镜（见 LiquidGlass），其他形状照常用素材。
-            let glass = effects.cursorStyle == LiquidGlass.styleID && LiquidGlass.isAvailable
+            // 三款玻璃圆片（透明、磨砂、石墨）不贴图：箭头形状时在画面上做一枚 Liquid Glass 透镜，
+            // 手指与十字做成同材质的异形玻璃（按轮廓折射，见 LiquidGlass.shaped），其他形状照常用素材。
+            let variant = LiquidGlass.isAvailable ? LiquidGlass.Variant(styleID: effects.cursorStyle) : nil
+            let glass = variant != nil
             let currentOpacity = frame.opacity * (effects.style == .original ? 1 : frame.shapeMix)
             var lensOpacity = 0.0
+            var shapedOpacity: [PointerShape: Double] = [:]
             var cursor: CIImage
             if glass, frame.shape == .arrow { lensOpacity = currentOpacity; cursor = CIImage.empty() }
+            else if glass, frame.shape == .pointer || frame.shape == .crosshair { shapedOpacity[frame.shape] = currentOpacity; cursor = CIImage.empty() }
             else { cursor = glyph(shape: frame.shape, opacity: currentOpacity) }
             if effects.style != .original, let previous = frame.previousShape {
                 let previousOpacity = frame.opacity * (1 - frame.shapeMix)
                 if glass, previous == .arrow { lensOpacity += previousOpacity }
+                else if glass, previous == .pointer || previous == .crosshair { shapedOpacity[previous, default: 0] += previousOpacity }
                 else {
                     // 两张图都围绕自己的热点放置，交叉淡化时点击位置不漂移。
                     cursor = cursor.applyingFilter("CIAdditionCompositing", parameters: [
@@ -94,7 +99,22 @@ enum PointerRenderer {
             if lensOpacity > 0.001 {
                 // 与其他样式同一可见大小：外接尺寸 32 点 × 光标大小 × 点击缩放。
                 let radius = 16 * unit * effects.cursorScale * frame.scale
-                result = LiquidGlass.lens(over: result, center: point(position), radius: radius, opacity: min(1, lensOpacity))
+                result = LiquidGlass.lens(over: result, center: point(position), radius: radius, opacity: min(1, lensOpacity), variant: variant ?? .clear)
+            }
+            for (shape, opacity) in shapedOpacity where opacity > 0.001 {
+                // 与其他样式同一可见大小。手指用现代主题手形的轮廓、按它的热点摆放（随点击缩放与旋转）；十字围着点击点。
+                let size = 32 * unit * effects.cursorScale * frame.scale
+                let mask: CIImage
+                if shape == .pointer, let asset = CursorAssets.asset(style: .tahoe, shape: .pointer) {
+                    let image = asset.image, scale = size / max(image.extent.width, image.extent.height), center = point(position)
+                    mask = image.transformed(by: CGAffineTransform(translationX: -image.extent.width * asset.hotspot.x, y: -image.extent.height * (1 - asset.hotspot.y))
+                        .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+                        .concatenating(CGAffineTransform(rotationAngle: -frame.rotation))
+                        .concatenating(CGAffineTransform(translationX: center.x, y: center.y)))
+                } else {
+                    mask = LiquidGlass.crosshairMask(center: point(position), size: size)
+                }
+                result = LiquidGlass.shaped(over: result, mask: mask, size: size, opacity: min(1, opacity), variant: variant ?? .clear)
             }
             // 按速度方向做运动模糊：固定参考帧率、强度 2；Core Image 实现连续核。
             // 只模糊光标层，点击高亮和视频保持清晰；限制快速跳变的最大拖尾。

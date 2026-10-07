@@ -33,11 +33,13 @@ public struct PlatformFormat: Identifiable, Hashable, Sendable {
         PlatformFormat("facebook.reels", "Facebook", "Reels", .portrait),
         PlatformFormat("x.landscape", "X", "横屏", .widescreen),
         PlatformFormat("linkedin.landscape", "LinkedIn", "横屏", .widescreen),
+        // 21:9 让出常用比例那一排给"原始"，从这里进入。
+        PlatformFormat("cinema.ultrawide", "电影", "超宽屏", .ultrawide),
     ]
 
     public static func formats(in orientation: CanvasRatio.Orientation) -> [PlatformFormat] { all.filter { $0.ratio.orientation == orientation } }
     public static func format(id: String) -> PlatformFormat? { all.first { $0.id == id } }
-    /// 该比例对应的第一个平台，让只经平台进入的比例（4:5、6:7）在面板上有名可显。
+    /// 该比例对应的第一个平台，让只经平台进入的比例（4:5、6:7、21:9）在面板上有名可显。
     public static func first(matching ratio: CanvasRatio) -> PlatformFormat? { all.first { $0.ratio == ratio } }
 
     private init(_ id: String, _ platform: String, _ usage: String, _ ratio: CanvasRatio) {

@@ -161,7 +161,7 @@ extension VideoEdit {
     @discardableResult
     mutating func splitTracks(at point: Double) -> [(head: UUID, tail: UUID)] {
         var pairs: [(head: UUID, tail: UUID)] = []
-        for role in [TimelineMedia.camera, .system, .microphone, .screen] {
+        for role in [TimelineMedia.camera, .system, .microphone, .screen] where ownsTrack(role) {
             let values = role == .screen ? clips : mediaClips(role)
             guard !values.isEmpty else { continue }
             let index = TimelineIndex(clips: values)
@@ -203,7 +203,7 @@ extension VideoEdit {
     mutating func rippleTimeline(from point: Double, by delta: Double) {
         guard delta.isFinite, abs(delta) > 0.0001 else { return }
         let threshold = point - 0.0001
-        for role in [TimelineMedia.screen, .camera, .system, .microphone] {
+        for role in [TimelineMedia.screen, .camera, .system, .microphone] where ownsTrack(role) {
             var values = role == .screen ? clips : mediaClips(role)
             guard !values.isEmpty else { continue }
             var changed = false

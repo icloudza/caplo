@@ -55,7 +55,7 @@ struct CustomLayoutSheet: View {
         VStack(spacing: CaploMetrics.Spacing.l) {
             Text("自定义布局").font(CaploFont.panelTitle).foregroundStyle(CaploColor.textPrimary)
             GeometryReader { proxy in
-                let size = CustomLayoutMath.canvasSize(fitting: proxy.size, ratio: layout.ratio.value)
+                let size = CustomLayoutMath.canvasSize(fitting: proxy.size, ratio: layout.aspect)
                 canvas(size: size).frame(width: size.width, height: size.height).position(x: proxy.size.width / 2, y: proxy.size.height / 2)
             }
             .frame(minWidth: 640, minHeight: 360)
@@ -288,7 +288,7 @@ enum CustomLayoutMath {
     /// 叠放与人像全屏原样返回。
     static func customEquivalent(camera: CameraLayout, edit: VideoEdit, sourceSize: CGSize) -> (camera: CameraLayout, layout: CanvasLayout) {
         guard camera.usesCard else { return (camera, edit.layout) }
-        let size = CGSize(width: 1920, height: 1920 / max(0.1, edit.layout.ratio.value))
+        let size = CGSize(width: 1920, height: 1920 / max(0.1, edit.layout.aspect))
         let padding = edit.layout.padding * size.width / 960
         let frames = camera.isSide ? camera.sideFrames(canvas: size, padding: padding, screen: sourceSize)
             : camera.isBehind ? camera.behindFrames(canvas: size, padding: padding, screen: sourceSize)

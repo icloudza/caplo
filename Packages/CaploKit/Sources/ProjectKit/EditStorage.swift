@@ -23,6 +23,7 @@ public enum EditStorage {
             }
             edit.focusEngineVersion = 2
             edit.focuses = AutoFocus.generate(events: samples, duration: document.duration)
+            edit.layout.syncOriginalAspect(capture: document.capture?.pixelSize)
             return edit
         }
         let data = try Data(contentsOf: path)
@@ -50,6 +51,8 @@ public enum EditStorage {
         edit.migrateLegacyHoldCards()
         edit.constrainTimelineFocuses()
         edit.normalizeTimelineRows()
+        // "原始"比例跟着录制画面走：按录制尺寸与裁剪重算一次（旧工程没存这个值）。
+        edit.layout.syncOriginalAspect(capture: document.capture?.pixelSize)
         try edit.validate(sourceDuration: document.duration)
         return edit
     }

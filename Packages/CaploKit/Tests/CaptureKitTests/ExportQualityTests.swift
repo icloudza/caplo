@@ -12,19 +12,30 @@ import RenderKit
 /// 导出亮度必须与原录制一致：合成器在解码端认的那个 709 空间（CoreMedia 709）里渲染、也标 709。
 /// 以前按 sRGB 曲线写却标 709，中灰被抬约 10 级；换成 `CGColorSpace.itur_709` 也不对，抬约 15 级。
 /// 均匀中灰经过编码与缩放都不变，两边差异只可能来自色彩曲线。
+/// 新工程默认"原始"比例：4:3 的录制按默认设置导出就是 4:3 的原片——不露背景、四角不圆（画面铺满画布时不画圆角）。
 @Test @MainActor func exportKeepsTheRecordedBrightness() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let url = try ProjectStorage.create(in: root, name: "亮度")
-    let writer = SegmentedCaptureWriter(project: url, width: 320, height: 180, systemAudio: false, microphone: false, onStarted: {}, onFailure: { _ in })
-    try await onQueue(writer) { writer.ingest(try makeFrame(at: CMTime(seconds: 10, preferredTimescale: 600)), role: .screen) }
+    let writer = SegmentedCaptureWriter(project: url, width: 320, height: 240, systemAudio: false, microphone: false, onStarted: {}, onFailure: { _ in })
+    try await onQueue(writer) { writer.ingest(try makeFrame(at: CMTime(seconds: 10, preferredTimescale: 600), width: 320, height: 240), role: .screen) }
     try await writer.finish(at: CMTime(seconds: 10.5, preferredTimescale: 600))
     let document = try ProjectStorage.load(url)
     let target = root.appendingPathComponent("gray.mp4")
-    try await ProjectMedia.export(url: url, document: document, levels: AudioLevels(), destination: target, edit: VideoEdit(duration: document.duration)) { _ in }
+    var edit = VideoEdit(duration: document.duration)
+    #expect(edit.layout.ratio == .original, "新工程默认不是原始比例")
+    edit.layout.syncOriginalAspect(capture: CGSize(width: 320, height: 240))
+    // 背景换成纯黑：哪里露出背景，一眼就和中灰的画面分得开。
+    edit.layout.background = .solidBlack
+    try await ProjectMedia.export(url: url, document: document, levels: AudioLevels(), destination: target, edit: edit) { _ in }
     let source = try await centerLevel(of: try ProjectStorage.mediaURL(document.segments[0].files[.screen]!, in: url))
     let exported = try await centerLevel(of: target)
     #expect(abs(source - exported) <= 3, "原录制 \(source)，导出 \(exported)")
+    let size = try #require(try await AVURLAsset(url: target).loadTracks(withMediaType: .video).first?.load(.naturalSize))
+    #expect(abs(size.width / size.height - 4.0 / 3) < 0.01, "原始比例导出成了 \(size)")
+    // 离角 4 像素：最外一圈像素会被编码与缩放压暗几级；而默认 12 点圆角在 1440 宽下半径 18 像素，这一点正好在被圆角切掉的那块里。
+    let corner = try await centerLevel(of: target, point: CGPoint(x: 4, y: 4))
+    #expect(abs(corner - exported) <= 6, "原片四角露出了背景：角上 \(corner)，中间 \(exported)")
 }
 
 /// 卡片导出成"背景 + 文字"、不带录屏：卡片这段画面轨留空，合成器按卡片画；成片因卡片变长。
@@ -104,13 +115,13 @@ import RenderKit
 }
 
 /// 画面正中一个像素的灰度（按色彩标签解读后落到 sRGB）。
-private func centerLevel(of url: URL, at seconds: Double = 0) async throws -> Double {
+private func centerLevel(of url: URL, at seconds: Double = 0, point: CGPoint? = nil) async throws -> Double {
     let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
     generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = seconds == 0 ? .positiveInfinity : .zero
     let image = try await generator.image(at: CMTime(seconds: seconds, preferredTimescale: 600)).image
     var pixel = [UInt8](repeating: 0, count: 4)
     CIContext().render(CIImage(cgImage: image), toBitmap: &pixel, rowBytes: 4,
-                       bounds: CGRect(x: image.width / 2, y: image.height / 2, width: 1, height: 1), format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+                       bounds: CGRect(x: point.map { Int($0.x) } ?? image.width / 2, y: point.map { Int($0.y) } ?? image.height / 2, width: 1, height: 1), format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
     return (Double(pixel[0]) + Double(pixel[1]) + Double(pixel[2])) / 3
 }
 

@@ -25,9 +25,12 @@ public enum TranscriptionError: LocalizedError {
     case denied
     case unsupported(String)
     case noAudio
+    /// 系统设置里关掉了"Siri 与听写"：本机识别也走听写服务，关掉后一律失败，系统只回一句英文。
+    case dictationDisabled
     case failed(String)
     public var errorDescription: String? {
         switch self {
+        case .dictationDisabled: "系统的听写已关闭，本机转写用不了。请在「系统设置 › 键盘 › 听写」打开听写后重试，音频仍只在本机处理。"
         case .denied: "没有语音识别权限。请在「系统设置 › 隐私与安全性 › 语音识别」里允许 Caplo。"
         case .unsupported(let reason): reason
         case .noAudio: "这个工程里没有可转写的声音轨。"
@@ -130,6 +133,16 @@ public struct SpeechTranscriber: TranscriptionEngine {
     public init() {}
     public var name: String { "系统本机识别" }
 
+    /// 把识别服务的错误换成能照着做的中文。听写关闭时系统回的是 kAFAssistantErrorDomain 下的
+    /// "Siri and Dictation are disabled"，错误码随系统版本变过，按域与原文一起认。
+    static func describe(_ error: any Error) -> TranscriptionError {
+        let ns = error as NSError
+        let text = ns.localizedDescription.lowercased()
+        if text.contains("dictation") && text.contains("disabled") { return .dictationDisabled }
+        if ns.domain == "kAFAssistantErrorDomain", text.contains("siri") { return .dictationDisabled }
+        return .failed(ns.localizedDescription)
+    }
+
     public func availability(locale: Locale) async -> TranscriptionAvailability {
         guard let recognizer = SFSpeechRecognizer(locale: locale) else {
             return .unavailable("系统不支持这个语言的本机识别。")
@@ -171,7 +184,7 @@ public struct SpeechTranscriber: TranscriptionEngine {
         let segments: [RecognizedWord] = try await withTaskCancellationHandler { try await withCheckedThrowingContinuation { continuation in
             guard box.install(continuation) else { return }
             let task = recognizer.recognitionTask(with: request) { result, error in
-                if let error { box.fail(TranscriptionError.failed(error.localizedDescription)); return }
+                if let error { box.fail(Self.describe(error)); return }
                 guard let result else { return }
                 // 识别结果的类型不是 Sendable，先在这里抄成纯值再跨越并发边界。
                 if result.isFinal {

@@ -45,9 +45,9 @@ import ProjectKit
     }
 }
 
-func makeFrame(at time: CMTime) throws -> CMSampleBuffer {
+func makeFrame(at time: CMTime, width: Int = 320, height: Int = 180) throws -> CMSampleBuffer {
     var pixel: CVPixelBuffer?
-    guard CVPixelBufferCreate(kCFAllocatorDefault, 320, 180, kCVPixelFormatType_32BGRA,
+    guard CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA,
                             [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &pixel) == kCVReturnSuccess,
           let pixel else { throw RecordingError.message("测试像素缓冲创建失败") }
     CVPixelBufferLockBaseAddress(pixel, [])

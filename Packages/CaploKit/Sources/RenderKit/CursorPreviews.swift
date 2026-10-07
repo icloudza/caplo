@@ -24,10 +24,10 @@ import Observation
     public func image(customStyle id: String, height: CGFloat = 44) -> NSImage? {
         image(key: customKey(id, height), height: height) { [store] in Self.customAsset(id, store: store, height: height) }
     }
-    /// 自绘样式的预览素材；"透明玻璃"是实时透镜，没有静态图可贴，画一枚放在几行文字条上的透镜。
+    /// 自绘样式的预览素材；三款玻璃圆片是实时透镜，没有静态图可贴，画一枚放在几行文字条上的透镜。
     private nonisolated static func customAsset(_ id: String, store: CursorAssets.Store, height: CGFloat) -> CursorAssets.Asset? {
-        if id == LiquidGlass.styleID, LiquidGlass.isAvailable {
-            return CursorAssets.Asset(image: LiquidGlass.preview(size: height * 2), hotspot: CGPoint(x: 0.5, y: 0.5))
+        if let variant = LiquidGlass.Variant(styleID: id), LiquidGlass.isAvailable {
+            return CursorAssets.Asset(image: LiquidGlass.preview(size: height * 2, variant: variant), hotspot: CGPoint(x: 0.5, y: 0.5))
         }
         return CursorAssets.custom(id, in: store)
     }

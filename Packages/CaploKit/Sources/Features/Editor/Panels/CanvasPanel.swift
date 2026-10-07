@@ -145,14 +145,14 @@ struct CanvasPanel: View {
     }
 
     private var outputCaption: String {
-        let ratio = model.edit.layout.ratio
-        let hd = ratio.outputSize(shortEdge: 1080)
+        let hd = model.edit.layout.outputSize(shortEdge: 1080)
         // 分辨率在导出窗口里选（2026-10-06 从顶栏挪过去）；这里只说明比例对应的尺寸。
         return "1080p 下为 \(hd.width)×\(hd.height)，导出时可选 720p 至 4K"
     }
 
     private func presetMatches(_ preset: CanvasPreset) -> Bool {
-        var current = model.edit.layout; current.backgroundImage = nil
+        // 原始比例的数值随工程的录制尺寸变，不算预设内容。
+        var current = model.edit.layout; current.backgroundImage = nil; current.originalAspect = preset.layout.originalAspect
         return current == preset.layout
     }
     private var matchingPreset: CanvasPreset? { presets.presets.first(where: presetMatches) }

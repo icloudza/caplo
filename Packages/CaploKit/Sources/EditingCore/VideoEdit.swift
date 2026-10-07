@@ -205,8 +205,11 @@ public struct VideoEdit: Codable, Equatable, Sendable {
     /// 仅保存同行的成员关系；时间范围与合成优先级仍由片段数据、layerOrder 决定。
     public var rowGroups: [[UUID]]?
     public var cameraClips: [VideoClip]?
+    /// 声音轨：nil 表示跟随画面片段（默认），非 nil 是"分离声音"之后单独的一份（见 `ownsTrack`）。
     public var systemClips: [VideoClip]?
     public var microphoneClips: [VideoClip]?
+    /// 用户明确分离过声音：打开时不再自动收回成跟随画面。
+    public var audioDetached: Bool?
     public var layout = CanvasLayout()
     public var audio = AudioLevels()
     public var focuses: [FocusSegment] = []

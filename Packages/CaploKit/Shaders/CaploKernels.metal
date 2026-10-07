@@ -37,7 +37,8 @@ extern "C" {
 
 // MARK: - 透明玻璃光标（LiquidGlass.swift）
 
-[[stitchable]] float4 liquidGlass(coreimage::sampler src, float2 center, float radius, float opacity, coreimage::destination dest) {
+// strength：折射与色散的强度（1 = 透明玻璃，0 = 不弯折）；tint：玻璃本身的颜色，a 是覆盖程度（0 = 无色）。
+[[stitchable]] float4 liquidGlass(coreimage::sampler src, float2 center, float radius, float opacity, float strength, float4 tint, coreimage::destination dest) {
     float2 p = dest.coord();
     float2 d = p - center;
     float r = length(d);
@@ -50,16 +51,17 @@ extern "C" {
     if (coverage <= 0.0) { return shadow * opacity; }
     float rim = smoothstep(0.35, 1.0, t);
     float bend = rim * rim * (3.0 - 2.0 * rim);
-    float factor = 0.7 + 1.2 * bend;
+    float factor = mix(1.0, 0.7 + 1.2 * bend, strength);
     float2 base = center + d * factor;
-    float2 step = dir * (0.02 * radius * bend);
+    float2 step = dir * (0.02 * radius * bend * strength);
     float4 mid = (src.sample(src.transform(base - 2.0 * step)) + src.sample(src.transform(base - step))
                   + src.sample(src.transform(base)) + src.sample(src.transform(base + step))
                   + src.sample(src.transform(base + 2.0 * step))) / 5.0;
-    float2 spread = dir * (0.06 * radius * bend);
+    float2 spread = dir * (0.06 * radius * bend * strength);
     float red = src.sample(src.transform(base + spread)).r;
     float blue = src.sample(src.transform(base - spread)).b;
     float4 glass = float4(mix(mid.r, red, 0.9), mid.g, mix(mid.b, blue, 0.9), mid.a);
+    glass.rgb = mix(glass.rgb, tint.rgb * glass.a, tint.a);
     float2 light = normalize(float2(-0.6, 0.8));
     float facing = dot(dir, light);
     float3 white = float3(glass.a, glass.a, glass.a);
@@ -77,6 +79,41 @@ extern "C" {
     float4 layer = glass * coverage;
     layer = layer + shadow * (1.0 - layer.a);
     return layer * opacity;
+}
+
+
+// 异形玻璃（手指、十字）：mask 是光标轮廓（只看 alpha），height 是轮廓糊开后的"厚度"，梯度即边缘法线。
+// 边缘一圈按法线把外面的画面折进来、错开红蓝通道，再加边缘亮环与迎光高光；scale 是折射幅度（像素）。
+// strength、tint 与 liquidGlass 同义。公式与 LiquidGlass.swift 里的 CIKL 兜底版必须同步。
+[[stitchable]] float4 shapedGlass(coreimage::sampler src, coreimage::sampler mask, coreimage::sampler height, float scale, float strength, float4 tint, coreimage::destination dest) {
+    float2 p = dest.coord();
+    float m = mask.sample(mask.transform(p)).a;
+    if (m <= 0.0) { return float4(0.0); }
+    float h = height.sample(height.transform(p)).a;
+    float e = 1.5;
+    float hx = height.sample(height.transform(p + float2(e, 0.0))).a - height.sample(height.transform(p - float2(e, 0.0))).a;
+    float hy = height.sample(height.transform(p + float2(0.0, e))).a - height.sample(height.transform(p - float2(0.0, e))).a;
+    float2 g = float2(hx, hy);
+    float gl = length(g);
+    float2 n = gl > 0.00001 ? g / gl : float2(0.0, 0.0);
+    float rim = 1.0 - smoothstep(0.5, 0.97, h);
+    float2 base = p - n * rim * rim * scale * strength;
+    float4 mid = (src.sample(src.transform(base)) + src.sample(src.transform(base + n * 1.2)) + src.sample(src.transform(base - n * 1.2))) / 3.0;
+    float2 spread = -n * rim * scale * 0.22 * strength;
+    float red = src.sample(src.transform(base + spread)).r;
+    float blue = src.sample(src.transform(base - spread)).b;
+    float4 glass = float4(mix(mid.r, red, 0.85), mid.g, mix(mid.b, blue, 0.85), mid.a);
+    glass.rgb = mix(glass.rgb, tint.rgb * glass.a, tint.a);
+    float2 light = normalize(float2(-0.6, 0.8));
+    float facing = dot(-n, light);
+    float3 white = float3(glass.a, glass.a, glass.a);
+    float glow = rim * rim * 0.32;
+    float ring = smoothstep(0.62, 0.95, rim);
+    float lit = 0.45 + 0.55 * pow(max(facing, 0.0), 1.2) + 0.5 * pow(max(-facing, 0.0), 1.6);
+    glass.rgb = mix(glass.rgb, white, min(1.0, glow + ring * lit * 0.85));
+    float inner = smoothstep(0.3, 0.5, rim) * (1.0 - smoothstep(0.5, 0.65, rim));
+    glass.rgb = glass.rgb * (1.0 - inner * 0.14);
+    return glass * m;
 }
 
 }
