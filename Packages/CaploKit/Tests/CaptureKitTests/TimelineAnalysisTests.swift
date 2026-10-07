@@ -41,5 +41,11 @@ import ProjectKit
     #expect(analysis.systemPeak(from: 0, to: 2.5) > 0.4)
     #expect(analysis.systemPeak(from: 1.06, to: 2.5) < 0.001)
     #expect(analysis.microphonePeak(from: 0, to: 2.5) == 0)
+
+    // 第二次读命中工程内的峰值缓存，结果一致；另一条声音的文件丢了只空出它自己，这一条照常有波形。
+    document.segments[0].files[.microphone] = "Media/missing.caf"
+    let again = try await TimelineAnalysis.load(url: url, document: document)
+    #expect(FileManager.default.fileExists(atPath: url.appendingPathComponent("Cache/Peaks/system.peaks").path), "峰值没有缓存")
+    #expect(again.system == analysis.system && again.microphone.isEmpty, "一个文件缺失让整条波形都没了")
 }
 

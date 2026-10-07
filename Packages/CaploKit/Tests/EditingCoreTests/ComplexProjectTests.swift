@@ -235,12 +235,12 @@ private func complexProject(sourceDuration: Double = 30) -> VideoEdit {
     focus.path = (0..<50_000).map { FocusKeyframe(time: Double($0) / 5000, x: 0.5, y: 0.5, scale: 1.5, move: 0) }
     heavy.focuses = [focus]
     var history = EditHistory()
-    for _ in 0..<20 { history.record(heavy) }
+    for _ in 0..<60 { history.record(heavy) }
     #expect(history.canUndo)
     var count = 0
     var current = heavy
     while let previous = history.undo(current: current) { current = previous; count += 1 }
-    // 单份就有五万个关键帧，二十份远超上限，只该留下最近的少数几份。
-    #expect(count < 20, "重快照没有被按份量削掉，留了 \(count) 份")
-    #expect(count >= 1, "削得太狠，一份都没留")
+    // 单份就有五万个关键帧，六十份超过总份量上限：要被削掉一部分，但大工程至少还能撤销 30 步。
+    #expect(count < 60, "重快照没有被按份量削掉，留了 \(count) 份")
+    #expect(count >= 30, "削得太狠，大工程只剩 \(count) 步撤销")
 }

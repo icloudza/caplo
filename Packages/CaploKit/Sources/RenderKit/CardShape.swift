@@ -4,8 +4,8 @@ import CoreGraphics
 /// 卡片形状的解析几何：圆角（可切超椭圆 squircle）、抗锯齿覆盖率与柔和阴影都由同一个带符号距离场（SDF）算出，
 /// 一个像素一次求值，没有额外的模糊 pass；半分辨率预览与 4K 导出按同一公式得到同一形状。
 ///
-/// 内核用 Core Image 内核语言在运行时编译，不依赖构建期的 Metal 工具链；编译失败时 `isAvailable` 为假，
-/// 调用方回退到 `CIRoundedRectangleGenerator` + 高斯模糊的老路径。
+/// 内核优先用预编译的 Metal 版（`MetalKernels`，源码 Shaders/CaploKernels.metal），读不到时再用下面的
+/// Core Image 内核语言在运行时编译；两样都失败时 `isAvailable` 为假，调用方回退到 `CIRoundedRectangleGenerator` + 高斯模糊的老路径。
 public enum CardShape {
     /// 圆角形状指数：2 是普通圆角，4 是 macOS 风格的超椭圆（squircle）。目前保持 2 以不改变现有观感。
     public static let cornerPower = 2.0
@@ -34,9 +34,10 @@ public enum CardShape {
     }
     """
 
-    private static let kernels: [CIColorKernel] = CIColorKernel.makeKernels(source: source) as? [CIColorKernel] ?? []
-    private static var coverageKernel: CIColorKernel? { kernels.first { $0.name == "cardCoverage" } }
-    private static var shadowKernel: CIColorKernel? { kernels.first { $0.name == "cardShadow" } }
+    /// Metal 版优先（见 `MetalKernels`）；上面的 CIKL 源码只作兜底，两处公式必须同步。
+    private static let fallback: [CIColorKernel] = CIColorKernel.makeKernels(source: source) as? [CIColorKernel] ?? []
+    private static let coverageKernel: CIColorKernel? = MetalKernels.colorKernel("cardCoverage") ?? fallback.first { $0.name == "cardCoverage" }
+    private static let shadowKernel: CIColorKernel? = MetalKernels.colorKernel("cardShadow") ?? fallback.first { $0.name == "cardShadow" }
 
     /// 内核是否编译成功；假时调用方走老路径。
     public static var isAvailable: Bool { coverageKernel != nil && shadowKernel != nil }

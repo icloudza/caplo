@@ -110,6 +110,9 @@ public enum EditStorage {
         return try JSONDecoder().decode(MasksOnly.self, from: data).masks ?? []
     }
 
+    /// 全部片段的指针事件，按工程时间排好。
+    /// 某一段的事件文件读不出来（损坏、缺失、路径越界）只跳过那一段：没有它只是那 10 秒没有光标与自动镜头，
+    /// 以前任何一段出错就整体抛错，新工程打不开、已有工程连播放项都建不起来。
     public static func events(in url: URL, document: ProjectDocument) throws -> [PointerSample] {
         var result: [PointerSample] = [], cursor = 0.0
         for segment in document.segments.sorted(by: { $0.id < $1.id }) {
@@ -118,8 +121,12 @@ public enum EditStorage {
             // 事件索引也必须限制在工程内部，不能借助相对路径或符号链接读取外部文件。
             let root = url.resolvingSymlinksInPath().standardizedFileURL.path + "/Events/"
             let file = url.appendingPathComponent(path).resolvingSymlinksInPath().standardizedFileURL
-            guard path.hasPrefix("Events/"), !path.contains(".."), file.path.hasPrefix(root) else { throw ProjectError.invalid("事件路径无效。") }
-            let samples = try PointerEventFile.events(from: Data(contentsOf: file))
+            guard path.hasPrefix("Events/"), !path.contains(".."), file.path.hasPrefix(root) else {
+                NSLog("Caplo：跳过路径无效的事件文件 %@", path); continue
+            }
+            guard let data = try? Data(contentsOf: file), let samples = try? PointerEventFile.events(from: data) else {
+                NSLog("Caplo：跳过读不出来的事件文件 %@", path); continue
+            }
             for var sample in samples where sample.time.isFinite && sample.time >= 0 && sample.time < segment.duration && (0...1).contains(sample.x) && (0...1).contains(sample.y) {
                 sample.time += cursor; result.append(sample)
             }

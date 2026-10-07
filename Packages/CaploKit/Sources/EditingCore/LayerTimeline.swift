@@ -51,7 +51,16 @@ extension VideoEdit {
         // 语音处理开关换的是麦克风素材文件本身，也算素材变化（要重建播放项）。
         // 卡片的文字与背景是合成器画的，改它们不用重建播放项（逐字重建会让打字时画面一闪一闪）；
         // 卡片的增删、时长、位置仍算素材变化。
-        layerOrder == other.layerOrder && Self.mediaShape(clips) == Self.mediaShape(other.clips) && cameraClips == other.cameraClips && systemClips == other.systemClips && microphoneClips == other.microphoneClips && duration == other.duration && audio.voiceProcessing == other.audio.voiceProcessing
+        // 层序只比素材块那一部分：文字、遮罩、镜头的层序只决定画面怎么叠，不改变素材怎么拼接。
+        // 以前整份层序一起比，加一条文字或遮罩（会往层序里插一个 ID）就整个重建播放项，大工程每次要等好几秒。
+        mediaLayerOrder == other.mediaLayerOrder && Self.mediaShape(clips) == Self.mediaShape(other.clips) && cameraClips == other.cameraClips && systemClips == other.systemClips && microphoneClips == other.microphoneClips && duration == other.duration && audio.voiceProcessing == other.audio.voiceProcessing
+    }
+    /// 层序里属于素材块（画面、人像、两条声音）的那些 ID，保持原顺序；没有层序时为 nil。
+    var mediaLayerOrder: [UUID]? {
+        guard let layerOrder else { return nil }
+        var media = Set(clips.map(\.id))
+        for values in [cameraClips, systemClips, microphoneClips] { media.formUnion((values ?? []).map(\.id)) }
+        return layerOrder.filter(media.contains)
     }
     /// 比较素材用的片段列表：卡片只留"它在这里、多长"，内容抹掉。
     static func mediaShape(_ values: [VideoClip]) -> [VideoClip] {

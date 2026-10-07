@@ -186,23 +186,19 @@ final class MicrophoneCapture: @unchecked Sendable {
         return status == noErr ? buffer : nil
     }
 
-    /// 采样块 → 指定时间戳的样本（需要转换时先转，帧数按采样率比例变化，起始时间戳不变）；样本数据复制进新的块缓冲。
-    static func sampleBuffer(from buffer: AVAudioPCMBuffer, presentationTime: CMTime, converter: AVAudioConverter?) -> CMSampleBuffer? {
-        var pcm = buffer
-        if let converter {
-            let ratio = converter.outputFormat.sampleRate / converter.inputFormat.sampleRate
-            guard let output = AVAudioPCMBuffer(pcmFormat: converter.outputFormat, frameCapacity: AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 64) else { return nil }
-            nonisolated(unsafe) var consumed = false
-            var error: NSError?
-            let status = converter.convert(to: output, error: &error) { _, outStatus in
-                if consumed { outStatus.pointee = .noDataNow; return nil }
-                consumed = true; outStatus.pointee = .haveData; return buffer
-            }
-            guard status != .error else { return nil }
-            pcm = output
+    /// 采样块按需转换（采样率、声道）；不需要转换时原样返回。转换器内部带缓冲，输出帧数与输入不一一对应，
+    /// 时间戳由调用方按输出帧数接续（见 `SessionEngine`）。
+    static func converted(_ buffer: AVAudioPCMBuffer, converter: AVAudioConverter?) -> AVAudioPCMBuffer? {
+        guard let converter else { return buffer }
+        let ratio = converter.outputFormat.sampleRate / converter.inputFormat.sampleRate
+        guard let output = AVAudioPCMBuffer(pcmFormat: converter.outputFormat, frameCapacity: AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 64) else { return nil }
+        nonisolated(unsafe) var consumed = false
+        var error: NSError?
+        let status = converter.convert(to: output, error: &error) { _, outStatus in
+            if consumed { outStatus.pointee = .noDataNow; return nil }
+            consumed = true; outStatus.pointee = .haveData; return buffer
         }
-        guard pcm.frameLength > 0 else { return nil }
-        return sampleBuffer(list: pcm.audioBufferList, frames: Int(pcm.frameLength), description: pcm.format.formatDescription, presentationTime: presentationTime)
+        return status == .error ? nil : output
     }
 
     /// 缓冲列表 → 样本：数据复制进新的块缓冲，时长按采样率。
@@ -509,6 +505,8 @@ final class SessionEngine: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
     private var observer: NSObjectProtocol?
     private var converter: AVAudioConverter?
     private var converterFormat: AVAudioFormat?
+    /// 下一块输出应接在什么时刻（主机时钟）。
+    private var nextTime: CMTime?
 
     init(deliver: @escaping @Sendable (CMSampleBuffer, Float) -> Void, onFailure: @escaping @Sendable (String) -> Void) {
         self.deliver = deliver; self.onFailure = onFailure
@@ -548,11 +546,18 @@ final class SessionEngine: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
         let clock: CMClock = session.synchronizationClock ?? CMClockGetHostTimeClock()
         let presentation = CMSyncConvertTime(sampleBuffer.presentationTimeStamp, from: clock, to: CMClockGetHostTimeClock())
         if converterFormat != format {
-            converterFormat = format
+            converterFormat = format; nextTime = nil
             converter = format.sampleRate == MicrophoneCapture.targetFormat.sampleRate && format.channelCount == 1 ? nil : AVAudioConverter(from: format, to: MicrophoneCapture.targetFormat)
         }
         guard let pcm = MicrophoneCapture.pcmBuffer(from: sampleBuffer, format: format),
-              let sample = MicrophoneCapture.sampleBuffer(from: pcm, presentationTime: presentation, converter: converter) else { return }
+              let output = MicrophoneCapture.converted(pcm, converter: converter), output.frameLength > 0 else { return }
+        // 时间戳按已输出的帧数接续：重采样（AirPods 的 16 / 24 kHz 等）时转换器内部有缓冲，每块输出的帧数和输入对不上，
+        // 直接用输入块的时间戳会让相邻两块重叠或留缝，写进文件就是细小的断续。偏离采集时间超过 20 毫秒（断流、换设备）才重新对齐。
+        var time = presentation
+        if let expected = nextTime, abs((expected - presentation).seconds) < 0.02 { time = expected }
+        nextTime = time + CMTime(value: CMTimeValue(output.frameLength), timescale: CMTimeScale(output.format.sampleRate))
+        guard let sample = MicrophoneCapture.sampleBuffer(list: output.audioBufferList, frames: Int(output.frameLength),
+                                                          description: output.format.formatDescription, presentationTime: time) else { return }
         deliver(sample, level)
     }
 }

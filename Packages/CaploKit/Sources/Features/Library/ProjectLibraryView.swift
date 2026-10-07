@@ -22,13 +22,33 @@ final class ProjectLibraryModel {
     var error: String?
     var loading = false
 
+    /// 正在进行的刷新与"刷新期间又有人要求刷新"的标记。
+    /// 以前刷新进行中再调一次会被直接丢掉：改名、复制、删除之后列表可能停在旧状态。
+    /// 现在后来的调用等这一轮结束后再刷一轮，调用方 await 返回时列表一定是最新的。
+    @ObservationIgnored private var running: Task<Void, Never>?
+    @ObservationIgnored private var refreshAgain = false
+
     func refresh() async {
-        guard !loading else { return }
+        if let running { refreshAgain = true; await running.value; return }
+        let task = Task { @MainActor in
+            repeat { refreshAgain = false; await refreshOnce() } while refreshAgain
+        }
+        running = task
+        await task.value
+        running = nil
+    }
+
+    private func refreshOnce() async {
         loading = true
-        // 外部工程记录里目录已经不在的（用户删掉了）直接从记录里去掉，不再每次报“manifest.json 不存在”。
+        // 外部工程记录：目录已经不在的（用户删掉了）去掉，不再每次报“manifest.json 不存在”；
+        // 但外置盘没接上时它所在的卷整个不在，记录要留着，盘接回来工程照常出现在项目中心。
+        // 项目库里的工程本来就会列出，不记成"外部"。
         let recorded = UserDefaults.standard.stringArray(forKey: "externalProjects") ?? []
-        let extra = recorded.filter { FileManager.default.fileExists(atPath: $0) }
-        if extra.count != recorded.count { UserDefaults.standard.set(extra, forKey: "externalProjects") }
+        let kept = recorded.filter { path in
+            !Self.isInLibrary(URL(fileURLWithPath: path)) && (FileManager.default.fileExists(atPath: path) || !Self.volumeIsMounted(for: path))
+        }
+        if kept != recorded { UserDefaults.standard.set(kept, forKey: "externalProjects") }
+        let extra = kept.filter { FileManager.default.fileExists(atPath: $0) }
         let result = await Task.detached(priority: .utility) {
             var entries: [LibraryEntry] = []
             var issues: [String] = []
@@ -45,6 +65,11 @@ final class ProjectLibraryModel {
                         if let lease = try? ProjectLease(url: url) { withExtendedLifetime(lease) {} }
                         else { continue }
                         document = try ProjectStorage.recover(url)
+                        // 崩溃发生在第一段提交之前：恢复出来什么都没有，移到废纸篓，不在列表里留一个打不开的空工程。
+                        if document.segments.isEmpty {
+                            try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
+                            continue
+                        }
                     }
                     let dates = ["manifest.json", "edits.json"].compactMap {
                         try? url.appendingPathComponent($0).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
@@ -69,7 +94,21 @@ final class ProjectLibraryModel {
         VideoEditorWindow.shared.show(project: url)
     }
 
+    /// 工程在不在项目库目录里（库里的工程本来就会列出，不需要记）。
+    nonisolated static func isInLibrary(_ url: URL) -> Bool {
+        let root = ProjectStorage.libraryURL.resolvingSymlinksInPath().standardizedFileURL.path + "/"
+        return url.resolvingSymlinksInPath().standardizedFileURL.path.hasPrefix(root)
+    }
+
+    /// 路径所在的卷是否挂着：/Volumes/<名称> 下的路径要看那个挂载点在不在，其他路径都在启动盘上。
+    nonisolated static func volumeIsMounted(for path: String) -> Bool {
+        let parts = URL(fileURLWithPath: path).standardizedFileURL.pathComponents
+        guard parts.count > 2, parts[1] == "Volumes" else { return true }
+        return FileManager.default.fileExists(atPath: "/Volumes/" + parts[2])
+    }
+
     static func remember(_ url: URL) {
+        guard !isInLibrary(url) else { return }
         var paths = UserDefaults.standard.stringArray(forKey: "externalProjects") ?? []
         if !paths.contains(url.path) { paths.append(url.path) }
         UserDefaults.standard.set(paths, forKey: "externalProjects")
@@ -98,7 +137,8 @@ final class ProjectLibraryModel {
                 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
                 let destination = root.appendingPathComponent(UUID().uuidString + ".caplo")
                 try FileManager.default.copyItem(at: entry.url, to: destination)
-                try? FileManager.default.removeItem(at: destination.appendingPathComponent("lease.lock"))
+                // 租约文件（.lock）只是 flock 的对象，复制过来无害；删掉免得副本里留着无用文件。
+                try? FileManager.default.removeItem(at: destination.appendingPathComponent(".lock"))
                 try ProjectStorage.rename(destination, to: name)
             }.value
             await refresh()

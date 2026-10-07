@@ -15,10 +15,11 @@ public enum VoiceProcessor {
         segment.files[.microphone] == nil ? nil : String(format: "Media/%06d-microphone-vp%d.caf", segment.id, version)
     }
 
-    /// 工程里有麦克风的片段是否都已有产物。
+    /// 工程里有麦克风的片段是否都已有产物。麦克风原件已经不在的片段没有可处理的东西，算作已处理。
     public static func isProcessed(project: URL, document: ProjectDocument) -> Bool {
         document.segments.allSatisfy { segment in
             guard let path = processedPath(for: segment) else { return true }
+            if let original = segment.files[.microphone], !ProjectStorage.mediaExists(original, in: project) { return true }
             return (try? ProjectStorage.mediaURL(path, in: project)).map { FileManager.default.fileExists(atPath: $0.path) } ?? false
         }
     }
@@ -26,7 +27,8 @@ public enum VoiceProcessor {
     /// 逐片段处理（跳过已有产物）。参考信号按片段内的素材偏移对齐到麦克风时间轴；没有系统声音就只做降噪。
     public static func process(project: URL, document: ProjectDocument, progress: @escaping @Sendable (Double) -> Void) async throws {
         let pending = document.segments.filter { segment in
-            guard let path = processedPath(for: segment), let url = try? ProjectStorage.mediaURL(path, in: project) else { return false }
+            guard let path = processedPath(for: segment), let url = try? ProjectStorage.mediaURL(path, in: project),
+                  let original = segment.files[.microphone], ProjectStorage.mediaExists(original, in: project) else { return false }
             return !FileManager.default.fileExists(atPath: url.path)
         }
         for (index, segment) in pending.enumerated() {
@@ -36,7 +38,7 @@ public enum VoiceProcessor {
             let outURL = try ProjectStorage.mediaURL(outPath, in: project)
             let microphone = try await readMono(url: micURL)
             var reference: [Float]?
-            if let systemPath = segment.files[.systemAudio] {
+            if let systemPath = segment.files[.systemAudio], ProjectStorage.mediaExists(systemPath, in: project) {
                 let system = try await readMono(url: try ProjectStorage.mediaURL(systemPath, in: project))
                 // 系统声音的第 j 个样本在片段里的时刻是 offset(system) + j / sr；换算到麦克风的采样序号上。
                 let shift = Int(((segment.offset(for: .microphone) - segment.offset(for: .systemAudio)) * sampleRate).rounded())

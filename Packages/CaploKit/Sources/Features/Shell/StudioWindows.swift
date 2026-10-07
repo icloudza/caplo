@@ -294,6 +294,9 @@ public final class VideoEditorWindow: NSObject, NSWindowDelegate {
     private var model: VideoEditorModel?
     private var openingID = UUID()
     private(set) var opening = false
+    /// 当前编辑器保存失败、没能切换过去的工程（多半是刚录完的那一段）：编辑器关掉之后接着打开它，
+    /// 不再就此"丢"在项目中心里——录制结束的自动打开只会触发一次。
+    private var deferredProject: URL?
     var isVisible: Bool { window?.isVisible == true || window?.isMiniaturized == true }
 
     public func show(project: URL) {
@@ -319,7 +322,8 @@ public final class VideoEditorWindow: NSObject, NSWindowDelegate {
                     return loaded.state == .recording ? try ProjectStorage.recover(url) : loaded
                 }.value
                 guard openingID == id, !ScreenRecorder.shared.isBusy, !StudioWindows.terminating else { return }
-                guard VideoEditorSessions.closeCurrent() else { reveal(); return }
+                guard VideoEditorSessions.closeCurrent() else { deferredProject = url; reveal(); return }
+                deferredProject = nil
                 let model = VideoEditorModel(entry: LibraryEntry(url: url, document: document))
                 self.model = model
                 VideoEditorSessions.current = model
@@ -357,8 +361,13 @@ public final class VideoEditorWindow: NSObject, NSWindowDelegate {
         openingID = UUID(); opening = false
         model = nil
         window?.contentView = nil
-        // 下一轮再恢复准备面板，避免在 AppKit 的关闭回调内改变关键窗口。
-        Task { @MainActor in if !StudioWindows.terminating { StudioWindows.showRecorder() } }
+        // 之前因为保存失败没能切过去的工程，现在编辑器关了，接着打开它；否则下一轮恢复准备面板
+        // （都放到下一轮，避免在 AppKit 的关闭回调内改变关键窗口）。
+        let next = deferredProject; deferredProject = nil
+        Task { @MainActor in
+            guard !StudioWindows.terminating else { return }
+            if let next { self.show(project: next) } else { StudioWindows.showRecorder() }
+        }
     }
 }
 

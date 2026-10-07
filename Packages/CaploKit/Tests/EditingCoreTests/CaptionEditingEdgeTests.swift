@@ -23,5 +23,10 @@ private func edit(clips: [(Double, Double)]) -> VideoEdit {
     value.mergeImportedCaptions(parsed)
     #expect(value.captionList.count == 2, "往返一次变成了 \(value.captionList.count) 句")
     try value.validate(sourceDuration: 6)
+
+    // 外部 VTT：带 BOM、时间行后跟显示设置、用带空格的空行与旧式回车分隔，三句都要读进来。
+    let vtt = "\u{FEFF}WEBVTT\r\r00:00:01.000 --> 00:00:01.800 align:start position:10%\r第一句\r \r00:00:02.000 --> 00:00:02.900 line:0\r第二句\r\r3\r00:00:03.000 --> 00:00:03.500\r第三句\r"
+    let imported = CaptionFile.parse(vtt, into: value)
+    #expect(imported.map(\.text) == ["第一句", "第二句", "第三句"], "VTT 只读到 \(imported.map(\.text))")
 }
 

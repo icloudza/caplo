@@ -574,12 +574,24 @@ public enum CaptionFile {
         // 常常比片子长一点点。不夹住的话最后一条会越界，整批导入在校验时被拒——
         // 用户看到的是"版本不支持"，几百句一条都进不来。
         let sourceLimit = edit.orderedScreenClips.map { $0.sourceStart + $0.playableDuration }.max() ?? 0
-        let blocks = text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n\n")
-        for block in blocks {
-            let rows = block.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        // 换行统一成 \n（含旧式 \r）、去掉 BOM，按"空白行"分块：只认连续两个换行的话，
+        // 用带空格的空行或旧式回车分隔的文件会把两句并成一句。
+        let normalized = text.replacingOccurrences(of: "\u{FEFF}", with: "")
+            .replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+        var blocks: [[String]] = [], current: [String] = []
+        for line in normalized.components(separatedBy: "\n") {
+            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                if !current.isEmpty { blocks.append(current); current = [] }
+            } else { current.append(line) }
+        }
+        if !current.isEmpty { blocks.append(current) }
+        for rows in blocks {
             guard let arrow = rows.firstIndex(where: { $0.contains("-->") }) else { continue }
             let parts = rows[arrow].components(separatedBy: "-->")
-            guard parts.count == 2, let from = seconds(parts[0]), let to = seconds(parts[1]), to > from else { continue }
+            // VTT 的时间行后面可以跟显示设置（align:start position:10% 等）：只取箭头两侧紧挨着的那个时间。
+            let left = parts.first?.split(whereSeparator: \.isWhitespace).last.map(String.init) ?? ""
+            let right = parts.count == 2 ? (parts[1].split(whereSeparator: \.isWhitespace).first.map(String.init) ?? "") : ""
+            guard parts.count == 2, let from = seconds(left), let to = seconds(right), to > from else { continue }
             let body = rows[(arrow + 1)...].joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !body.isEmpty else { continue }
             guard let sourceStart = index.sourceTime(at: from), sourceStart < sourceLimit else { continue }

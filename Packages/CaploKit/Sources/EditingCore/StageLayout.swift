@@ -227,10 +227,14 @@ extension VideoEdit {
             // 只加 duration 会让 offset + duration 越过包络长度：validate 直接判无效，
             // 于是插完卡片保存、播放、导出全都报"内容无效"。包络要跟着一起变长。
             else if start + focuses[number].duration > threshold {
+                // 运镜路径的时间按包络计（分割出来的镜头片段带 transitionOffset），插入点要换算到同一时间轴上。
+                let local = threshold - start + (focuses[number].transitionOffset ?? 0)
                 focuses[number].duration = max(1.0 / 30, focuses[number].duration + delta)
                 if let length = focuses[number].transitionDuration {
                     focuses[number].transitionDuration = max(1.0 / 30, length + delta)
                 }
+                // 插入点之后的关键帧跟着平移：以前只拉长时长，卡片之后那段的运镜还按插入前的时刻走，和画面错开一张卡片的长度。
+                focuses[number].shiftPath(at: local, by: delta)
             }
         }
         for value in textList where value.timelineStart != nil {
@@ -245,5 +249,24 @@ extension VideoEdit {
             guard let start = value.timelineStart, start >= threshold else { continue }
             updateMask(id: value.id) { $0.timelineStart = max(0, start + delta) }
         }
+    }
+}
+
+extension FocusSegment {
+    /// 在路径时间 `local` 处插入（`delta` > 0）或删去（`delta` < 0，删的是 `local + delta ..< local`）一段时长：
+    /// 之后的关键帧整体平移，被删区间里的关键帧丢掉；至少留一帧，路径保持有序。
+    mutating func shiftPath(at local: Double, by delta: Double) {
+        guard var frames = path, !frames.isEmpty, delta.isFinite, abs(delta) > 0.0001 else { return }
+        if delta < 0 {
+            let cut = local + delta
+            let removed = frames.filter { $0.time >= cut - 0.0001 && $0.time < local - 0.0001 }
+            frames.removeAll { $0.time >= cut - 0.0001 && $0.time < local - 0.0001 }
+            if frames.isEmpty, let last = removed.last { var kept = last; kept.time = max(0, cut); frames = [kept] }
+        }
+        for index in frames.indices where frames[index].time >= local - 0.0001 {
+            frames[index].time = max(0, frames[index].time + delta)
+        }
+        frames.sort { $0.time < $1.time }
+        path = frames
     }
 }

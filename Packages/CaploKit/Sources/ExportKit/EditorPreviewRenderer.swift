@@ -74,7 +74,8 @@ public actor EditorPreviewRenderer {
         for segment in document.segments.sorted(by: { $0.id < $1.id }) {
             defer { cursor += segment.duration }
             guard sourceTime >= cursor, sourceTime < cursor + segment.duration else { continue }
-            guard let path = segment.files[role] else { return nil }
+            // 素材文件缺失（外置盘断开、文件损坏被删）时这一段当空白，见 ProjectStorage.load。
+            guard let path = segment.files[role], ProjectStorage.mediaExists(path, in: url) else { return nil }
             let local = sourceTime - cursor - segment.offset(for: role)
             guard local >= 0 else { return nil }
             return try await image(url: ProjectStorage.mediaURL(path, in: url), at: CMTime(seconds: local, preferredTimescale: 48_000)).map { CIImage(cgImage: $0) }

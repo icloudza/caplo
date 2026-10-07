@@ -13,7 +13,9 @@ public enum ProjectMedia {
         if let edit { try edit.validate(sourceDuration: document.duration) }
         guard !document.segments.isEmpty else { throw ProjectError.invalid("工程没有可播放的片段。") }
         let composition = AVMutableComposition()
-        var audioGroups: [MediaRole: [(UUID?, AVMutableCompositionTrack)]] = [:]
+        // 声音：每个角色按"泳道"建轨——互不重叠的块共用一条轨，只有时间上重叠的块才另开一条（见 audioLanes）。
+        // 以前独立编辑模式下每块一条轨，分割几百次就是几百条音轨，播放与导出的混音开销随之暴涨。
+        var audioGroups: [MediaRole: [(Int, AVMutableCompositionTrack)]] = [:]
         // 分段编码可能产生不同的 H.264 参数集；按完整格式复用解码轨道，避免切换时解码失败。
         var videoGroups: [MediaRole: [(formats: [CMFormatDescription], track: AVMutableCompositionTrack)]] = [:]
         // 同一素材可能被剪成数百个片段；轨道与时间范围只加载一次，后续插入共享元数据。
@@ -24,6 +26,7 @@ public enum ProjectMedia {
         for (role, logical) in roleMap {
           let separateAudio = !role.isVideo && (role == .systemAudio ? snapshot.systemClips != nil : snapshot.microphoneClips != nil)
           let media = separateAudio ? snapshot.mediaClips(logical) : snapshot.resolvedMedia(logical)
+          let lanes = role.isVideo ? [:] : audioLanes(media)
           for original in media {
             // 卡片不引用素材：这段画面轨留空，合成器按卡片画背景与文字。
             if original.card != nil { continue }
@@ -50,7 +53,8 @@ public enum ProjectMedia {
                 let requested = CMTimeRange(start: CMTime(seconds: lower - segmentStart, preferredTimescale: 48_000), duration: CMTime(seconds: upper - lower, preferredTimescale: 48_000))
                 do {
                     try Task.checkCancellation()
-                    guard let path = mediaPath(for: role, in: segment, levels: levels, project: url) else { continue }
+                    // 缺失的素材文件当空白跳过（工程照常打开与导出，编辑器会提示缺了哪些），见 ProjectStorage.load。
+                    guard let path = mediaPath(for: role, in: segment, levels: levels, project: url), ProjectStorage.mediaExists(path, in: url) else { continue }
                     let offset = CMTime(seconds: segment.offset(for: role), preferredTimescale: 48_000)
                     let localRequest = CMTimeRange(start: requested.start - offset, duration: requested.duration)
                     let mediaType: AVMediaType = role.isVideo ? .video : .audio
@@ -89,13 +93,11 @@ public enum ProjectMedia {
                                 destination = created
                             }
                         } else {
-                            let key: UUID? = separateAudio ? original.id : nil
-                            if let matching = audioGroups[role]?.first(where: { $0.0 == key }) { destination = matching.1 }
+                            let lane = lanes[original.id] ?? 0
+                            if let matching = audioGroups[role]?.first(where: { $0.0 == lane }) { destination = matching.1 }
                             else {
-                                let count = separateAudio ? (media.firstIndex { $0.id == original.id } ?? 0) : 0
-                                let identifier = count == 0 ? trackID(for: role) : CMPersistentTrackID(100_000 + count * 2 + (role == .systemAudio ? 0 : 1))
-                                guard let created = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: identifier) else { throw ProjectError.invalid("无法创建声音轨道。") }
-                                audioGroups[role, default: []].append((key, created)); destination = created
+                                guard let created = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: audioTrackID(role: role, lane: lane)) else { throw ProjectError.invalid("无法创建声音轨道。") }
+                                audioGroups[role, default: []].append((lane, created)); destination = created
                             }
                         }
                         // 所有素材使用同一裁剪交集；晚到的声音和摄像头保留各自偏移。
@@ -120,7 +122,7 @@ public enum ProjectMedia {
         }
         // AVFoundation 不支持完全空的视频轨道导出；用原素材单帧提供时钟，合成器按逻辑空白只画背景。
         if composition.track(withTrackID: 1) == nil, snapshot.duration > 0,
-           let path = segments.compactMap({ $0.files[.screen] }).first {
+           let path = segments.compactMap({ $0.files[.screen] }).first(where: { ProjectStorage.mediaExists($0, in: url) }) {
             let asset = AVURLAsset(url: try ProjectStorage.mediaURL(path, in: url))
             if let source = try await asset.loadTracks(withMediaType: .video).first,
                let track = composition.addMutableTrack(withMediaType: .video, preferredTrackID: 1) {
@@ -135,18 +137,46 @@ public enum ProjectMedia {
         }
         let mix = AVMutableAudioMix()
         mix.inputParameters = [MediaRole.systemAudio, .microphone].flatMap { role in
-            (audioGroups[role] ?? []).map { id, track in
-                let parameter = AVMutableAudioMixInputParameters(track: track)
-                let audioTrack: AudioTrack = role == .systemAudio ? .system : .microphone
-                let logical: TimelineMedia = role == .systemAudio ? .system : .microphone
-                let values = id == nil ? snapshot.resolvedMedia(logical) : snapshot.mediaClips(logical).filter { $0.id == id }
-                for clip in values {
-                    parameter.setVolume(levels.effectiveGain(for: audioTrack) * clip.gain(for: audioTrack), at: CMTime(seconds: clip.timelineStart ?? 0, preferredTimescale: 48_000))
-                }
-                return parameter
+            (audioGroups[role] ?? []).map { lane, track in
+                volumeParameters(track: track, role: role, lane: lane, edit: snapshot, levels: levels)
             }
         }
         return (composition, mix)
+    }
+
+    /// 声音块的泳道：按起点排好，放进第一条已经空出来的泳道，都占着才开新泳道。
+    /// 结果只由块的时间决定，合成与 `updatePresentation` 各算一遍也一定一致。
+    nonisolated static func audioLanes(_ clips: [VideoClip]) -> [UUID: Int] {
+        var ends: [Double] = [], result: [UUID: Int] = [:]
+        let ordered = clips.enumerated().sorted { ($0.element.timelineStart ?? 0, $0.offset) < ($1.element.timelineStart ?? 0, $1.offset) }
+        for (_, clip) in ordered {
+            let start = clip.timelineStart ?? 0
+            if let lane = ends.firstIndex(where: { $0 <= start + 0.0001 }) { ends[lane] = start + clip.duration; result[clip.id] = lane }
+            else { ends.append(start + clip.duration); result[clip.id] = ends.count - 1 }
+        }
+        return result
+    }
+
+    /// 泳道的轨道号：第 0 道沿用角色的固定轨号（系统 2、麦克风 3），其余从 100 002 起，系统偶数、麦克风奇数。
+    nonisolated static func audioTrackID(role: MediaRole, lane: Int) -> CMPersistentTrackID {
+        lane == 0 ? trackID(for: role) : CMPersistentTrackID(100_000 + lane * 2 + (role == .systemAudio ? 0 : 1))
+    }
+
+    /// 轨道号反推泳道（`audioTrackID` 的逆运算）。
+    nonisolated static func audioLane(trackID: CMPersistentTrackID) -> Int { trackID < 100_002 ? 0 : Int((trackID - 100_000) / 2) }
+
+    /// 一条泳道的音量：泳道里每一块在自己的起点切到自己的增益（块与块之间是空的，切换点不会出声）。
+    nonisolated static func volumeParameters(track: AVAssetTrack, role: MediaRole, lane: Int, edit: VideoEdit, levels: AudioLevels) -> AVMutableAudioMixInputParameters {
+        let parameter = AVMutableAudioMixInputParameters(track: track)
+        let audioTrack: AudioTrack = role == .systemAudio ? .system : .microphone
+        let logical: TimelineMedia = role == .systemAudio ? .system : .microphone
+        let independent = role == .systemAudio ? edit.systemClips != nil : edit.microphoneClips != nil
+        let values = independent ? edit.mediaClips(logical) : edit.resolvedMedia(logical)
+        let lanes = audioLanes(values)
+        for clip in values.filter({ (lanes[$0.id] ?? 0) == lane }).sorted(by: { ($0.timelineStart ?? 0) < ($1.timelineStart ?? 0) }) {
+            parameter.setVolume(levels.effectiveGain(for: audioTrack) * clip.gain(for: audioTrack), at: CMTime(seconds: clip.timelineStart ?? 0, preferredTimescale: 48_000))
+        }
+        return parameter
     }
 
     /// `pointers` 允许调用方复用已解析的指针事件（编辑会话内事件不变），避免每次重建播放项都在主线程解一遍 JSON。
@@ -165,7 +195,7 @@ public enum ProjectMedia {
         return item
     }
 
-    private static func trackID(for role: MediaRole) -> CMPersistentTrackID {
+    nonisolated private static func trackID(for role: MediaRole) -> CMPersistentTrackID {
         switch role { case .screen: 1; case .systemAudio: 2; case .microphone: 3; case .camera: 4 }
     }
 
@@ -183,37 +213,52 @@ public enum ProjectMedia {
         if previous.audio != edit.audio {
             let mix = AVMutableAudioMix()
             mix.inputParameters = [MediaRole.systemAudio, .microphone].flatMap { role -> [AVMutableAudioMixInputParameters] in
-                let logical: TimelineMedia = role == .systemAudio ? .system : .microphone
-                let audio: AudioTrack = role == .systemAudio ? .system : .microphone
-                let independent = role == .systemAudio ? edit.systemClips != nil : edit.microphoneClips != nil
-                let values = independent ? edit.mediaClips(logical) : edit.resolvedMedia(logical)
                 let tracks = composition.tracks.filter { $0.mediaType == .audio && ($0.trackID == trackID(for: role) || ($0.trackID >= 100_002 && $0.trackID % 2 == (role == .systemAudio ? 0 : 1))) }.sorted { $0.trackID < $1.trackID }
                 return tracks.map { track in
-                    let parameter = AVMutableAudioMixInputParameters(track: track)
-                    let clipIndex = track.trackID < 100_002 ? 0 : Int((track.trackID - 100_000) / 2)
-                    let clips = independent ? (values.indices.contains(clipIndex) ? [values[clipIndex]] : []) : values
-                    for clip in clips { parameter.setVolume(edit.audio.effectiveGain(for: audio) * clip.gain(for: audio), at: CMTime(seconds: clip.timelineStart ?? 0, preferredTimescale: 48_000)) }
-                    return parameter
+                    volumeParameters(track: track, role: role, lane: audioLane(trackID: track.trackID), edit: edit, levels: edit.audio)
                 }
             }
             item.audioMix = mix
         }
     }
 
-    /// 项目列表的封面：取第一段素材的首帧，并盖上那一刻生效的遮罩。
-    /// 读不出遮罩就抛错而不是给一张没打码的图——封面上印着密钥比没有封面糟糕得多。
+    /// 项目列表的封面：成片里第一块录制画面的第一帧，盖上那一刻生效的**全部**遮罩。
+    /// 以前只按源素材第 0 秒取遮罩：钉在成片时间上的遮罩不参与，剪掉开头之后封面还是被剪掉的那一帧。
+    /// 读不出编辑数据就抛错而不是给一张没打码的图——封面上印着密钥比没有封面糟糕得多。
     public static func thumbnail(url: URL, document: ProjectDocument) async throws -> CGImage {
-        guard let path = document.segments.first?.files[.screen] else { throw ProjectError.invalid("暂无缩略图。") }
-        let masks = try EditStorage.maskList(in: url)
-        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: try ProjectStorage.mediaURL(path, in: url)))
+        let plan = try await Task.detached(priority: .utility) { () throws -> (path: String, local: Double, masks: [MaskState]) in
+            let file = url.appendingPathComponent("edits.json")
+            var edit: VideoEdit?
+            var masks: [MaskState] = []
+            if FileManager.default.fileExists(atPath: file.path) {
+                if let decoded = try? JSONDecoder().decode(VideoEdit.self, from: Data(contentsOf: file)) { edit = decoded }
+                else {
+                    // 解不成完整编辑数据（只有音量的旧格式）：退回只读遮罩、按源时间求值。
+                    var legacy = VideoEdit(duration: max(0.001, document.duration)); legacy.maskList = try EditStorage.maskList(in: url)
+                    masks = legacy.sourceMasks(atSource: 0)
+                }
+            }
+            let clip = edit?.orderedScreenClips.filter { $0.card == nil }.min { ($0.timelineStart ?? 0) < ($1.timelineStart ?? 0) }
+            let source = clip?.sourceStart ?? 0
+            if let edit { masks = edit.activeMasks(at: (clip?.timelineStart ?? 0) + 0.0001) }
+            var cursor = 0.0
+            for segment in document.segments.sorted(by: { $0.id < $1.id }) {
+                defer { cursor += segment.duration }
+                guard source < cursor + segment.duration || segment.id == document.segments.map(\.id).max() else { continue }
+                guard let path = segment.files[.screen], ProjectStorage.mediaExists(path, in: url) else { break }
+                return (path, max(0, min(source - cursor, segment.duration - 0.001)), masks)
+            }
+            throw ProjectError.invalid("暂无缩略图。")
+        }.value
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: try ProjectStorage.mediaURL(plan.path, in: url)))
         generator.maximumSize = CGSize(width: 640, height: 400)
         generator.appliesPreferredTrackTransform = true
-        let frame = try await generator.image(at: .zero).image
-        var edit = VideoEdit(duration: max(0.001, document.duration)); edit.maskList = masks
-        let states = edit.sourceMasks(atSource: 0)
-        guard !states.isEmpty else { return frame }
-        let source = CIImage(cgImage: frame)
-        guard let masked = CIContext().createCGImage(MaskRenderer.apply(states, to: source), from: source.extent) else {
+        // 取精确的那一帧：遮罩按这一刻求值，容差放开可能取到遮罩还没盖上的相邻帧。
+        generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
+        let frame = try await generator.image(at: CMTime(seconds: plan.local, preferredTimescale: 600)).image
+        guard !plan.masks.isEmpty else { return frame }
+        let image = CIImage(cgImage: frame)
+        guard let masked = CIContext().createCGImage(MaskRenderer.apply(plan.masks, to: image), from: image.extent) else {
             throw ProjectError.invalid("无法生成已打码的缩略图。")
         }
         return masked
@@ -278,6 +323,18 @@ public enum ProjectMedia {
         return video
     }
 
+    /// 清掉这个文件夹里上次没收尾的导出临时文件（应用在导出中途被强制退出、崩溃时留下的）。
+    /// 只删 6 小时前的，正在进行的导出写的临时文件不会被碰到。
+    nonisolated static func removeStaleTemporaryFiles(in folder: URL) {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return }
+        let limit = Date().addingTimeInterval(-6 * 3600)
+        for name in names where name.hasPrefix(".caplo-export-") {
+            let file = folder.appendingPathComponent(name)
+            guard let modified = try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, modified < limit else { continue }
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+
     /// 固定工程快照导出；取消仅清理本次临时文件，不触碰用户原有目标或原素材。
     /// 旧入口：`longEdge` 1920 / 3840 对应 1080p / 4K 的 H.264（测试与旧调用方用）。
     public static func export(url: URL, document: ProjectDocument, levels: AudioLevels, destination: URL, edit: VideoEdit? = nil, longEdge: Int = 1920,
@@ -288,13 +345,23 @@ public enum ProjectMedia {
     }
 
     /// 按导出设置导出：格式、分辨率、帧率、画质、声音见 `ExportSettings`。
+    /// `pointers`：编辑会话已经解析好的指针事件，传进来就不再重读。
     public static func export(url: URL, document: ProjectDocument, levels: AudioLevels, destination: URL, edit: VideoEdit? = nil, settings: ExportSettings,
-                              progress: @escaping @MainActor (Double) -> Void) async throws {
+                              pointers: PointerTimeline? = nil, progress: @escaping @MainActor (Double) -> Void) async throws {
         let (composition, mix) = try await compose(url: url, document: document, levels: levels, edit: edit)
         // 码率与帧率自己定（见 ExportEncoder）：系统预设在 4K 上只给约 10 Mbps 且降到 30 fps。
         let rate = settings.outputFrameRate(recorded: document.frameRate)
-        let video = try edit.map { try videoComposition(composition: composition, edit: $0, shortEdge: settings.resolution.rawValue, pointers: loadPointers(url: url, document: document), backgroundImage: backgroundImage(for: $0.layout, in: url), frameRate: rate) }
-        let temporary = destination.deletingLastPathComponent().appendingPathComponent(".caplo-export-\(UUID()).\(settings.format.fileExtension)")
+        // 指针事件与背景图在后台读：两小时的工程解析事件要 0.6 秒，背景图解码几十毫秒，以前都卡在主线程上。
+        let timeline: PointerTimeline
+        if let pointers { timeline = pointers }
+        else if edit != nil { timeline = try await Task.detached(priority: .userInitiated) { try ProjectMedia.loadPointers(url: url, document: document) }.value }
+        else { timeline = PointerTimeline(events: []) }
+        let layout = edit?.layout
+        nonisolated(unsafe) let background = await Task.detached(priority: .userInitiated) { layout.flatMap { backgroundImage(for: $0, in: url) } }.value
+        let video = try edit.map { try videoComposition(composition: composition, edit: $0, shortEdge: settings.resolution.rawValue, pointers: timeline, backgroundImage: background, frameRate: rate) }
+        let folder = destination.deletingLastPathComponent()
+        removeStaleTemporaryFiles(in: folder)
+        let temporary = folder.appendingPathComponent(".caplo-export-\(UUID()).\(settings.format.fileExtension)")
         defer { try? FileManager.default.removeItem(at: temporary) }
         try await ExportEncoder.encode(asset: composition, videoComposition: video, audioMix: mix, destination: temporary, settings: settings) { value in
             Task { @MainActor in progress(value) }

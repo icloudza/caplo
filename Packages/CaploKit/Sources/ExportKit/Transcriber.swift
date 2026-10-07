@@ -79,6 +79,8 @@ public enum ProjectTranscription {
         var result: [CaptionCue] = []
         for (number, entry) in origins.enumerated() {
             try Task.checkCancellation()
+            // 缺失的录音段跳过，其余照常转写。
+            guard ProjectStorage.mediaExists(entry.path, in: url) else { continue }
             let file = try ProjectStorage.mediaURL(entry.path, in: url)
             let share = 1.0 / Double(origins.count)
             let cues = try await engine.transcribe(file: file, locale: locale) { value in

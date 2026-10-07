@@ -115,6 +115,9 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
     private var resumeFrom: CMTime?
     private var timer: DispatchSourceTimer?
     private var clock: CMClock = CMClockGetHostTimeClock()
+    /// 同时在收尾、提交的旧片段上限。到了上限还要换段就结束录制（保护已提交的部分）。
+    /// 原来是 2：慢盘、外置盘上一段的收尾加提交偶尔超过 10 秒，长录制会被中途结束；4 段留出约 40 秒余量。
+    static let maximumPendingSegments = 4
 
     init(project: URL, width: Int, height: Int, systemAudio: Bool, microphone: Bool, camera: Bool = false, frameRate: Double = 30, segmentSeconds: Double = 10,
          onStarted: @escaping @Sendable () -> Void, onFailure: @escaping @Sendable (String) -> Void) {
@@ -125,7 +128,10 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
         self.onStarted = onStarted; self.onFailure = onFailure
     }
 
-    /// 和媒体共用队列及片段边界；每段最多 2000 个事件，内存不会随录制时长增长。
+    /// 和媒体共用队列及片段边界；每段（10 秒）最多 6000 个事件，内存不会随录制时长增长。
+    /// 60 Hz 位置 + 60 Hz 拖拽 + 60 Hz 滚轮同时进行一段也只有约 1800 个；以前上限 2000 贴得太近。
+    /// 点击与松开不受上限约束：自动镜头靠它们，丢了就少一个镜头。
+    static let maximumEventsPerSegment = 6000
     private var savedCursors = Set<String>()
     private var cursorBytes = 0
     func appendPointer(_ sample: PointerSample, cursor: CapturedCursor? = nil) {
@@ -133,16 +139,20 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
             guard !stopped, !paused else { return }
             var sample = sample
             if let cursor, !savedCursors.contains(cursor.id) {
-                do {
-                    if savedCursors.count < 2048 && cursorBytes + cursor.png.count <= 48 * 1_048_576 {
-                        try CursorStorage.save(cursor, in: project); savedCursors.insert(cursor.id); cursorBytes += cursor.png.count
-                    } else { sample.cursorAssetID = nil }
-                } catch { sample.cursorAssetID = nil }
+                if savedCursors.count < 2048 && cursorBytes + cursor.png.count <= 48 * 1_048_576 {
+                    savedCursors.insert(cursor.id); cursorBytes += cursor.png.count
+                    // 光标图写盘放到提交队列：不在采集队列上做文件读写，画面与声音的写入不会被它挡住。
+                    // 写失败只是那一款光标按样式回退（读取端缺文件即跳过），不影响录制。
+                    let project = self.project
+                    commitQueue.async {
+                        do { try CursorStorage.save(cursor, in: project) } catch { NSLog("Caplo：光标图写入失败：%@", error.localizedDescription) }
+                    }
+                } else { sample.cursorAssetID = nil }
             }
             for segment in retiring + (current.map { [$0] } ?? []) {
                 guard sample.time >= segment.start.seconds,
                       segment.end == nil || sample.time < segment.end!.seconds,
-                      segment.events.count < 2000 else { continue }
+                      segment.events.count < Self.maximumEventsPerSegment || sample.kind == .click || sample.kind == .release else { continue }
                 var local = sample; local.time -= segment.start.seconds
                 segment.events.append(local)
             }
@@ -184,7 +194,6 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
     func ingest(_ sample: CMSampleBuffer, role: MediaRole) {
         dispatchPrecondition(condition: .onQueue(queue))
         guard !stopped, roles.contains(role), sample.isValid, sample.presentationTimeStamp.isNumeric, reportedFailure == nil else { return }
-        if role == .screen, latestFrame == nil || sample.presentationTimeStamp > latestFrame!.presentationTimeStamp { latestFrame = sample }
         if let from = resumeFrom, current == nil, !paused {
             let end = sample.presentationTimeStamp + (sample.duration.isNumeric ? sample.duration : .zero)
             if end > from { resumeFrom = end }
@@ -199,6 +208,9 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
                 try begin(at: sample.presentationTimeStamp)
                 try seedCamera(at: sample.presentationTimeStamp)
             }
+            // 换段之后再记住这一帧：换段用的段首快照必须是边界之前的画面（与摄像头同一规则），
+            // 以前先记后换，边界后到的帧会被提前到边界时刻显示。
+            if role == .screen, latestFrame == nil || sample.presentationTimeStamp > latestFrame!.presentationTimeStamp { latestFrame = sample }
             // 换段快照先使用边界之前的帧，再记住当前帧，防止后来的画面被提前显示。
             if role == .camera, latestCameraFrame == nil || sample.presentationTimeStamp > latestCameraFrame!.presentationTimeStamp {
                 latestCameraFrame = sample
@@ -249,7 +261,14 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
             segment.tracks[.camera] = try TrackFile(project: project, index: segment.index, role: .camera, width: width, height: height, start: sample.presentationTimeStamp)
         }
         guard segment.tracks[.camera]?.videoSize == CGSize(width: CVPixelBufferGetWidth(pixel), height: CVPixelBufferGetHeight(pixel)) else {
-            throw RecordingError.message("摄像头在录制中更改了画面尺寸，已停止录制以保护现有素材。")
+            // 摄像头中途换了画面尺寸（连续互通相机转向、切换格式）：一个编码器只能是一种尺寸，
+            // 以前直接结束整段录制。现在就地换段，新段用新尺寸建摄像头文件；退役中的旧段只丢掉这一帧。
+            // 段首 0.1 秒内不换（片段至少要有时长），先丢帧，下一帧再换。
+            guard segment === current, !paused, (sample.presentationTimeStamp - segment.start).seconds >= 0.1 else { return }
+            try rotate(at: sample.presentationTimeStamp)
+            // 还没有屏幕帧时换不了段（rotate 原样返回）：丢掉这一帧，不能对同一段再追加一次——那会无限递归。
+            if let fresh = current, fresh !== segment { try appendCamera(sample, to: fresh) }
+            return
         }
         try segment.tracks[.camera]?.append(sample, audio: false)
     }
@@ -264,7 +283,7 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
 
     private func rotate(at time: CMTime) throws {
         guard let old = current, let frame = latestFrame else { return }
-        guard pending < 2 else { throw RecordingError.message("片段保存持续积压，已结束录制以保护现有素材。") }
+        guard pending < Self.maximumPendingSegments else { throw RecordingError.message("片段保存持续积压，已结束录制以保护现有素材。") }
         old.end = time
         retire(old)
         current = nil
@@ -314,7 +333,7 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
                 queue.async { [self] in
                     pending -= 1
                     if let result { fail(result) }
-                    if let from = resumeFrom, pending < 2, current == nil, !paused, !stopped, reportedFailure == nil {
+                    if let from = resumeFrom, pending < Self.maximumPendingSegments, current == nil, !paused, !stopped, reportedFailure == nil {
                         resumeSegment(at: from)
                     }
                     group.leave()
@@ -346,7 +365,7 @@ final class SegmentedCaptureWriter: NSObject, SCStreamOutput, @unchecked Sendabl
                 // 暂停刚把一段送去提交、前一段还没提交完时，立刻开新段会让积压越过上限。
                 // 这不是故障：先记下继续的时刻，等提交降下来再开段（期间有新画面到达时 ingest 会先开段）。
                 // 以前这里直接报错，整段录制随之结束。
-                if pending >= 2 { resumeFrom = time } else { resumeSegment(at: time) }
+                if pending >= Self.maximumPendingSegments { resumeFrom = time } else { resumeSegment(at: time) }
                 continuation.resume()
             }
         }

@@ -42,9 +42,8 @@ public final class EditSaveQueue: @unchecked Sendable {
     /// 上次成功写下的内容；只在存盘队列上读写。写失败就清掉，下次一定重写。
     private var written: VideoEdit?
 
-    /// `written`：调用方刚写下的那份（打开工程时的首次落盘），紧接着的同样内容不必再写一遍。
-    public init(url: URL, document: ProjectDocument, onDisk: EditStorage.FileVersions? = nil, written: VideoEdit? = nil) {
-        self.url = url; self.document = document; self.onDisk = onDisk; self.written = written
+    public init(url: URL, document: ProjectDocument, onDisk: EditStorage.FileVersions? = nil) {
+        self.url = url; self.document = document; self.onDisk = onDisk
     }
 
     /// 排队保存这一份。`completion` 在主线程回调写盘结果；被后来的提交覆盖掉的那份不单独回调。

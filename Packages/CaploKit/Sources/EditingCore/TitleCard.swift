@@ -119,9 +119,15 @@ extension VideoEdit {
     }
 
     /// 删掉一块卡片：后面的一切前移卡片的长度，插入时切开的片段若还连续就合回一块。
+    /// 钉在卡片这段时间里的文字、遮罩、字幕（在卡片上加的标题之类）跟着卡片一起删掉：
+    /// 以前它们留在原处，卡片一删、后面的画面前移，就盖到了不相干的画面上。
     public mutating func removeCard(id: UUID) {
         guard let clip = clips.first(where: { $0.id == id }), let content = clip.card else { return }
         let point = clip.timelineStart ?? 0, length = clip.duration
+        let inside: (Double?) -> Bool = { start in start.map { $0 >= point - 0.0001 && $0 < point + length - 0.0001 } ?? false }
+        for value in textList where inside(value.timelineStart) { removeText(id: value.id); layerOrder?.removeAll { $0 == value.id } }
+        for value in maskList where inside(value.timelineStart) { removeMask(id: value.id); layerOrder?.removeAll { $0 == value.id } }
+        captionList.removeAll { inside($0.timelineStart) }
         clips.removeAll { $0.id == id }
         rippleTimeline(from: point + length, by: -length)
         for join in content.joins ?? [] { rejoin(head: join.head, tail: join.tail, at: point) }
@@ -134,9 +140,35 @@ extension VideoEdit {
         let length = max(Self.minimumCardDuration, min(wanted, 600))
         let old = clips[number].duration, delta = length - old
         guard abs(delta) > 0.0001 else { return }
-        let end = (clips[number].timelineStart ?? 0) + old
+        let cardStart = clips[number].timelineStart ?? 0, end = cardStart + old
         clips[number].duration = length
         clips[number].card?.text.duration = length
+        // 改短时，钉在被截掉那一截里的文字 / 遮罩 / 字幕挪回卡片之内（太长的文字、遮罩同时截到卡片长度），
+        // 否则后面的画面前移后它们就盖在了别的画面上。
+        if delta < 0 {
+            let newEnd = cardStart + length
+            let cut: (Double?) -> Bool = { start in start.map { $0 >= newEnd - 0.0001 && $0 < end - 0.0001 } ?? false }
+            for value in textList where cut(value.timelineStart) {
+                updateText(id: value.id) { text in
+                    text.duration = min(text.duration, length)
+                    text.timelineStart = max(cardStart, newEnd - text.duration)
+                }
+            }
+            for value in maskList where cut(value.timelineStart) {
+                updateMask(id: value.id) { mask in
+                    mask.duration = min(mask.duration, length)
+                    mask.timelineStart = max(cardStart, newEnd - mask.duration)
+                    // 关键帧时间相对遮罩起点，必须落在时长之内：截短后超出的丢掉。
+                    let limit = mask.duration + 0.001
+                    mask.positionKeys = mask.positionKeys?.filter { $0.time <= limit }
+                    mask.sizeKeys = mask.sizeKeys?.filter { $0.time <= limit }
+                    mask.amountKeys = mask.amountKeys?.filter { $0.time <= limit }
+                }
+            }
+            for cue in captionList where cut(cue.timelineStart) {
+                updateCaption(id: cue.id) { $0.timelineStart = max(cardStart, newEnd - $0.sourceDuration) }
+            }
+        }
         rippleTimeline(from: end, by: delta)
         normalizeTimelineRows()
     }

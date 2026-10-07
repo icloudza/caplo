@@ -100,17 +100,35 @@ public enum ProjectStorage {
         return url
     }
 
+    /// 读工程清单：校验片段结构与素材路径安全，**不**要求素材文件都在。
+    /// 以前缺任何一个文件（外置盘断开、单个文件损坏）整个工程就打不开；现在缺的素材在合成时当空白跳过，
+    /// 编辑器打开时用 `missingMedia` 提示缺了哪些。
     public static func load(_ url: URL) throws -> ProjectDocument {
         let data = try Data(contentsOf: url.appendingPathComponent("manifest.json"))
         let document = try JSONDecoder().decode(ProjectDocument.self, from: data)
         guard document.schemaVersion == 1 else { throw ProjectError.invalid("此工程版本暂不支持，请使用创建它的 Caplo 版本打开。") }
-        try validate(document.segments, in: url)
+        try validate(document.segments, in: url, checkingFiles: false)
         return document
     }
 
+    /// 清单里记着、磁盘上却不在的素材（相对路径）。
+    public static func missingMedia(in document: ProjectDocument, at url: URL) -> [String] {
+        document.segments.flatMap { $0.files.values }.filter { path in
+            guard let file = try? mediaURL(path, in: url) else { return true }
+            return !FileManager.default.fileExists(atPath: file.path)
+        }.sorted()
+    }
+
+    /// 素材文件在不在：合成、波形、语音处理遇到缺失的文件都跳过那一段，而不是整条失败。
+    public static func mediaExists(_ path: String, in project: URL) -> Bool {
+        guard let file = try? mediaURL(path, in: project) else { return false }
+        return FileManager.default.fileExists(atPath: file.path)
+    }
+
     public static func save(_ document: ProjectDocument, to url: URL) throws {
+        // 不缩进：录制中每 10 秒重写一次，两小时七百多段时缩进让文件翻倍、编码变慢；键排序保留，内容不变时字节不变。
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.outputFormatting = [.sortedKeys]
         try encoder.encode(document).write(to: url.appendingPathComponent("manifest.json"), options: .atomic)
     }
 
@@ -126,8 +144,9 @@ public enum ProjectStorage {
         try save(document, to: url)
     }
 
+    /// 提交一个片段：只核对这一段的文件（以前每次都把全部片段的文件逐个查一遍，两小时的录制每 10 秒查近三千个文件）。
     public static func commit(_ segment: SegmentRecord, to url: URL) throws {
-        try validate([segment], in: url)
+        try validate([segment], in: url, checkingFiles: true)
         let log = url.appendingPathComponent(String(format: "Recovery/%06d.json", segment.id))
         try JSONEncoder().encode(segment).write(to: log, options: .atomic)
         var document = try load(url)
@@ -151,9 +170,14 @@ public enum ProjectStorage {
         guard document.state == .recording else { return document }
         let logs = try FileManager.default.contentsOfDirectory(at: url.appendingPathComponent("Recovery"), includingPropertiesForKeys: nil)
         var recovered = Dictionary(uniqueKeysWithValues: document.segments.map { ($0.id, $0) })
-        for log in logs where log.pathExtension == "json" {
-            let segment = try JSONDecoder().decode(SegmentRecord.self, from: Data(contentsOf: log))
-            try validate([segment], in: url)
+        // 只认片段日志（六位编号.json）：同一目录里还有编辑数据升级前留的备份（edits-v5.json 等），
+        // 以前按扩展名全读，备份解不成片段就让整个恢复失败。单条日志坏了或素材不全也只跳过这一段。
+        for log in logs where Self.isSegmentLog(log.lastPathComponent) {
+            guard let data = try? Data(contentsOf: log), let segment = try? JSONDecoder().decode(SegmentRecord.self, from: data),
+                  (try? validate([segment], in: url, checkingFiles: true)) != nil else {
+                NSLog("Caplo：恢复时跳过无法使用的片段日志 %@", log.lastPathComponent)
+                continue
+            }
             recovered[segment.id] = segment
         }
         document.segments = recovered.values.sorted { $0.id < $1.id }
@@ -194,7 +218,13 @@ public enum ProjectStorage {
         return path
     }
 
-    private static func validate(_ segments: [SegmentRecord], in url: URL) throws {
+    /// 片段日志的文件名：六位编号加 .json。
+    static func isSegmentLog(_ name: String) -> Bool {
+        name.count == 11 && name.hasSuffix(".json") && name.prefix(6).allSatisfy { $0.isASCII && $0.isNumber }
+    }
+
+    /// `checkingFiles`：新提交、恢复日志要求文件确实在；读清单只查结构与路径安全（见 `load`）。
+    private static func validate(_ segments: [SegmentRecord], in url: URL, checkingFiles: Bool) throws {
         var ids = Set<Int>()
         for segment in segments {
             guard segment.id >= 0, ids.insert(segment.id).inserted,
@@ -206,7 +236,7 @@ public enum ProjectStorage {
             }
             for path in segment.files.values {
                 let file = try mediaURL(path, in: url)
-                guard FileManager.default.fileExists(atPath: file.path) else { throw ProjectError.invalid("工程素材丢失：\(path)") }
+                guard !checkingFiles || FileManager.default.fileExists(atPath: file.path) else { throw ProjectError.invalid("工程素材丢失：\(path)") }
             }
         }
     }

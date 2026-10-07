@@ -51,6 +51,20 @@ import EditingCore
     edit.audio.muted = [.microphone]
     let silence = try await exportRMS(edit, name: "muted-solo")
     #expect(silence < 0.0001)
+
+    // 独立编辑的麦克风切成四块（互不重叠）：共用一条轨，不再一块一轨；每块自己的增益照样作用到混音上。
+    var layered = edit; layered.audio.solo = [.microphone]; layered.audio.muted = []
+    layered.prepareLayerEditing(camera: false, system: true, microphone: true)
+    for time in [0.25, 0.5, 0.75] {
+        let id = try #require(layered.mediaClips(.microphone).first { ($0.timelineStart ?? 0) < time && ($0.timelineStart ?? 0) + $0.duration > time }?.id)
+        #expect(layered.splitMedia(.microphone, id: id, at: time) != nil)
+    }
+    #expect(layered.mediaClips(.microphone).count == 4)
+    let (layeredComposition, _) = try await ProjectMedia.compose(url: url, document: document, levels: layered.audio, edit: layered)
+    #expect(layeredComposition.tracks(withMediaType: .audio).count == 2, "四块麦克风建了 \(layeredComposition.tracks(withMediaType: .audio).count - 1) 条轨")
+    layered.setMediaClips(.microphone, layered.mediaClips(.microphone).map { var clip = $0; clip.microphoneGain = 0; return clip })
+    #expect(try await exportRMS(layered, name: "layered-silent") < 0.0001, "共用一条轨后单块增益没生效")
+
     try EditStorage.save(edit, in: url, document: document)
     let reopened = try EditStorage.load(in: url, document: document)
     #expect(reopened.audio == edit.audio)

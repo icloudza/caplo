@@ -12,7 +12,8 @@ import CoreImage
 ///   亮环内侧压暗一圈、背光一侧更重，白底上也看得出玻璃的厚度；
 /// - **投影**：圆心略下方一圈柔和的暗影，只在玻璃外缘露出来，让它"浮"在画面上。
 ///
-/// 内核用 Core Image 内核语言在运行时编译（与 `CardShape` 同一做法）；编译失败时 `isAvailable` 为假，调用方退回 PNG 素材。
+/// 内核优先用预编译的 Metal 版（`MetalKernels`），读不到时再用下面的 Core Image 内核语言在运行时编译；
+/// 两样都失败时 `isAvailable` 为假，调用方退回 PNG 素材。
 enum LiquidGlass {
     /// 光标样式表里"透明玻璃"的 ID。
     static let styleID = "4-01"
@@ -61,7 +62,9 @@ enum LiquidGlass {
     }
     """
 
-    private static let kernel: CIKernel? = (CIKernel.makeKernels(source: source) as? [CIKernel])?.first { $0.name == "liquidGlass" }
+    /// Metal 版优先（见 `MetalKernels`）；下面的 CIKL 源码只作兜底，两处公式必须同步。
+    private static let kernel: CIKernel? = MetalKernels.kernel("liquidGlass")
+        ?? (CIKernel.makeKernels(source: source) as? [CIKernel])?.first { $0.name == "liquidGlass" }
 
     static var isAvailable: Bool { kernel != nil }
 

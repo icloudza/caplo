@@ -26,49 +26,109 @@ public struct TimelineAnalysis: Sendable {
     public func microphonePeak(from start: Double, to end: Double) -> Float { Self.peak(in: microphoneLevels, from: start, to: end) }
 
     /// 后台生成波形代理数据：实际 PCM 峰值，缺失音轨保留空数组，不使用装饰性假波形。
-    public static func load(url: URL, document: ProjectDocument) async throws -> TimelineAnalysis {
+    ///
+    /// - 每个音频文件的峰值单独算、单独缓存在工程 `Cache/Peaks/` 里（按文件大小与修改时间核对）：
+    ///   以前每次打开编辑器都把全部录音重新解码一遍，两小时的工程光系统声音就要读两个多 GB；
+    /// - 某个文件读不出来（缺失、损坏）只空出它那一段，不再让整条波形都没有；
+    /// - `voiceProcessing` 打开且已有处理产物时，麦克风波形画处理后的声音，和听到的一致。
+    public static func load(url: URL, document: ProjectDocument, voiceProcessing: Bool = false) async throws -> TimelineAnalysis {
         let worker = Task.detached(priority: .utility) {
             let bins = Int((document.duration * binsPerSecond).rounded(.up))
             guard bins > 0 else { return TimelineAnalysis() }
             var system = [Float](repeating: 0, count: bins), microphone = system
             var hasSystem = false, hasMicrophone = false
+            let cache = url.appendingPathComponent("Cache/Peaks", isDirectory: true)
+            try? FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
             var cursor = 0.0
             for segment in document.segments.sorted(by: { $0.id < $1.id }) {
                 defer { cursor += segment.duration }
                 try Task.checkCancellation()
                 for role in [MediaRole.systemAudio, .microphone] {
-                    guard let path = segment.files[role] else { continue }
-                    let asset = AVURLAsset(url: try ProjectStorage.mediaURL(path, in: url))
-                    guard let track = try await asset.loadTracks(withMediaType: .audio).first else { continue }
-                    let reader = try AVAssetReader(asset: asset)
-                    let output = AVAssetReaderTrackOutput(track: track, outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMIsFloatKey: true, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsNonInterleaved: false])
-                    reader.add(output)
-                    guard reader.startReading() else { throw reader.error ?? ProjectError.invalid("无法读取音频波形。") }
-                    defer { reader.cancelReading() }
+                    guard var path = segment.files[role] else { continue }
+                    if role == .microphone, voiceProcessing, let processed = VoiceProcessor.processedPath(for: segment), ProjectStorage.mediaExists(processed, in: url) { path = processed }
+                    guard ProjectStorage.mediaExists(path, in: url), let file = try? ProjectStorage.mediaURL(path, in: url) else { continue }
+                    let peaks: [Float]
+                    do { peaks = try await filePeaks(file, cache: cache) }
+                    catch is CancellationError { throw CancellationError() }
+                    catch { NSLog("Caplo：波形跳过读不出来的音频 %@：%@", path, error.localizedDescription); continue }
                     // 音轨可能晚于画面开始（`mediaOffsets`），格子按片段时间对齐，和合成、导出用同一条规则。
-                    let segmentStart = cursor + segment.offset(for: role)
-                    while let sample = output.copyNextSampleBuffer() {
-                        try Task.checkCancellation()
-                        guard let data = sample.dataBuffer, let format = sample.formatDescription,
-                              let description = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee,
-                              sample.presentationTimeStamp.isNumeric else { continue }
-                        let channels = Int(max(1, description.mChannelsPerFrame))
-                        let sampleRate = description.mSampleRate > 0 ? description.mSampleRate : 48_000
-                        let frames = CMBlockBufferGetDataLength(data) / (MemoryLayout<Float>.size * channels)
-                        guard frames > 0 else { continue }
-                        let base = segmentStart + sample.presentationTimeStamp.seconds
-                        try withContiguousFloats(of: data, count: frames * channels) { samples in
-                            if role == .systemAudio { accumulate(into: &system, samples: samples, frames: frames, channels: channels, sampleRate: sampleRate, base: base) }
-                            else { accumulate(into: &microphone, samples: samples, frames: frames, channels: channels, sampleRate: sampleRate, base: base) }
-                        }
-                    }
-                    guard reader.status == .completed else { throw reader.error ?? ProjectError.invalid("波形读取中断。") }
-                    if role == .systemAudio { hasSystem = true } else { hasMicrophone = true }
+                    let base = cursor + segment.offset(for: role)
+                    if role == .systemAudio { merge(peaks, into: &system, base: base); hasSystem = true }
+                    else { merge(peaks, into: &microphone, base: base); hasMicrophone = true }
                 }
             }
             return TimelineAnalysis(system: hasSystem ? system : [], microphone: hasMicrophone ? microphone : [])
         }
         return try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
+    }
+
+    /// 文件级峰值放到工程时间轴上：整体平移 `base` 换算成的格数（四舍五入到最近一格，误差不超过 5 毫秒）。
+    /// 不能逐格算 (base + i / 100) × 100 再向下取整：浮点误差会让整段错开一格。
+    static func merge(_ peaks: [Float], into timeline: inout [Float], base: Double) {
+        let shift = Int((base * binsPerSecond).rounded())
+        for (index, value) in peaks.enumerated() where value > 0 {
+            let bin = shift + index
+            guard bin >= 0 else { continue }
+            guard bin < timeline.count else { break }
+            timeline[bin] = max(timeline[bin], value)
+        }
+    }
+
+    /// 缓存文件头：魔数、文件大小、修改时间、格数，后面是格子。
+    private static let cacheMagic: UInt32 = 0x314B_5043   // "CPK1"
+
+    /// 一个音频文件的峰值（每 10 毫秒一格，相对文件起点）。缓存命中就直接读，否则解码一遍再写缓存。
+    static func filePeaks(_ file: URL, cache: URL) async throws -> [Float] {
+        let values = try file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+        let size = UInt64(values.fileSize ?? 0), modified = values.contentModificationDate?.timeIntervalSince1970 ?? 0
+        let cached = cache.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".peaks")
+        if let data = try? Data(contentsOf: cached), data.count >= 24 {
+            let header = data.withUnsafeBytes { raw in
+                (raw.loadUnaligned(fromByteOffset: 0, as: UInt32.self), raw.loadUnaligned(fromByteOffset: 4, as: UInt64.self),
+                 raw.loadUnaligned(fromByteOffset: 12, as: Double.self), raw.loadUnaligned(fromByteOffset: 20, as: UInt32.self))
+            }
+            if header.0 == cacheMagic, header.1 == size, header.2 == modified, data.count == 24 + Int(header.3) * 4 {
+                return data.withUnsafeBytes { raw in (0..<Int(header.3)).map { raw.loadUnaligned(fromByteOffset: 24 + $0 * 4, as: Float.self) } }
+            }
+        }
+        let peaks = try await decodePeaks(file)
+        var data = Data(capacity: 24 + peaks.count * 4)
+        withUnsafeBytes(of: cacheMagic) { data.append(contentsOf: $0) }
+        withUnsafeBytes(of: size) { data.append(contentsOf: $0) }
+        withUnsafeBytes(of: modified) { data.append(contentsOf: $0) }
+        withUnsafeBytes(of: UInt32(peaks.count)) { data.append(contentsOf: $0) }
+        peaks.withUnsafeBytes { data.append(contentsOf: $0) }
+        try? data.write(to: cached, options: .atomic)
+        return peaks
+    }
+
+    /// 解码整个音频文件取峰值。
+    static func decodePeaks(_ file: URL) async throws -> [Float] {
+        let asset = AVURLAsset(url: file)
+        guard let track = try await asset.loadTracks(withMediaType: .audio).first else { return [] }
+        let duration = try await asset.load(.duration).seconds
+        var peaks = [Float](repeating: 0, count: max(1, Int(((duration.isFinite ? duration : 0) * binsPerSecond).rounded(.up)) + 1))
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMIsFloatKey: true, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsNonInterleaved: false])
+        reader.add(output)
+        guard reader.startReading() else { throw reader.error ?? ProjectError.invalid("无法读取音频波形。") }
+        defer { reader.cancelReading() }
+        while let sample = output.copyNextSampleBuffer() {
+            try Task.checkCancellation()
+            guard let data = sample.dataBuffer, let format = sample.formatDescription,
+                  let description = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee,
+                  sample.presentationTimeStamp.isNumeric else { continue }
+            let channels = Int(max(1, description.mChannelsPerFrame))
+            let sampleRate = description.mSampleRate > 0 ? description.mSampleRate : 48_000
+            let frames = CMBlockBufferGetDataLength(data) / (MemoryLayout<Float>.size * channels)
+            guard frames > 0 else { continue }
+            let base = sample.presentationTimeStamp.seconds
+            try withContiguousFloats(of: data, count: frames * channels) { samples in
+                accumulate(into: &peaks, samples: samples, frames: frames, channels: channels, sampleRate: sampleRate, base: base)
+            }
+        }
+        guard reader.status == .completed else { throw reader.error ?? ProjectError.invalid("波形读取中断。") }
+        return peaks
     }
 
     /// 连续内存直接借用，不连续或未对齐时才复制一份。

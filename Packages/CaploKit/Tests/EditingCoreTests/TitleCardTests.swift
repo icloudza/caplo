@@ -31,9 +31,24 @@ private func recording(_ duration: Double) -> VideoEdit {
     #expect(edit.activeTexts(at: 5.5).contains { $0.id == card.card?.text.id })
     #expect(edit.stage(at: 5.5).alpha < 0.01)
 
+    // 在卡片上加一段文字（钉在成片时间上）：删卡片时它要跟着删，不能留下来盖到前移过来的画面上。
+    var onCard = TextSegment(start: 0, duration: 2, text: "卡片上的字"); onCard.timelineStart = 4.5
+    edit.addText(onCard)
     edit.removeCard(id: id)
     try edit.validate(sourceDuration: 10)
+    #expect(edit.text(id: onCard.id) == nil, "卡片删了，钉在卡片上的文字还在")
     #expect(abs(edit.duration - 10) < 0.001)
+
+    // 横跨插入点的跟随镜头：插入点之后的运镜关键帧跟着卡片后移，删卡片后回到原处。
+    var follow = recording(10)
+    var zoom = FocusSegment(start: 2, duration: 4, x: 0.5, y: 0.5); zoom.timelineStart = 2; zoom.sampledPath = true
+    zoom.path = [FocusKeyframe(time: 0, x: 0.2, y: 0.5, scale: 1.8, move: 0), FocusKeyframe(time: 3, x: 0.8, y: 0.5, scale: 1.8, move: 0)]
+    follow.focuses = [zoom]
+    let insertedFollow = follow.insertCard(at: 4, duration: 3)
+    let followCard = try #require(insertedFollow)
+    #expect(follow.focuses.first?.path?.map(\.time) == [0, 6], "插卡片后运镜没跟着后移：\(follow.focuses.first?.path?.map(\.time) ?? [])")
+    follow.removeCard(id: followCard)
+    #expect(follow.focuses.first?.path?.map(\.time) == [0, 3])
     // 插入时切开的口子合回去了：画面与声音都还是一整块。
     #expect(edit.clips.count == 1 && abs(edit.clips[0].duration - 10) < 0.001)
     #expect(edit.mediaClips(.system).count == 1 && edit.mediaClips(.microphone).count == 1)

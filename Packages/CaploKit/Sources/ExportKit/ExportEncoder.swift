@@ -127,14 +127,19 @@ public enum ExportEncoder {
     }
 }
 
-/// GIF：按合成的帧率（就是 GIF 帧率）逐帧取画面，转成 sRGB 位图写进 ImageIO，无限循环。
+/// GIF：按合成的帧率（就是 GIF 帧率）逐帧取画面，转成 sRGB 位图编码，无限循环。
 /// 合成器输出的是 CoreMedia 709 空间的像素，这里按它解读再落到 sRGB，GIF 的颜色才和视频一致。
+///
+/// 不再把所有帧交给一个多帧 `CGImageDestination`：实测（2026-10-07）它在写入阶段只占几 MB，
+/// 收尾那一步却把全部帧一起展开——120 帧 1080p 就涨到 2.6 GB，一分钟的 GIF 直接把内存撑爆。
+/// 现在每帧单独编码成一张单帧 GIF（用系统的调色与压缩），再由 `GIFAssembler` 把各帧的图像块
+/// 拼进同一个文件，内存不随帧数增长。
 private final class GIFWriter: @unchecked Sendable {
     private let reader: AVAssetReader
     private let output: AVAssetReaderOutput
     private let destination: URL
     private let frames: Int
-    private let delay: Double
+    private let frameRate: Double
     private let duration: Double
     private let progress: @Sendable (Double) -> Void
     private let lock = NSLock()
@@ -143,7 +148,7 @@ private final class GIFWriter: @unchecked Sendable {
     init(reader: AVAssetReader, output: AVAssetReaderOutput, destination: URL, frames: Int, frameRate: Double, duration: Double,
          progress: @escaping @Sendable (Double) -> Void) {
         self.reader = reader; self.output = output; self.destination = destination; self.frames = frames
-        self.delay = 1 / max(1, frameRate); self.duration = max(0.001, duration); self.progress = progress
+        self.frameRate = max(1, frameRate); self.duration = max(0.001, duration); self.progress = progress
     }
 
     func cancel() {
@@ -163,13 +168,9 @@ private final class GIFWriter: @unchecked Sendable {
 
     private func write() throws {
         guard reader.startReading() else { throw reader.error ?? ProjectError.invalid("无法开始读取工程素材。") }
-        guard let file = CGImageDestinationCreateWithURL(destination as CFURL, UTType.gif.identifier as CFString, frames, nil) else {
-            reader.cancelReading(); throw ProjectError.invalid("无法写入 GIF。")
-        }
-        CGImageDestinationSetProperties(file, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
-        let frameProperties = [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: delay, kCGImagePropertyGIFUnclampedDelayTime: delay]] as CFDictionary
         let context = CIContext(options: [.cacheIntermediates: false])
         let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
+        var assembler: GIFAssembler?
         var written = 0, last: CGImage?
         while written < frames {
             if isCancelled { throw CancellationError() }
@@ -178,17 +179,131 @@ private final class GIFWriter: @unchecked Sendable {
                 let picture = CIImage(cvPixelBuffer: buffer, options: [.colorSpace: SceneColor.output])
                 return context.createCGImage(picture, from: picture.extent, format: .RGBA8, colorSpace: sRGB)
             }
-            // 读完了但帧数还没到（时长取整的最后一帧）：重复最后一帧补齐，ImageIO 要求帧数与声明一致。
+            // 读完了但帧数还没到（时长取整的最后一帧）：重复最后一帧补齐，帧数与时长保持一致。
             guard let frame = image ?? last else { break }
-            CGImageDestinationAddImage(file, frame, frameProperties)
+            if assembler == nil { assembler = try GIFAssembler(destination: destination, width: frame.width, height: frame.height, frameRate: frameRate) }
+            try autoreleasepool { try assembler?.append(frame) }
             last = frame; written += 1
             if written % 5 == 0 { progress(min(0.99, Double(written) / Double(frames))) }
         }
         if isCancelled { throw CancellationError() }
         if reader.status == .failed { throw reader.error ?? ProjectError.invalid("读取工程素材失败。") }
-        guard written > 0, CGImageDestinationFinalize(file) else { throw ProjectError.invalid("GIF 写入失败。") }
+        guard written > 0, let assembler else { throw ProjectError.invalid("GIF 写入失败。") }
+        try assembler.finish()
         progress(1)
     }
+}
+
+/// 把单帧 GIF 的图像块拼成一个循环播放的动图，边编码边写盘。
+///
+/// 每帧先用 ImageIO 编成一张完整的单帧 GIF（调色板、LZW 压缩都交给系统），再从中取出：
+/// 调色板（全局或局部）与图像数据块；写出时调色板一律放成该帧的局部调色板，前面加一个图形控制扩展记录这一帧的停留时间。
+/// GIF 的时间单位是 1/100 秒：15 fps 的 6.67 厘秒按误差扩散在 6 和 7 之间交替，总时长不漂。
+final class GIFAssembler {
+    private let handle: FileHandle
+    private let width: Int, height: Int
+    private let frameDuration: Double
+    private var elapsed = 0.0
+    private var emitted = 0
+
+    init(destination: URL, width: Int, height: Int, frameRate: Double) throws {
+        guard width > 0, height > 0, width <= 65_535, height <= 65_535 else { throw ProjectError.invalid("GIF 尺寸无效。") }
+        guard FileManager.default.createFile(atPath: destination.path, contents: nil) else { throw ProjectError.invalid("无法写入 GIF。") }
+        handle = try FileHandle(forWritingTo: destination)
+        self.width = width; self.height = height
+        frameDuration = 1 / max(1, frameRate)
+        var head = Data("GIF89a".utf8)
+        head.append(contentsOf: Self.le16(width) + Self.le16(height) + [0x00, 0x00, 0x00])   // 不用全局调色板
+        // NETSCAPE2.0 循环扩展：0 = 无限循环。
+        head.append(contentsOf: [0x21, 0xFF, 0x0B] + Array("NETSCAPE2.0".utf8) + [0x03, 0x01, 0x00, 0x00, 0x00])
+        try handle.write(contentsOf: head)
+    }
+
+    func append(_ image: CGImage) throws {
+        let data = NSMutableData()
+        guard let single = CGImageDestinationCreateWithData(data, UTType.gif.identifier as CFString, 1, nil) else { throw ProjectError.invalid("GIF 编码失败。") }
+        CGImageDestinationAddImage(single, image, nil)
+        guard CGImageDestinationFinalize(single) else { throw ProjectError.invalid("GIF 编码失败。") }
+        let frame = try Self.parse(data as Data)
+        // 停留时间按累计时刻取整后求差，误差不累积。
+        elapsed += frameDuration
+        let target = Int((elapsed * 100).rounded())
+        let delay = max(1, target - emitted)
+        emitted += delay
+        var block: [UInt8] = [0x21, 0xF9, 0x04, 0x04] + Self.le16(delay) + [0x00, 0x00]   // 处置方式 1：保留，不透明
+        let tableBits = UInt8(frame.tableSizeBits & 0x07)
+        block += [0x2C] + Self.le16(frame.left) + Self.le16(frame.top) + Self.le16(frame.width) + Self.le16(frame.height)
+        block.append((frame.table.isEmpty ? 0x00 : (0x80 | tableBits)) | (frame.interlaced ? 0x40 : 0x00))
+        var out = Data(block)
+        out.append(frame.table)
+        out.append(frame.imageData)
+        try handle.write(contentsOf: out)
+    }
+
+    func finish() throws {
+        try handle.write(contentsOf: Data([0x3B]))
+        try handle.close()
+    }
+
+    struct Frame { var left = 0, top = 0, width = 0, height = 0; var table = Data(); var tableSizeBits = 0; var interlaced = false; var imageData = Data() }
+
+    /// 解析单帧 GIF：取第一幅图的位置、调色板（局部优先，否则全局）与 LZW 数据（含最小码长字节与全部子块、结尾 0）。
+    static func parse(_ data: Data) throws -> Frame {
+        let bytes = [UInt8](data)
+        func fail() -> Error { ProjectError.invalid("GIF 编码结果无法解析。") }
+        guard bytes.count > 13, bytes[0] == 0x47, bytes[1] == 0x49, bytes[2] == 0x46 else { throw fail() }
+        var index = 13
+        var global = Data(), globalBits = 0
+        if bytes[10] & 0x80 != 0 {
+            globalBits = Int(bytes[10] & 0x07)
+            let size = 3 * (1 << (globalBits + 1))
+            guard index + size <= bytes.count else { throw fail() }
+            global = Data(bytes[index..<(index + size)]); index += size
+        }
+        func skipSubBlocks(from start: Int) throws -> Int {
+            var cursor = start
+            while true {
+                guard cursor < bytes.count else { throw fail() }
+                let length = Int(bytes[cursor]); cursor += 1
+                if length == 0 { return cursor }
+                cursor += length
+            }
+        }
+        while index < bytes.count {
+            switch bytes[index] {
+            case 0x21:   // 扩展：标签 + 子块
+                guard index + 1 < bytes.count else { throw fail() }
+                index = try skipSubBlocks(from: index + 2)
+            case 0x2C:   // 图像描述符
+                guard index + 10 <= bytes.count else { throw fail() }
+                var frame = Frame()
+                frame.left = Int(bytes[index + 1]) | Int(bytes[index + 2]) << 8
+                frame.top = Int(bytes[index + 3]) | Int(bytes[index + 4]) << 8
+                frame.width = Int(bytes[index + 5]) | Int(bytes[index + 6]) << 8
+                frame.height = Int(bytes[index + 7]) | Int(bytes[index + 8]) << 8
+                let packed = bytes[index + 9]
+                index += 10
+                if packed & 0x80 != 0 {
+                    frame.tableSizeBits = Int(packed & 0x07)
+                    let size = 3 * (1 << (frame.tableSizeBits + 1))
+                    guard index + size <= bytes.count else { throw fail() }
+                    frame.table = Data(bytes[index..<(index + size)]); index += size
+                } else { frame.table = global; frame.tableSizeBits = globalBits }
+                guard frame.table.count > 0 else { throw fail() }
+                // 交错扫描的图拼接后仍要按交错解码：保留这一位。
+                frame.interlaced = packed & 0x40 != 0
+                let dataStart = index
+                index = try skipSubBlocks(from: index + 1)
+                frame.imageData = Data(bytes[dataStart..<index])
+                return frame
+            case 0x3B: throw fail()
+            default: throw fail()
+            }
+        }
+        throw fail()
+    }
+
+    private static func le16(_ value: Int) -> [UInt8] { [UInt8(value & 0xFF), UInt8((value >> 8) & 0xFF)] }
 }
 
 /// 读写泵：画面与声音各一个串行队列，各自在编码器要数据时搬运，两路都搬完再收尾。

@@ -52,8 +52,9 @@ final class VideoEditorModel {
     }
     @ObservationIgnored private var focusPlanKey: FocusPlanKey?
     @ObservationIgnored private var focusPlan: [FocusSegment]?
-    /// 后台预解的指针事件，见 open()。构建播放项时也要用同一份，别在会话里存两份解析结果——
-    /// 半小时的录制光指针事件就有几百万个采样。
+    /// 指针事件的唯一一次后台解析（见 `loadPointers()`）：打开时的预读、重建播放项、重新生成镜头、切换跟随都等它，
+    /// 不再各自把整份事件文件再解一遍——两小时的工程解析一次就要 0.6 秒。
+    @ObservationIgnored private var pointerTask: Task<PointerTimeline, Never>?
     @ObservationIgnored private var pointerPreloadTask: Task<Void, Never>?
 
     /// 和画面同一份数据：跟随镜头已经预编译成运镜路径。
@@ -66,10 +67,8 @@ final class VideoEditorModel {
         let key = FocusPlanKey(clips: edit.clips, layerOrder: edit.layerOrder, focuses: edit.focuses,
                                style: edit.focusStyle, automatic: edit.automaticFocus)
         if key != focusPlanKey {
-            if pointers == nil {
-                // 正常情况下 open() 里那次后台预解早已把它填好；这里是兜底（刚打开就立刻用到相机）。
-                pointers = try? ProjectMedia.loadPointers(url: entry.url, document: entry.document)
-            }
+            // 指针事件还没在后台解完时先按空事件规划，不在主线程上同步读盘（两小时的工程要卡 0.6 秒）；
+            // 解完时 loadPointers() 会把缓存作废，下一次取用自动按真实事件重排。
             focusPlan = edit.resolvingTimelineFocus(events: pointers?.focusSamples ?? []).focuses
             focusPlanKey = key
         }
@@ -208,22 +207,23 @@ final class VideoEditorModel {
             let url = entry.url, document = entry.document, wallpaper = DesktopWallpaper.currentURL()
             let camera = document.segments.contains { $0.files[.camera] != nil }
             let system = audioTracks.contains(.system), microphone = audioTracks.contains(.microphone)
-            let (loaded, versions) = try await Task.detached(priority: .userInitiated) { () throws -> (VideoEdit, EditStorage.FileVersions?) in
+            let (loaded, missing) = try await Task.detached(priority: .userInitiated) { () throws -> (VideoEdit, Int) in
                 var edit = try EditStorage.load(in: url, document: document, wallpaper: wallpaper)
                 edit.prepareLayerEditing(camera: camera, system: system, microphone: microphone)
-                // 初次自动生成镜头也落盘，重新打开时保持相同结果。之后的保存交给后台队列，它记得盘上的版本、不再回读旧文件。
-                var versions: EditStorage.FileVersions?
-                try EditStorage.save(edit, in: url, document: document, onDisk: &versions)
-                return (edit, versions)
+                return (edit, ProjectStorage.missingMedia(in: document, at: url).count)
             }.value
-            // 读盘期间窗口可能已经关掉（close 会放掉租约）：什么都不再改。
+            // 读盘期间窗口可能已经关掉（close 会放掉租约）：什么都不再改，也不写盘。
             guard !closed else { return }
             edit = loaded
             selectedClip = edit.clips.first?.id
             selectedClipIDs = Set(edit.clips.prefix(1).map(\.id))
             ready = true; saveStatus = "已保存"
             VideoEditorSessions.current = self
-            saver = EditSaveQueue(url: entry.url, document: entry.document, onDisk: versions, written: loaded)
+            // 初次自动生成的镜头、旧工程的迁移也落一次盘，重新打开时结果相同。交给存盘队列：关窗前 flush 会等它写完再放掉租约。
+            // 以前在读盘的后台任务里直接写，窗口关掉、工程被重新打开之后它还可能写进来，盖掉新会话刚保存的修改。
+            saver = EditSaveQueue(url: entry.url, document: entry.document)
+            save()
+            if missing > 0 { error = "工程缺少 \(missing) 个素材文件（外置盘未连接或文件被移走），对应时段显示为空白、没有声音。" }
             installTimeObserver()
             // 播放到结尾自动回到暂停态，播放头停在末尾；再按播放从头开始（togglePlayback 已处理）。
             endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] note in
@@ -236,25 +236,9 @@ final class VideoEditorModel {
                 }
             }
             reload()
-            // 指针事件先在后台解出来。第一次访问 renderEdit 才去同步读盘的话，
-            // 那一下往往正好落在鼠标事件里（画布命中测试就会取它），十分钟的录制能把界面卡住近百毫秒。
-            let projectURL = entry.url, projectDocument = entry.document
-            pointerPreloadTask = Task { [weak self] in
-                let loaded = await Task.detached(priority: .utility) {
-                    try? ProjectMedia.loadPointers(url: projectURL, document: projectDocument)
-                }.value
-                guard let self, !self.closed, self.pointers == nil, let loaded else { return }
-                self.pointers = loaded
-                // 之前若已经用空事件规划过，缓存要作废重排一次。
-                self.focusPlanKey = nil
-            }
-            analysisTask = Task { [weak self] in
-                guard let self else { return }
-                do {
-                    let result = try await TimelineAnalysis.load(url: entry.url, document: entry.document)
-                    try Task.checkCancellation(); analysis = result
-                } catch is CancellationError {} catch { self.error = "时间线预览生成失败：\(error.localizedDescription)" }
-            }
+            // 指针事件先在后台解出来（reload 也在等同一份）：第一次用到相机时不必在主线程上同步读盘。
+            pointerPreloadTask = Task { [weak self] in _ = await self?.loadPointers() }
+            reloadAnalysis()
         } catch { self.error = error.localizedDescription; saveStatus = "未能打开编辑"; ready = false; loading = false; lease = nil }
     }
 
@@ -288,7 +272,13 @@ final class VideoEditorModel {
         // 而不是在校验时变成一句"版本不支持"甩给用户。
         edit.normalizeSchemaVersion()
         do { try edit.validate(sourceDuration: entry.document.duration) }
-        catch { edit = previous; self.error = error.localizedDescription; restorePlayheadFrame(); return }
+        catch {
+            edit = previous
+            // 这里是"这次修改被拒"，不是读盘失败：不能沿用"版本不支持……已保留原文件"那句。
+            if let reason = error as? EditError, case .tooMany = reason { self.error = (reason.errorDescription ?? "") + "这次修改已撤回。" }
+            else { self.error = "这次修改会让工程数据无效，已撤回。" }
+            restorePlayheadFrame(); return
+        }
         history.record(previous)
         edgePreview = nil
         save(); normalizeSelection(); refreshPresentation()
@@ -441,16 +431,21 @@ final class VideoEditorModel {
         else {
             let ids = selectedClipIDs.isEmpty ? Set([selectedClip].compactMap { $0 }) : selectedClipIDs
             commit { edit in
-                // 卡片走自己的删除：后面的内容前移、插入时切开的片段合回去，而不是在成片里留一段空洞。
-                for card in edit.clips where card.card != nil && ids.contains(card.id) { edit.removeCard(id: card.id) }
-                edit.clips.removeAll { ids.contains($0.id) }
+                // 先删选中的普通片段，再删卡片：卡片删除会把插入时切开的两半合回一块，
+                // 先删卡片的话合并后的块沿用了被选中那一半的 ID，会被接着一起删掉，多删一截。
+                // 卡片走自己的删除：后面的内容前移、切开的片段（两半都还在时）合回去，不在成片里留空洞。
+                let cards = edit.clips.filter { $0.card != nil && ids.contains($0.id) }.map(\.id)
+                edit.clips.removeAll { $0.card == nil && ids.contains($0.id) }
+                for card in cards { edit.removeCard(id: card) }
             }
         }
     }
     func selectClip(_ id: UUID, extending: Bool = false, range: Bool = false) {
         selectedMedia = nil; selectedMediaID = nil; selectedMask = nil; selectedText = nil; selectedCaption = nil
-        if range, let selectedClip, let start = edit.clips.firstIndex(where: { $0.id == selectedClip }), let end = edit.clips.firstIndex(where: { $0.id == id }) {
-            selectedClipIDs.formUnion(edit.clips[min(start, end)...max(start, end)].map(\.id))
+        // 范围选择按时间线上的先后排，不按存储顺序：插入卡片、复制之后两者并不一致。
+        let ordered = edit.clips.enumerated().sorted { ($0.element.timelineStart ?? 0, $0.offset) < ($1.element.timelineStart ?? 0, $1.offset) }.map(\.element)
+        if range, let selectedClip, let start = ordered.firstIndex(where: { $0.id == selectedClip }), let end = ordered.firstIndex(where: { $0.id == id }) {
+            selectedClipIDs.formUnion(ordered[min(start, end)...max(start, end)].map(\.id))
         } else if extending {
             if selectedClipIDs.contains(id) { selectedClipIDs.remove(id) } else { selectedClipIDs.insert(id) }
             selectedClip = selectedClipIDs.contains(id) ? id : edit.clips.first(where: { selectedClipIDs.contains($0.id) })?.id
@@ -677,6 +672,8 @@ final class VideoEditorModel {
     /// 转写进度；非空表示正在转写。
     private(set) var transcription: (progress: Double, message: String)?
     @ObservationIgnored private var transcriptionTask: Task<Void, Never>?
+    /// 当前这次转写的身份：取消后立刻重新开始时，旧任务收尾不能把新任务的引用和进度清掉。
+    @ObservationIgnored private var transcriptionID: UUID?
     /// 转写用的语言；默认跟随系统。
     var captionLocale = Locale(identifier: Locale.preferredLanguages.first ?? "zh-CN")
     /// 转写用哪条声音；默认有麦克风就用麦克风。
@@ -701,9 +698,10 @@ final class VideoEditorModel {
         }
         let engine = SpeechTranscriber()
         let locale = captionLocale, url = entry.url, document = entry.document
+        let token = UUID(); transcriptionID = token
         transcription = (0, "正在准备…")
         transcriptionTask = Task { @MainActor [weak self] in
-            defer { self?.transcriptionTask = nil; self?.transcription = nil }
+            defer { if self?.transcriptionID == token { self?.transcriptionTask = nil; self?.transcription = nil; self?.transcriptionID = nil } }
             switch await engine.availability(locale: locale) {
             case .ready: break
             case .needsPermission:
@@ -719,7 +717,7 @@ final class VideoEditorModel {
                 let cues = try await ProjectTranscription.run(url: url, document: document, source: source,
                                                               locale: locale, engine: engine) { value in
                     Task { @MainActor [weak self] in
-                        guard self?.transcriptionTask != nil else { return }
+                        guard self?.transcriptionID == token else { return }
                         self?.transcription = (value, "正在转写…")
                     }
                 }
@@ -733,7 +731,7 @@ final class VideoEditorModel {
         }
     }
     func cancelTranscription() {
-        transcriptionTask?.cancel(); transcriptionTask = nil; transcription = nil
+        transcriptionTask?.cancel(); transcriptionTask = nil; transcription = nil; transcriptionID = nil
     }
 
     /// 导入 SRT / VTT。时间按成片时间换算回源时间，导入的句子一律锁住。
@@ -902,6 +900,8 @@ final class VideoEditorModel {
     /// 画布、镜头、音量的变化直接换到同一个播放项上：播放器用已解码的当前帧按新合成重渲染并送到画布，
     /// 播放中也不打断；只有片段变化才重建播放项。
     private func refreshPresentation() {
+        // 语音处理开关（含撤销 / 重做带来的切换）换的是麦克风素材，波形跟着换成听到的那一份。
+        if let shown = analysisVoiceProcessing, shown != edit.audio.voiceProcessing { reloadAnalysis() }
         if rebuilding {
             if let presented = presentedEdit, let item = player.currentItem, presented.hasSameMedia(as: edit) {
                 // 撤销 / 重做回到了现有播放项的片段：在途重建作废，继续用手上这个播放项。
@@ -959,7 +959,8 @@ final class VideoEditorModel {
         rebuildingEdit = snapshot
         reloadTask = Task {
             do {
-                let pointers = try await loadPointers()
+                let pointers = await loadPointers()
+                try Task.checkCancellation()
                 let item = try await ProjectMedia.playerItem(url: entry.url, document: entry.document, levels: snapshot.audio, edit: snapshot, pointers: pointers)
                 try Task.checkCancellation()
                 guard !closed else { return }
@@ -987,15 +988,14 @@ final class VideoEditorModel {
     }
     /// 源事件在后台加载；完成后只替换自动镜头，保留手动编辑与统一撤销记录。
     func regenerateFocus() async {
-        let url = entry.url, document = entry.document
+        let duration = entry.document.duration
         let style = edit.focusStyle ?? AutoFocusStyle()
-        do {
-            let generated = try await Task.detached(priority: .userInitiated) {
-                AutoFocus.generate(events: try EditStorage.events(in: url, document: document), duration: document.duration, style: style)
-            }.value
-            guard !closed, (edit.focusStyle ?? AutoFocusStyle()) == style else { return }
-            commit { edit in edit.focuses.removeAll { $0.automatic }; edit.focuses.append(contentsOf: generated); edit.automaticFocus = true; edit.focusEngineVersion = 2 }
-        } catch { self.error = error.localizedDescription }
+        let samples = await loadPointers().focusSamples
+        let generated = await Task.detached(priority: .userInitiated) {
+            AutoFocus.generate(events: samples, duration: duration, style: style)
+        }.value
+        guard !closed, (edit.focusStyle ?? AutoFocusStyle()) == style else { return }
+        commit { edit in edit.focuses.removeAll { $0.automatic }; edit.focuses.append(contentsOf: generated); edit.automaticFocus = true; edit.focusEngineVersion = 2 }
     }
 
     func setFocusFollowing(_ id: UUID, enabled: Bool) async {
@@ -1010,23 +1010,48 @@ final class VideoEditorModel {
             }
             return
         }
-        let url = entry.url, document = entry.document, snapshot = edit
+        let snapshot = edit
         let style = edit.focusStyle ?? AutoFocusStyle()
-        do {
-            let events = try await Task.detached(priority: .userInitiated) { try EditStorage.events(in: url, document: document) }.value
-            guard !closed, edit.hasSameMedia(as: snapshot), edit.focuses.first(where: { $0.id == id }) == segment else { return }
-            var input = segment; input.start = segment.editingStart
-            let following = AutoFocus.following(input, events: events, style: style)
-            commit { edit in if let index = edit.focuses.firstIndex(where: { $0.id == id }) { edit.focuses[index].path = following.path; edit.focuses[index].sampledPath = true; edit.focuses[index].automatic = false } }
-        } catch { self.error = error.localizedDescription }
+        let events = await loadPointers().focusSamples
+        guard !closed, edit.hasSameMedia(as: snapshot), edit.focuses.first(where: { $0.id == id }) == segment else { return }
+        var input = segment; input.start = segment.editingStart
+        let following = AutoFocus.following(input, events: events, style: style)
+        commit { edit in if let index = edit.focuses.firstIndex(where: { $0.id == id }) { edit.focuses[index].path = following.path; edit.focuses[index].sampledPath = true; edit.focuses[index].automatic = false } }
     }
 
-    private func loadPointers() async throws -> PointerTimeline {
+    /// 指针事件只在后台解析一次，所有用到它的地方都等这同一个任务。读不出来就按没有指针数据处理：
+    /// 只是没有光标与自动镜头，不能因此让播放项建不起来。
+    func loadPointers() async -> PointerTimeline {
         if let pointers { return pointers }
-        let url = entry.url, document = entry.document
-        let loaded = try await Task.detached(priority: .userInitiated) { try ProjectMedia.loadPointers(url: url, document: document) }.value
-        pointers = loaded
-        return loaded
+        if pointerTask == nil {
+            let url = entry.url, document = entry.document
+            pointerTask = Task.detached(priority: .userInitiated) {
+                (try? ProjectMedia.loadPointers(url: url, document: document)) ?? PointerTimeline(events: [])
+            }
+        }
+        let loaded = await pointerTask!.value
+        if pointers == nil {
+            pointers = loaded
+            // 之前若已经用空事件规划过运镜，缓存作废重排一次。
+            focusPlanKey = nil
+        }
+        return pointers ?? loaded
+    }
+
+    /// 时间线波形：后台读（有缓存），语音处理开关换了就按新的麦克风重读一遍。
+    @ObservationIgnored private var analysisVoiceProcessing: Bool?
+    private func reloadAnalysis() {
+        analysisTask?.cancel()
+        let url = entry.url, document = entry.document, processed = edit.audio.voiceProcessing
+        analysisVoiceProcessing = processed
+        analysisTask = Task { [weak self] in
+            do {
+                let result = try await TimelineAnalysis.load(url: url, document: document, voiceProcessing: processed)
+                try Task.checkCancellation()
+                guard let self, !self.closed else { return }
+                self.analysis = result
+            } catch is CancellationError {} catch { self?.error = "时间线预览生成失败：\(error.localizedDescription)" }
+        }
     }
     /// 没有可用播放项时的兜底：离线解码并合成当前时间的静帧。串行处理，只保留最后一次请求。
     func refreshFallbackFrame() {
@@ -1111,12 +1136,20 @@ final class VideoEditorModel {
         exportTask = Task {
             defer { exporting = false; exportTask = nil }
             do {
-                try await ProjectMedia.export(url: entry.url, document: entry.document, levels: snapshot.audio, destination: destination, edit: snapshot, settings: settings) { self.progress = $0 }
+                let pointers = await loadPointers()
+                try Task.checkCancellation()
+                try await ProjectMedia.export(url: entry.url, document: entry.document, levels: snapshot.audio, destination: destination, edit: snapshot, settings: settings, pointers: pointers) { self.progress = $0 }
                 if settings.revealsInFinder, !Task.isCancelled { NSWorkspace.shared.activateFileViewerSelecting([destination]) }
             } catch is CancellationError {} catch { if !Task.isCancelled { self.error = error.localizedDescription } }
         }
     }
     func cancelExport() { exportTask?.cancel() }
+    /// 取消导出并等它收尾（临时文件删掉）后返回：退出应用前用。
+    func cancelExportAndWait() async {
+        guard let exportTask else { return }
+        exportTask.cancel()
+        await exportTask.value
+    }
     func flush() -> Bool {
         endInteraction()
         guard ready else { return true }

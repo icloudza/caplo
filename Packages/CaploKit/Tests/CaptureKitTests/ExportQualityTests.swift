@@ -81,6 +81,13 @@ import RenderKit
     try await ProjectMedia.export(url: url, document: document, levels: edit.audio, destination: target, edit: edit, settings: gif) { _ in }
     let source = try #require(CGImageSourceCreateWithURL(target as CFURL, nil))
     #expect(CGImageSourceGetCount(source) == 30, "GIF 有 \(CGImageSourceGetCount(source)) 帧")
+    // 逐帧拼接的动图：每帧停留时间加起来就是成片时长（15 fps 的 6.67 厘秒按误差扩散取 6 / 7），且无限循环。
+    let delays = (0..<CGImageSourceGetCount(source)).compactMap { index in
+        ((CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any])?[kCGImagePropertyGIFDictionary] as? [CFString: Any])?[kCGImagePropertyGIFUnclampedDelayTime] as? Double
+    }
+    #expect(delays.count == 30 && abs(delays.reduce(0, +) - 2) < 0.011, "GIF 总时长 \(delays.reduce(0, +)) 秒")
+    let loop = ((CGImageSourceCopyProperties(source, nil) as? [CFString: Any])?[kCGImagePropertyGIFDictionary] as? [CFString: Any])?[kCGImagePropertyGIFLoopCount] as? Int
+    #expect(loop == 0, "GIF 没有设成无限循环")
 }
 
 /// 缩小到一半以下走 Lanczos：一像素宽的黑白细线应融成均匀的灰。

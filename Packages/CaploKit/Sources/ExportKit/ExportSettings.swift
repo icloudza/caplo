@@ -175,9 +175,17 @@ public struct ExportSettings: Codable, Equatable, Sendable {
     }
 
     /// 文件名里不能出现的字符换成"-"，两端空白去掉；空名返回 nil。
+    /// 手打的视频扩展名去掉（导出时按格式再加，免得出现"演示.mp4.mp4"）；
+    /// 长度按 UTF-8 不超过 200 字节截断（系统上限 255，留出扩展名与"副本"后缀的余地），截在完整的字上。
     public static func sanitizedFileName(_ name: String) -> String? {
-        let cleaned = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        var cleaned = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowered = cleaned.lowercased()
+        if let suffix = [".mp4", ".mov", ".m4v", ".gif"].first(where: { lowered.hasSuffix($0) && lowered.count > $0.count }) {
+            cleaned = String(cleaned.dropLast(suffix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        while cleaned.utf8.count > 200 { cleaned.removeLast() }
+        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         return cleaned.isEmpty || cleaned.hasPrefix(".") ? nil : cleaned
     }
 

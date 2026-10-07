@@ -431,9 +431,13 @@ public final class ScreenRecorder {
         if let writer {
             do { try await writer.finish(at: stopTime) } catch { issue = issue ?? error.localizedDescription }
         }
+        // 一段都没提交成的工程（启动中途失败、首帧超时）里没有可用内容：放掉租约后移到废纸篓，
+        // 不留在项目中心——以前它会在下次刷新时被"恢复"成一个打不开的空工程。
+        var emptyProject: URL?
         if let projectURL {
             do {
                 guard !(try ProjectStorage.load(projectURL)).segments.isEmpty else {
+                    emptyProject = projectURL
                     throw RecordingError.message(issue ?? "未收到可保存的画面，请检查来源和权限后重试。")
                 }
                 try ProjectStorage.complete(projectURL, warning: issue)
@@ -442,6 +446,10 @@ public final class ScreenRecorder {
         }
         errorMessage = issue
         stream = nil; systemAudioStream = nil; writer = nil; delegate = nil; sessionID = nil; lease = nil
+        if let emptyProject {
+            try? FileManager.default.trashItem(at: emptyProject, resultingItemURL: nil)
+            projectURL = nil
+        }
         startedAt = nil; phase = .idle; sessionUsesCamera = false
     }
 

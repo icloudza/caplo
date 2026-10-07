@@ -282,8 +282,18 @@ public struct VideoEdit: Codable, Equatable, Sendable {
         clips[index].sourceStart = start; clips[index].duration = end - start
     }
 
+    /// 叠加内容的数量上限：防止损坏或恶意的工程文件拖垮渲染，同时留够正常使用的余量。
+    /// 字幕 2 万条够五六个小时的密集口播（原来 5000 条，四五个小时的录音转写就会超）；文字与遮罩各 2000 条。
+    public static let captionLimit = 20_000
+    public static let textLimit = 2_000
+    public static let maskLimit = 2_000
+
     /// 拒绝损坏或未知版本的编辑文件，避免自动保存覆盖无法理解的用户数据。
+    /// 数量超限单独报出是哪一样超了，不再一律说"版本不支持或内容无效"。
     public func validate(sourceDuration: Double) throws {
+        if captionList.count > Self.captionLimit { throw EditError.tooMany("字幕", Self.captionLimit) }
+        if textList.count > Self.textLimit { throw EditError.tooMany("文字", Self.textLimit) }
+        if maskList.count > Self.maskLimit { throw EditError.tooMany("遮罩", Self.maskLimit) }
         let editedDuration = duration
         let focusCoverage = FocusCoverage(clips: clips)
         for media in [cameraClips, systemClips, microphoneClips].compactMap({ $0 }) {
@@ -291,17 +301,17 @@ public struct VideoEdit: Codable, Equatable, Sendable {
             try isolated.validate(sourceDuration: sourceDuration)
         }
         guard (5...Self.maximumSchemaVersion).contains(schemaVersion),
-              captionList.count <= 5000, Set(captionList.map(\.id)).count == captionList.count,
+              Set(captionList.map(\.id)).count == captionList.count,
               captionStyle?.isValid != false,
               captionList.allSatisfy({ cue in cue.isValid && cue.sourceEnd <= sourceDuration + 0.001
                                        && (cue.timelineStart.map { $0 + cue.sourceDuration <= editedDuration + 0.001 } ?? true) }),
-              textList.count <= 500, Set(textList.map(\.id)).count == textList.count,
+              Set(textList.map(\.id)).count == textList.count,
               // 钉在成片时间上的叠加层只查成片域：它的 start 是源域的残留，没有任何一处读它。
               // 片尾附近钉上去的文字（含停在卡片上新加的）就靠这一条：按源域查可能越界，
               // 越界等于整笔编辑回滚，用户只看到一句"内容无效"。
               textList.allSatisfy({ value in value.isValid && (value.timelineStart.map { $0 + value.duration <= editedDuration + 0.001 }
                                                                ?? (value.start + value.duration <= sourceDuration + 0.001)) }),
-              maskList.count <= 500, Set(maskList.map(\.id)).count == maskList.count,
+              Set(maskList.map(\.id)).count == maskList.count,
               maskList.allSatisfy({ mask in mask.isValid && (mask.timelineStart.map { $0 + mask.duration <= editedDuration + 0.001 }
                                                              ?? (mask.start + mask.duration <= sourceDuration + 0.001)) }),
               layerOrder.map({ Set($0).count == $0.count }) != false, focusStyle?.isValid != false, camera?.isValid != false, pointer?.isValid != false, clips.count <= 100_000, Set(clips.map(\.id)).count == clips.count,
@@ -323,9 +333,17 @@ public struct VideoEdit: Codable, Equatable, Sendable {
     }
 }
 
-public enum EditError: LocalizedError {
+public enum EditError: LocalizedError, Equatable {
+    /// 结构或数值不合法（读盘时多半是版本不认识或文件损坏）。
     case invalid
-    public var errorDescription: String? { "编辑数据版本不支持或内容无效，已保留原文件。" }
+    /// 某一类叠加内容超过上限。
+    case tooMany(String, Int)
+    public var errorDescription: String? {
+        switch self {
+        case .invalid: "编辑数据版本不支持或内容无效，已保留原文件。"
+        case .tooMany(let kind, let limit): "\(kind)最多 \(limit) 条，已超出上限。"
+        }
+    }
 }
 
 public struct FocusState: Equatable, Sendable {
@@ -540,7 +558,12 @@ public struct EditHistory: Sendable {
     public var canRedo: Bool { !redoStack.isEmpty }
     /// 撤销栈的粗略"份量"上限。只按条数封顶不够：一份快照里可能钉着几千个采样运镜关键帧、
     /// 几百条字幕和上千个遮罩关键帧，一百份就能吃掉几百兆。这里按"关键点数"折算，够用且不用真去量字节。
-    static let weightLimit = 400_000
+    ///
+    /// 快照之间写时复制、共享没改过的数组，真实占用远小于按份量估的值；以前上限 40 万，
+    /// 大工程一份就有五万多（几万个运镜关键帧 + 两千多条字幕），只能撤销七八步。
+    /// 现在上限 200 万，并且无论多大都至少留 30 步。
+    static let weightLimit = 2_000_000
+    static let minimumSteps = 30
     private var weights: [Int] = []
     private static func weight(_ edit: VideoEdit) -> Int {
         var value = edit.clips.count + edit.textList.count
@@ -561,7 +584,7 @@ public struct EditHistory: Sendable {
     public mutating func record(_ previous: VideoEdit) {
         undoStack.append(previous); weights.append(Self.weight(previous))
         // 条数与份量双上限：先按条数削，再按份量削，保证再大的工程也不会让撤销栈无限长胖。
-        while undoStack.count > 100 || (weights.reduce(0, +) > Self.weightLimit && undoStack.count > 1) {
+        while undoStack.count > 100 || (weights.reduce(0, +) > Self.weightLimit && undoStack.count > Self.minimumSteps) {
             undoStack.removeFirst(); weights.removeFirst()
         }
         redoStack.removeAll()
