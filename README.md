@@ -133,6 +133,8 @@ ReleaseNotes/             各版本更新说明
 
 开发约定与贡献授权见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
+> [LINUX DO](https://linux.do/) — a new ideal community, where tech enthusiasts gather.
+
 ## 许可证
 
 源码与官网发布的安装包均以 [PolyForm Noncommercial 1.0.0](LICENSE) 授权：允许个人学习、研究、爱好项目以及非营利机构使用、修改和分发；**禁止任何商业用途**，包括在公司或营利性工作中使用、出售，或作为商业产品与服务的一部分。商业授权请联系 cloudza@vip.qq.com。
