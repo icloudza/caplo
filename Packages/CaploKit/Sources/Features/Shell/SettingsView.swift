@@ -360,7 +360,7 @@ public struct CaploSettingsView: View {
         SettingsGroup {
             SettingsRow(String(localized: "版本"), caption: updater.isEnabled ? lastCheckCaption : String(localized: "开发版不检查更新。")) {
                 HStack(spacing: CaploMetrics.Spacing.m) {
-                    Text(Self.version).font(CaploFont.value).foregroundStyle(CaploColor.textSecondary)
+                    Text(Self.version).font(CaploFont.value).foregroundStyle(CaploColor.textSecondary).fixedSize()
                     Button(updater.pendingVersion.map { "安装 \($0)" } ?? "检查更新") { updater.checkForUpdates() }
                         .buttonStyle(StudioButtonStyle(.secondary, size: .small))
                         .fixedSize()
@@ -373,10 +373,41 @@ public struct CaploSettingsView: View {
             }
             SettingsRow(String(localized: "系统要求")) { Text("macOS 15 及以上").font(CaploFont.value).foregroundStyle(CaploColor.textSecondary) }
         }
+        SettingsGroup {
+            SettingsRow(String(localized: "官网")) { ExternalLink("caplo.app", url: CaploLinks.site) }
+            SettingsRow(String(localized: "点个 Star 吧")) { ExternalLink("GitHub", url: CaploLinks.repository) }
+        }
     }
 
     static var version: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? String(localized: "开发版") }
     static var build: String { Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—" }
+}
+
+/// 对外链接。官网按这次启动的界面语言打开中文或英文页。
+enum CaploLinks {
+    static var site: URL { URL(string: AppLanguage.running == .english ? "https://caplo.app/en" : "https://caplo.app")! }
+    static let repository = URL(string: "https://github.com/icloudza/caplo")!
+}
+
+/// 设置行右侧的外部链接：强调色文字 + 右上箭头，点了用浏览器打开；悬停提示完整地址。
+private struct ExternalLink: View {
+    let title: String
+    let url: URL
+    init(_ title: String, url: URL) { self.title = title; self.url = url }
+
+    var body: some View {
+        Button { NSWorkspace.shared.open(url) } label: {
+            HStack(spacing: 3) {
+                Text(title).font(CaploFont.value)
+                Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .semibold))
+            }
+            .foregroundStyle(CaploColor.accent)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(url.absoluteString)
+        .onHover { inside in if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() } }
+    }
 }
 
 /// 设置页展示的库路径，避免直接依赖 ProjectKit 的内部细节。

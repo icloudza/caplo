@@ -3336,6 +3336,17 @@
         }
       }
     },
+    "官网": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Website"
+          }
+        }
+      }
+    },
     "定格画面": {
       "extractionState": "manual",
       "localizations": {
@@ -7308,6 +7319,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Click View to see what's new and install."
+          }
+        }
+      }
+    },
+    "点个 Star 吧": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Give It a Star"
           }
         }
       }

@@ -5,10 +5,10 @@
 1. 按标签换算版本号与构建号（`version.sh`）
 2. 归档、以 Developer ID 导出、重签 Sparkle 组件（`build.sh`）
 3. 公证并装订应用，用 dmgbuild 打包 DMG（背景、图标布局与卷图标见 `dmg/`），再公证并装订 DMG
-4. 签名安装包，生成并签名 `appcast.xml` 与 `latest.json`，上传到 Cloudflare R2（`publish.sh`）
+4. 签名安装包，生成并签名 `appcast.xml`，生成 `latest.json` 与 `releases.json`，上传到 Cloudflare R2（`publish.sh`）
 5. 创建 GitHub Release，附上 DMG 与更新说明（`notes.sh`）；GitHub 接口出错时自动重试，最终失败也不影响已上传的版本
 
-应用内更新使用 [Sparkle](https://sparkle-project.org)：每天检查一次 `appcast.xml`，在录制或导出期间不弹窗。安装包和 appcast 都经过 EdDSA 签名校验。
+应用内更新使用 [Sparkle](https://sparkle-project.org)：启动时与之后每小时检查一次 `appcast.xml`，有新版本发系统通知，在录制或导出期间不弹窗。安装包和 appcast 都经过 EdDSA 签名校验。
 
 ## 一次性配置
 
@@ -44,7 +44,14 @@ Scripts/release/configure-github.sh
 
 ## 发布
 
-更新说明写在 `ReleaseNotes/<版本>.md`，应用内更新窗口和 GitHub Release 共用这份说明，格式支持 `##` 标题、`-` 列表和行内 Markdown。写好后提交，再推送标签：
+更新说明写在 `ReleaseNotes/<版本>.md`，应用内更新窗口和 GitHub Release 共用这份说明，格式支持 `##` 标题、`-` 列表和行内 Markdown。双语写法是列表项写中文，下一行缩进两格写英文：
+
+```markdown
+- 导出时 Dock 图标显示进度条
+  Export progress on the Dock icon
+```
+
+写好后提交，再推送标签：
 
 ```bash
 git tag v0.2.0
@@ -62,6 +69,7 @@ git push origin v0.2.0
 | --- | --- | --- |
 | `appcast.xml` | 应用内更新 | 60 秒 |
 | `latest.json` | 官网读取版本号、大小与说明 | 60 秒 |
+| `releases.json` | 官网"更新日志"页：全部正式版的说明，每次发版从 `ReleaseNotes/` 全量生成 | 60 秒 |
 | `Caplo.dmg` | 官网"下载"按钮，始终是最新正式版 | 5 分钟 |
 | `releases/<版本>/Caplo-<版本>.dmg` | 各版本存档，appcast 指向这里 | 永久 |
 

@@ -66,7 +66,7 @@ jobs:
         run: Scripts/release/build.sh "$TAG"
 
       - name: 更新说明
-        run: Scripts/release/notes.sh "$TAG" > "$RUNNER_TEMP/notes.md" && cat "$RUNNER_TEMP/notes.md"
+        run: Scripts/release/notes.sh "$TAG" --github > "$RUNNER_TEMP/notes.md" && cat "$RUNNER_TEMP/notes.md"
 
       - name: 上传 Cloudflare R2
         env:

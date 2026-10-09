@@ -92,11 +92,12 @@ public struct UpdateWindowPreview: View {
                                     notes: """
                                     ## 新功能
                                     - 画面比例新增**原始**，默认按录制画面导出
+                                      New **Original** aspect ratio, exports at the recorded size
                                     - 录制声音默认跟随画面，可在时间线右键分离
-                                    - 磨砂、石墨两款玻璃光标改为实时透镜
+                                      Recorded audio follows the picture; detach it from the timeline menu
                                     ## 修复
                                     - 短片段把手与下一块重叠
-                                    - 系统听写关闭时转写字幕没有提示
+                                      Short clip handles overlapping the next clip
                                     """, size: 48_213_504)
         switch state {
         case "checking": flow.beginChecking {}
@@ -355,10 +356,15 @@ private struct ReleaseNotesView: View {
                     case .heading(let title):
                         Text(inline(title)).font(CaploFont.sectionTitle).foregroundStyle(CaploColor.textSecondary)
                             .padding(.top, index == 0 ? 0 : CaploMetrics.Spacing.s)
-                    case .bullet(let item):
+                    case .bullet(let item, let detail):
                         HStack(alignment: .firstTextBaseline, spacing: CaploMetrics.Spacing.s) {
                             Circle().fill(CaploColor.textTertiary).frame(width: 4, height: 4).alignmentGuide(.firstTextBaseline) { $0.height / 2 + 4 }
-                            Text(inline(item)).font(CaploFont.body)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(inline(item)).font(CaploFont.body)
+                                if let detail {
+                                    Text(inline(detail)).font(CaploFont.body).foregroundStyle(CaploColor.textSecondary)
+                                }
+                            }
                         }
                     case .paragraph(let line):
                         Text(inline(line)).font(CaploFont.body).foregroundStyle(CaploColor.textSecondary)

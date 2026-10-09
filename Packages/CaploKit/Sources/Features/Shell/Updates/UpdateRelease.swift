@@ -42,29 +42,44 @@ extension UpdateRelease {
 }
 
 /// 更新说明的排版块。只认三种：标题、列表项、段落；其余 Markdown 交给行内解析（粗体、代码、链接）。
+///
+/// 双语说明的写法：列表项写中文，下一行缩进写英文——缩进的续行归到上一个列表项，作为第二行显示。
 enum ReleaseNoteBlock: Equatable {
     case heading(String)
-    case bullet(String)
+    case bullet(String, detail: String? = nil)
     case paragraph(String)
 
     static func parse(_ text: String) -> [ReleaseNoteBlock] {
-        text.components(separatedBy: .newlines).compactMap { raw in
+        var blocks: [ReleaseNoteBlock] = []
+        for raw in text.components(separatedBy: .newlines) {
             let line = raw.trimmingCharacters(in: .whitespaces)
-            guard !line.isEmpty else { return nil }
+            guard !line.isEmpty else { continue }
             if line.hasPrefix("#") {
                 let title = line.drop { $0 == "#" }.trimmingCharacters(in: .whitespaces)
-                return title.isEmpty ? nil : .heading(title)
+                if !title.isEmpty { blocks.append(.heading(title)) }
+                continue
             }
-            for marker in ["- ", "* ", "• ", "· "] where line.hasPrefix(marker) {
-                return .bullet(String(line.dropFirst(marker.count)))
+            if let item = bulletText(line) { blocks.append(.bullet(item)); continue }
+            // 缩进续行：接到上一个列表项的第二行（已有第二行则继续换行追加）。
+            if raw.first?.isWhitespace == true, case .bullet(let item, let detail) = blocks.last {
+                blocks[blocks.count - 1] = .bullet(item, detail: detail.map { $0 + "\n" + line } ?? line)
+                continue
             }
-            // 有序列表"1. xxx"也按列表项排，序号本身不保留（发布说明里顺序没有含义）。
-            if let dot = line.firstIndex(of: "."), line[..<dot].allSatisfy(\.isNumber), !line[..<dot].isEmpty,
-               line[line.index(after: dot)...].first == " " {
-                return .bullet(String(line[line.index(dot, offsetBy: 2)...]))
-            }
-            return .paragraph(line)
+            blocks.append(.paragraph(line))
         }
+        return blocks
+    }
+
+    private static func bulletText(_ line: String) -> String? {
+        for marker in ["- ", "* ", "• ", "· "] where line.hasPrefix(marker) {
+            return String(line.dropFirst(marker.count))
+        }
+        // 有序列表"1. xxx"也按列表项排，序号本身不保留（发布说明里顺序没有含义）。
+        if let dot = line.firstIndex(of: "."), line[..<dot].allSatisfy(\.isNumber), !line[..<dot].isEmpty,
+           line[line.index(after: dot)...].first == " " {
+            return String(line[line.index(dot, offsetBy: 2)...])
+        }
+        return nil
     }
 }
 

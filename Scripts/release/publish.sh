@@ -15,6 +15,7 @@
 #   releases/<版本>/Caplo-<版本>.dmg   每个版本一份，永久缓存
 #   Caplo.dmg                          最新正式版（官网"下载"按钮）
 #   latest.json                        最新正式版信息（官网显示版本号、大小）
+#   releases.json                      全部正式版的更新说明（官网"更新日志"页）
 #   appcast.xml                        应用内在线更新（最后上传，保证它指向的安装包已经就位）
 # 预发布（beta / rc）只上传 releases/，不改动后三项。
 set -euo pipefail
@@ -45,11 +46,12 @@ echo "▶ 签名安装包"
 signature=$("$tools/sign_update" --ed-key-file "$key" "$dmg" | python3 Scripts/release/appcast.py --parse-signature)
 
 if [[ $PRERELEASE == false ]]; then
-    echo "▶ 生成 appcast.xml 与 latest.json"
+    echo "▶ 生成 appcast.xml、latest.json 与 releases.json"
     Scripts/release/notes.sh "$tag" > "$out/notes.md"
     python3 Scripts/release/appcast.py --version "$VERSION" --build "$BUILD_NUMBER" --dmg "$dmg" \
         --url "$base/releases/$VERSION/Caplo-$VERSION.dmg" --notes "$out/notes.md" --signature "$signature" \
         --site "${SITE_URL:-}" --out "$site"
+    python3 Scripts/release/releases.py --tag "$tag" --out "$site"
     cp "$dmg" "$site/Caplo.dmg"
     "$tools/sign_update" --ed-key-file "$key" "$site/appcast.xml"
     "$tools/sign_update" --verify --ed-key-file "$key" "$site/appcast.xml"
@@ -85,6 +87,7 @@ if [[ $PRERELEASE == false ]]; then
     put "$dmg" Caplo.dmg application/x-apple-diskimage "public, max-age=300" \
         --content-disposition "attachment; filename=\"Caplo-$VERSION.dmg\""
     put "$site/latest.json" latest.json application/json "public, max-age=60"
+    put "$site/releases.json" releases.json application/json "public, max-age=60"
     put "$site/appcast.xml" appcast.xml application/xml "public, max-age=60"
 fi
 
